@@ -1,0 +1,28 @@
+# Local CSV exports — never commit client/transaction data
+*.csv
+*.xlsx
+*.xls
+AffiliateCommissionReport_*
+AW-*-Ads-*
+
+# Backups & swaps
+*.bak
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if any local tooling)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Editor
+.vscode/
+.idea/
+*.code-workspace
+
+# Vercel
+.vercel/
