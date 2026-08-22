@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   AFFILIATE DECISION ENGINE v2
+   AFFILIATE DECISION ENGINE v3
    Pure calculation layer — no DOM. Runs in browser and in Node (for tests).
    ═══════════════════════════════════════════════════════════════════════════ */
 (function (root, factory) {
@@ -33,6 +33,10 @@ function tokens(s) {
   return (s || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3);
 }
 function dayOnly(s) { return (s || '').trim().split(' ')[0]; }
+function hourOf(s) {
+  const m = /\s(\d{2}):/.exec(s || '');
+  return m ? parseInt(m[1], 10) : null;
+}
 function isDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || ''); }
 function addDays(iso, n) {
   const d = new Date(iso + 'T00:00:00Z');
@@ -47,6 +51,10 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+function topOf(obj, n) {
+  return Object.keys(obj || {}).map(k => ({ name: k, value: obj[k] }))
+    .sort((a, b) => b.value - a.value).slice(0, n || 99);
+}
 
 /* ── Column resolution (defensive against header drift) ──────────────────── */
 const COL = {
@@ -54,27 +62,50 @@ const COL = {
     orderId:  ['ID Pemesanan'],
     status:   ['Status Pesanan'],
     orderAt:  ['Waktu Pemesanan'],
+    doneAt:   ['Waktu Terselesaikan'],
     clickAt:  ['Waktu Klik'],
     comm:     ['Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)'],
+    commNet:  ['Komisi Bersih Affiliate (Rp)'],
     gmv:      ['Nilai Pembelian(Rp)'],
+    refund:   ['Jumlah Pengembalian Dana(Rp)'],
+    price:    ['Harga(Rp)'],
     qty:      ['Jumlah'],
     tag:      ['Tag_link1'],
     platform: ['Platform'],
     product:  ['Nama Barange', 'Nama Barang'],
+    shop:     ['Nama Toko'],
+    shopType: ['Tipe toko.', 'Tipe toko'],
     cat:      ['L1 Kategori Global'],
+    cat2:     ['L2 Kategori Global'],
+    rate:     ['Persentase Komisi Shopee pada Produk'],
+    offer:    ['Tipe Penawaran'],
+    content:  ['Content Type'],
   },
   ads: {
-    date:   ['Reporting starts'],
-    name:   ['Ad name', 'Campaign name', 'Ad set name'],
-    spend:  ['Amount spent (IDR)', 'Amount spent'],
-    clicks: ['Link clicks'],
-    impr:   ['Impressions'],
-    status: ['Ad delivery'],
+    date:    ['Reporting starts'],
+    name:    ['Ad name', 'Campaign name', 'Ad set name'],
+    campaign:['Campaign name'],
+    spend:   ['Amount spent (IDR)', 'Amount spent'],
+    clicks:  ['Link clicks'],
+    impr:    ['Impressions'],
+    reach:   ['Reach'],
+    freq:    ['Frequency'],
+    cpm:     ['CPM (cost per 1,000 impressions) (IDR)'],
+    ctr:     ['CTR (link click-through rate)'],
+    lpv:     ['Landing page views'],
+    results: ['Results'],
+    delivery:['Ad delivery'],
+    quality: ['Quality ranking'],
+    engage:  ['Engagement rate ranking'],
+    convRank:['Conversion rate ranking'],
+    shopClicks:['shop_clicks'],
+    allClicks:['Clicks (all)'],
   },
   clk: {
-    time: ['Waktu Klik', 'click_time', 'Click Time'],
-    tag:  ['Tag_link', 'Tag_link1'],
-    src:  ['Perujuk', 'Referrer'],
+    time:   ['Waktu Klik', 'click_time', 'Click Time'],
+    tag:    ['Tag_link', 'Tag_link1'],
+    src:    ['Perujuk', 'Referrer'],
+    region: ['Wilayah Klik'],
   },
 };
 function pick(row, keys) {
@@ -94,11 +125,9 @@ function detectFileType(headers) {
   if (exact('tag_link') || (has('klik id') && has('tag_link'))) return 'clicks';
   if (has('wilayah klik') || has('click_time')) return 'clicks';
 
-  // Affiliate commission report
   if (has('id pemesanan') || has('total komisi per pesanan') || has('tag_link1')) return 'affiliate';
   if (has('waktu pemesanan') || has('status pesanan')) return 'affiliate';
 
-  // Meta ads report
   if (has('reporting starts') || has('amount spent')) return 'ads';
   if (has('ad name') || has('campaign name')) return 'ads';
 
@@ -107,7 +136,7 @@ function detectFileType(headers) {
 
 /* ── Ad name → affiliate tag matching ────────────────────────────────────────
    Replaces the old 5-char substring fallback, which could silently bind an ad
-   to an unrelated tag (e.g. any two names sharing "video"). Now every match
+   to an unrelated tag (e.g. any two names sharing "video"). Every match now
    carries a method + confidence so the UI can surface weak ones for review.
    ─────────────────────────────────────────────────────────────────────────── */
 function extractPipeTag(name) {
@@ -120,14 +149,12 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
   const n = normalize(raw);
   if (!n) return { tag: raw, method: 'kosong', confidence: 0 };
 
-  // 1. Pipe convention: "1204 | Mentok | TagName"
   const piped = extractPipeTag(raw);
   if (piped) {
     const hit = (affiliateTags || []).find(t => normalize(t) === normalize(piped));
     return { tag: hit || piped, method: 'Pipe', confidence: hit ? 1 : 0.8 };
   }
 
-  // 2. User-managed mapping table — always wins
   const map = tagMap || {};
   if (map[n]) return { tag: map[n], method: 'Manual', confidence: 1 };
   for (const k of Object.keys(map)) {
@@ -136,12 +163,10 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
     }
   }
 
-  // 3. Exact normalized match
   for (const t of affiliateTags || []) {
     if (normalize(t) === n) return { tag: t, method: 'Exact', confidence: 1 };
   }
 
-  // 4. Full containment, longest tag wins (avoids short-tag hijack)
   let best = null;
   for (const t of affiliateTags || []) {
     const nt = normalize(t);
@@ -153,7 +178,6 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
   }
   if (best && best.confidence >= 0.55) return best;
 
-  // 5. Token overlap — requires real shared words, not incidental substrings
   const at = tokens(raw);
   if (at.length) {
     let tb = null;
@@ -169,10 +193,10 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
       if (!tb || conf > tb.confidence) tb = { tag: t, method: 'Token', confidence: conf };
     }
     if (tb && tb.confidence >= 0.5) return tb;
-    if (tb && tb.confidence >= 0.3) return { ...tb, method: 'Lemah' };
+    if (tb && tb.confidence >= 0.3) return { tag: tb.tag, method: 'Lemah', confidence: tb.confidence };
   }
 
-  if (best) return { ...best, method: 'Lemah' };
+  if (best) return { tag: best.tag, method: 'Lemah', confidence: best.confidence };
   return { tag: raw, method: 'Tidak cocok', confidence: 0 };
 }
 
@@ -199,13 +223,16 @@ function analyze(data, options) {
 
   /* ── Filter source rows ─────────────────────────────────────────────── */
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
-  const fAff = [], excluded = { cancelled: 0, unpaid: 0 };
+  const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
+  const statusCount = {};
   aff.forEach(r => {
     const d = dayOnly(pick(r, COL.aff.orderAt));
     if (!inRange(d)) return;
     const st = String(pick(r, COL.aff.status) || '');
+    statusCount[st] = (statusCount[st] || 0) + 1;
     if (EXCLUDED[st]) {
-      if (st === 'Dibatalkan') excluded.cancelled++; else excluded.unpaid++;
+      if (st === 'Dibatalkan') { excluded.cancelled++; excluded.cancelledValue += num(pick(r, COL.aff.comm)); }
+      else excluded.unpaid++;
       return;
     }
     fAff.push(r);
@@ -221,105 +248,145 @@ function analyze(data, options) {
     clkStart = cd[0]; clkEnd = cd[cd.length - 1];
   }
 
-  /* ── Affiliate aggregation ──────────────────────────────────────────── */
+  /* ── Buckets ────────────────────────────────────────────────────────── */
   const T = {};
   function bucket(t) {
     if (!T[t]) T[t] = {
-      tag: t, comm: 0, commDone: 0, commPending: 0, gmv: 0, qty: 0,
-      orders: new Set(), spend: 0, clicks: 0, impr: 0, days: new Set(),
-      daily: {}, shopeeClicks: 0, metaClicksWindow: 0,
+      tag: t, comm: 0, commDone: 0, commPending: 0, gmv: 0, qty: 0, refund: 0,
+      orders: new Set(), doneOrders: new Set(), pendingOrders: new Set(),
+      spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
+      days: new Set(), daily: {}, shopeeClicks: 0, metaClicksWindow: 0,
+      adNames: {}, delivery: {}, quality: {}, platforms: {}, shops: {}, products: {},
     };
     return T[t];
   }
+
   const dailyAll = {};
-  const platform = {}, category = {}, product = {};
+  const platform = {}, category = {}, category2 = {}, product = {}, shop = {};
+  const hourly = new Array(24).fill(0), hourlyOrders = new Array(24).fill(0);
+  const offerType = {}, contentType = {};
 
   fAff.forEach(r => {
     const t = cleanTag(pick(r, COL.aff.tag)) || '(tanpa tag)';
     const b = bucket(t);
     const c = num(pick(r, COL.aff.comm));
     const g = num(pick(r, COL.aff.gmv));
+    const q = int(pick(r, COL.aff.qty));
+    const rf = num(pick(r, COL.aff.refund));
     const d = dayOnly(pick(r, COL.aff.orderAt));
     const st = String(pick(r, COL.aff.status) || '');
+    const id = pick(r, COL.aff.orderId);
 
-    b.comm += c; b.gmv += g; b.qty += int(pick(r, COL.aff.qty));
-    b.orders.add(pick(r, COL.aff.orderId));
-    if (st === 'Tertunda') b.commPending += c; else b.commDone += c;
+    b.comm += c; b.gmv += g; b.qty += q; b.refund += rf;
+    b.orders.add(id);
+    if (st === 'Tertunda') { b.commPending += c; b.pendingOrders.add(id); }
+    else { b.commDone += c; b.doneOrders.add(id); }
 
-    if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set() };
-    b.daily[d].comm += c;
-    b.daily[d].orders.add(pick(r, COL.aff.orderId));
+    if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
+    b.daily[d].comm += c; b.daily[d].gmv += g;
+    b.daily[d].orders.add(id);
 
-    if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, orders: new Set() };
+    if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
     dailyAll[d].comm += c; dailyAll[d].gmv += g;
-    dailyAll[d].orders.add(pick(r, COL.aff.orderId));
+    dailyAll[d].orders.add(id);
+
+    const h = hourOf(pick(r, COL.aff.orderAt));
+    if (h != null) { hourly[h] += c; hourlyOrders[h]++; }
 
     const pf = String(pick(r, COL.aff.platform) || 'Lainnya');
     platform[pf] = (platform[pf] || 0) + c;
+    b.platforms[pf] = (b.platforms[pf] || 0) + c;
+
     const ct = String(pick(r, COL.aff.cat) || 'Lainnya');
     category[ct] = (category[ct] || 0) + c;
+    const ct2 = String(pick(r, COL.aff.cat2) || '');
+    if (ct2) category2[ct2] = (category2[ct2] || 0) + c;
+
+    const sh = String(pick(r, COL.aff.shop) || '');
+    if (sh) { shop[sh] = (shop[sh] || 0) + c; b.shops[sh] = (b.shops[sh] || 0) + c; }
+
+    const ot = String(pick(r, COL.aff.offer) || '');
+    if (ot) offerType[ot] = (offerType[ot] || 0) + c;
+    const cty = String(pick(r, COL.aff.content) || '');
+    if (cty) contentType[cty] = (contentType[cty] || 0) + c;
+
     const pn = String(pick(r, COL.aff.product) || '');
     if (pn) {
-      if (!product[pn]) product[pn] = { name: pn, comm: 0, gmv: 0, qty: 0 };
-      product[pn].comm += c; product[pn].gmv += g;
-      product[pn].qty += int(pick(r, COL.aff.qty));
+      if (!product[pn]) product[pn] = { name: pn, comm: 0, gmv: 0, qty: 0, orders: new Set(), tag: t };
+      product[pn].comm += c; product[pn].gmv += g; product[pn].qty += q;
+      product[pn].orders.add(id);
+      b.products[pn] = (b.products[pn] || 0) + c;
     }
   });
 
   const affiliateTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
 
-  /* ── Ads aggregation + matching ─────────────────────────────────────── */
-  const matchLog = [], seen = {};
+  /* ── Ads aggregation + matching (also per ad unit) ──────────────────── */
+  const units = {};
   fAds.forEach(r => {
     const rawName = String(pick(r, COL.ads.name) || '');
     const m = matchAdToTag(rawName, affiliateTags, tagMap);
-    if (rawName && !seen[rawName]) {
-      seen[rawName] = 1;
-      matchLog.push({ adName: rawName, tag: m.tag, method: m.method, confidence: m.confidence, spend: 0, clicks: 0 });
-    }
-    const entry = matchLog.find(x => x.adName === rawName);
-
     const t = m.tag || '(tanpa tag)';
     const b = bucket(t);
+
     const sp = num(pick(r, COL.ads.spend));
+    const spPPN = sp * ppnMult;
     const cl = int(pick(r, COL.ads.clicks));
     const im = int(pick(r, COL.ads.impr));
+    const rc = int(pick(r, COL.ads.reach));
+    const lp = int(pick(r, COL.ads.lpv));
+    const ac = int(pick(r, COL.ads.allClicks));
     const d = dayOnly(pick(r, COL.ads.date));
+    const dv = String(pick(r, COL.ads.delivery) || '').trim();
+    const ql = String(pick(r, COL.ads.quality) || '').trim();
 
-    b.spend += sp; b.clicks += cl; b.impr += im;
+    b.spend += sp; b.clicks += cl; b.impr += im; b.reach += rc; b.lpv += lp; b.allClicks += ac;
     if (sp > 0 && isDate(d)) b.days.add(d);
-    if (entry) { entry.spend += sp * ppnMult; entry.clicks += cl; }
+    b.adNames[rawName] = (b.adNames[rawName] || 0) + spPPN;
+    if (dv) b.delivery[dv] = (b.delivery[dv] || 0) + 1;
+    if (ql && ql !== '-') b.quality[ql] = (b.quality[ql] || 0) + 1;
 
-    if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set() };
-    b.daily[d].spend += sp * ppnMult;
+    if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
+    b.daily[d].spend += spPPN;
     b.daily[d].clicks += cl;
 
-    if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, orders: new Set() };
-    dailyAll[d].spend += sp * ppnMult;
+    if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
+    dailyAll[d].spend += spPPN;
     dailyAll[d].clicks += cl;
+    dailyAll[d].impr += im;
 
-    // Meta clicks restricted to the click-report window, for leakage parity
     if (clkStart && d >= clkStart && d <= clkEnd) b.metaClicksWindow += cl;
+
+    // Per ad unit — the reference dashboard's primary grain
+    if (!units[rawName]) units[rawName] = {
+      adName: rawName, tag: t, method: m.method, confidence: m.confidence,
+      spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, days: new Set(),
+      delivery: {}, quality: {},
+    };
+    const u = units[rawName];
+    u.spend += spPPN; u.clicks += cl; u.impr += im; u.reach += rc; u.lpv += lp;
+    if (sp > 0 && isDate(d)) u.days.add(d);
+    if (dv) u.delivery[dv] = (u.delivery[dv] || 0) + 1;
+    if (ql && ql !== '-') u.quality[ql] = (u.quality[ql] || 0) + 1;
   });
 
   /* ── Shopee click report ────────────────────────────────────────────── */
-  const clickSrc = {};
+  const clickSrc = {}, clickRegion = {}, clickDaily = {};
   fClk.forEach(r => {
     const t = cleanTag(pick(r, COL.clk.tag));
-    if (t && T[t]) T[t].shopeeClicks++;
-    else if (t) bucket(t).shopeeClicks++;
+    if (t) bucket(t).shopeeClicks++;
     const s = String(pick(r, COL.clk.src) || 'Lainnya');
     clickSrc[s] = (clickSrc[s] || 0) + 1;
+    const rg = String(pick(r, COL.clk.region) || '');
+    if (rg) clickRegion[rg] = (clickRegion[rg] || 0) + 1;
+    const d = dayOnly(pick(r, COL.clk.time));
+    if (isDate(d)) clickDaily[d] = (clickDaily[d] || 0) + 1;
   });
 
-  /* ── Attribution maturity ───────────────────────────────────────────────
-     Orders keep arriving for days after the click. Days inside the lag window
-     are still filling in, so their ROAS reads artificially low and must never
-     drive a STOP verdict. ──────────────────────────────────────────────── */
+  /* ── Attribution maturity ───────────────────────────────────────────── */
   const matureUntil = de ? addDays(de, -o.lagDays) : '';
   const isMature = d => !matureUntil || d <= matureUntil;
 
-  /* Observed lag profile, straight from the data */
   const lagHist = {};
   let lagTotal = 0;
   fAff.forEach(r => {
@@ -334,8 +401,60 @@ function analyze(data, options) {
   let cum = 0;
   lagProfile.forEach(x => { cum += x.pct; x.cumulative = cum; });
 
+  /* Settlement curve: how pending resolves as orders age */
+  const ageBuckets = {};
+  fAff.forEach(r => {
+    const od = dayOnly(pick(r, COL.aff.orderAt));
+    if (!isDate(od) || !de) return;
+    const age = diffDays(od, de);
+    if (age < 0 || age > 30) return;
+    if (!ageBuckets[age]) ageBuckets[age] = { pending: 0, total: 0 };
+    ageBuckets[age].total++;
+    if (String(pick(r, COL.aff.status)) === 'Tertunda') ageBuckets[age].pending++;
+  });
+  const settlement = Object.keys(ageBuckets).map(Number).sort((a, b) => a - b).map(a => ({
+    age: a, pendingPct: ageBuckets[a].total ? ageBuckets[a].pending / ageBuckets[a].total * 100 : 0,
+    n: ageBuckets[a].total,
+  }));
+
   /* ── Per-tag verdicts ───────────────────────────────────────────────── */
   const targetMult = 1 + o.targetROI / 100;
+
+  function verdictFor(spend, commEff, daysProd, dailyRows, leak) {
+    let streak = 0;
+    dailyRows.forEach(r => { if (r.roas < 1) streak++; else streak = 0; });
+    const streakStop = streak >= o.streakDays;
+    const roasEff = spend > 0 ? commEff / spend : (commEff > 0 ? Infinity : 0);
+
+    let status = 'evaluasi', label = 'Belum cukup data', reason = '';
+    const qualified = spend >= o.minSpend && daysProd >= o.minDays;
+
+    if (spend === 0 && commEff > 0) {
+      status = 'organik'; label = 'ORGANIK'; reason = 'Komisi tanpa biaya iklan';
+    } else if (!qualified) {
+      const need = [];
+      if (spend < o.minSpend) need.push('spend belum cukup');
+      if (daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi`);
+      reason = need.join(', ');
+    } else if (streakStop) {
+      status = 'stop'; label = 'STOP';
+      reason = `ROAS di bawah 1 selama ${streak} hari produksi berturut`;
+    } else if (roasEff >= o.thScale) {
+      status = 'scale'; label = 'SCALE';
+      reason = `ROAS efektif ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
+    } else if (roasEff >= o.thPantau) {
+      status = 'pantau'; label = 'PANTAU';
+      reason = `ROAS efektif ${roasEff.toFixed(2)}x, belum layak scale`;
+    } else {
+      status = 'stop'; label = 'STOP';
+      reason = `ROAS efektif ${roasEff.toFixed(2)}x di bawah titik impas`;
+    }
+    if (leak && leak.severity === 'bad' && status === 'stop') {
+      reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
+    }
+    return { status, label, reason, streak };
+  }
+
   const tags = Object.keys(T).map(k => {
     const b = T[k];
     const spend = b.spend * ppnMult;
@@ -348,155 +467,306 @@ function analyze(data, options) {
     const net = b.comm - spend;
     const netEff = commEff - spend;
     const roi = spend > 0 ? (netEff / spend) * 100 : 0;
+    const margin = b.comm > 0 ? netEff / commEff * 100 : 0;
 
     const cpc = b.clicks > 0 ? spend / b.clicks : 0;
     const cpm = b.impr > 0 ? spend / b.impr * 1000 : 0;
+    const ctr = b.impr > 0 ? b.clicks / b.impr * 100 : 0;
+    const freq = b.reach > 0 ? b.impr / b.reach : 0;
+    const lpvRate = b.clicks > 0 ? b.lpv / b.clicks * 100 : 0;
     const commPerClick = b.clicks > 0 ? commEff / b.clicks : 0;
-    // Highest CPC that still clears the ROI target at the current earn-rate
     const cpcIdeal = b.clicks > 0 ? commPerClick / targetMult : 0;
     const cpcGap = cpcIdeal - cpc;
     const convRate = b.clicks > 0 ? orders / b.clicks * 100 : 0;
     const costPerOrder = orders > 0 ? spend / orders : 0;
     const avgComm = orders > 0 ? b.comm / orders : 0;
+    const avgOrder = orders > 0 ? b.gmv / orders : 0;
+    const commRate = b.gmv > 0 ? b.comm / b.gmv * 100 : 0;
 
-    /* Click leakage — only meaningful when both sides cover the same window */
     let leak = null;
     if (clkStart && b.metaClicksWindow > 0) {
       const shopee = b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
-      const wasted = b.metaClicksWindow > 0 ? (spend / Math.max(b.clicks, 1)) * failed : 0;
+      const wasted = (spend / Math.max(b.clicks, 1)) * failed;
       leak = {
-        metaClicks: b.metaClicksWindow, shopeeClicks: shopee,
-        pct, failed, wasted,
+        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
         severity: pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad',
       };
     }
 
-    /* Consecutive sub-1 ROAS streak over mature production days only */
     const prodDays = Object.keys(b.daily)
-      .filter(d => isDate(d) && b.daily[d].spend > 0 && isMature(d))
-      .sort();
-    let streak = 0, worstStreak = 0, streakRun = [];
+      .filter(d => isDate(d) && b.daily[d].spend > 0 && isMature(d)).sort();
     const dailyRows = prodDays.map(d => {
       const dd = b.daily[d];
-      const r = dd.spend > 0 ? dd.comm / dd.spend : 0;
-      if (r < 1) { streak++; streakRun.push({ date: d, roas: r }); if (streak > worstStreak) worstStreak = streak; }
-      else { streak = 0; streakRun = []; }
-      return { date: d, comm: dd.comm, spend: dd.spend, roas: r, orders: dd.orders.size, clicks: dd.clicks };
+      return {
+        date: d, comm: dd.comm, spend: dd.spend, gmv: dd.gmv,
+        roas: dd.spend > 0 ? dd.comm / dd.spend : 0,
+        orders: dd.orders.size, clicks: dd.clicks,
+      };
     });
-    const tailStreak = streak; // streak that is still running at the end
-    const streakStop = tailStreak >= o.streakDays;
 
-    /* Verdict — requires BOTH enough spend AND enough production days.
-       The v1 engine used OR, which let a single big-spend day trigger STOP. */
-    let status = 'evaluasi', label = 'Belum cukup data', reason = '';
-    const qualified = spend >= o.minSpend && daysProd >= o.minDays;
+    const v = verdictFor(spend, commEff, daysProd, dailyRows, leak);
 
-    if (spend === 0 && b.comm > 0) {
-      status = 'organik'; label = 'ORGANIK';
-      reason = 'Komisi tanpa biaya iklan';
-    } else if (!qualified) {
-      const need = [];
-      if (spend < o.minSpend) need.push('spend belum cukup');
-      if (daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi`);
-      reason = need.join(', ');
-    } else if (streakStop) {
-      status = 'stop'; label = 'STOP';
-      reason = `ROAS di bawah 1 ${tailStreak} hari produksi berturut`;
-    } else if (roasEff >= o.thScale) {
-      status = 'scale'; label = 'SCALE';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
-    } else if (roasEff >= o.thPantau) {
-      status = 'pantau'; label = 'PANTAU';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x, belum layak scale`;
-    } else {
-      status = 'stop'; label = 'STOP';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x di bawah titik impas`;
-    }
-
-    /* Leakage overrides the diagnosis: the creative may be fine, the link is not */
-    if (leak && leak.severity === 'bad' && status === 'stop') {
-      reason = `${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
-    }
-
-    /* Bid guidance from CPC headroom */
     let bidHint = '';
-    if (status !== 'organik' && status !== 'evaluasi' && b.clicks > 0) {
-      if (cpcGap > 0) bidHint = `Ruang naik bid s/d ${Math.round(cpcIdeal)}`;
-      else bidHint = `Turunkan bid ke ${Math.round(cpcIdeal)}`;
+    if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
+      bidHint = cpcGap > 0 ? `Ruang naik bid s/d ${Math.round(cpcIdeal)}` : `Turunkan bid ke ${Math.round(cpcIdeal)}`;
     }
+
+    const activeUnits = Object.keys(b.adNames).length;
+    const delivery = topOf(b.delivery, 1)[0];
 
     return {
       tag: k, comm: b.comm, commDone: b.commDone, commPending: b.commPending, commEff,
-      spend, net, netEff, roas, roasEff, roi, orders, qty: b.qty, gmv: b.gmv,
-      clicks: b.clicks, impr: b.impr, daysProd, cpc, cpm, cpcIdeal, cpcGap,
-      commPerClick, convRate, costPerOrder, avgComm,
-      leak, status, label, reason, bidHint,
-      streak: tailStreak, worstStreak, streakRun, dailyRows,
+      spend, net, netEff, roas, roasEff, roi, margin,
+      orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
+      qty: b.qty, gmv: b.gmv, refund: b.refund,
+      clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
+      daysProd, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
+      convRate, costPerOrder, avgComm, avgOrder, commRate,
+      leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
+      dailyRows, activeUnits, delivery: delivery ? delivery.name : '',
+      topPlatform: topOf(b.platforms, 1)[0] || null,
+      topShop: topOf(b.shops, 1)[0] || null,
+      adNames: Object.keys(b.adNames),
     };
   }).sort((a, b) => b.spend - a.spend || b.comm - a.comm);
+
+  const tagIndex = {};
+  tags.forEach(t => { tagIndex[t.tag] = t; });
+
+  /* ── Per ad unit rows (reference-style grain) ───────────────────────── */
+  const adUnits = Object.keys(units).map(k => {
+    const u = units[k];
+    const parent = tagIndex[u.tag];
+    // Commission is only known at tag level; attribute it to units by spend share.
+    const tagSpend = parent ? parent.spend : 0;
+    const share = tagSpend > 0 ? u.spend / tagSpend : 0;
+    const commEff = parent ? parent.commEff * share : 0;
+    const orders = parent ? Math.round(parent.orders * share) : 0;
+    const cpc = u.clicks > 0 ? u.spend / u.clicks : 0;
+    const cpm = u.impr > 0 ? u.spend / u.impr * 1000 : 0;
+    const ctr = u.impr > 0 ? u.clicks / u.impr * 100 : 0;
+    const cpcIdeal = u.clicks > 0 ? (commEff / u.clicks) / targetMult : 0;
+    const roasEff = u.spend > 0 ? commEff / u.spend : 0;
+    const dv = topOf(u.delivery, 1)[0];
+    const active = dv ? /active|aktif/i.test(dv.name) : false;
+    return {
+      adName: k, tag: u.tag, method: u.method, confidence: u.confidence,
+      spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
+      days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
+      commEff, orders, roasEff, netEff: commEff - u.spend,
+      roi: u.spend > 0 ? (commEff - u.spend) / u.spend * 100 : 0,
+      convRate: u.clicks > 0 ? orders / u.clicks * 100 : 0,
+      costPerOrder: orders > 0 ? u.spend / orders : 0,
+      delivery: dv ? dv.name : '', active,
+      quality: topOf(u.quality, 1)[0] ? topOf(u.quality, 1)[0].name : '',
+      status: parent ? parent.status : 'evaluasi',
+      label: parent ? parent.label : 'Belum cukup data',
+      estimated: share > 0 && share < 1,
+    };
+  }).sort((a, b) => b.spend - a.spend);
+
+  const matchLog = adUnits.map(u => ({
+    adName: u.adName, tag: u.tag, method: u.method, confidence: u.confidence,
+    spend: u.spend, clicks: u.clicks,
+  }));
 
   /* ── Portfolio totals ───────────────────────────────────────────────── */
   const sum = f => tags.reduce((s, t) => s + (isFinite(f(t)) ? f(t) : 0), 0);
   const totalSpend = sum(t => t.spend);
   const totalComm = sum(t => t.comm);
   const totalEff = sum(t => t.commEff);
-  const totalPending = sum(t => t.commPending);
+  const totalImpr = sum(t => t.impr);
+  const totalClicks = sum(t => t.clicks);
   const allOrders = new Set();
   fAff.forEach(r => allOrders.add(pick(r, COL.aff.orderId)));
+
+  const paid = tags.filter(t => t.spend > 0);
+  const paidSpend = paid.reduce((s, t) => s + t.spend, 0);
+  const paidComm = paid.reduce((s, t) => s + t.commEff, 0);
+  const organicComm = tags.filter(t => t.status === 'organik').reduce((s, t) => s + t.comm, 0);
 
   const kpi = {
     spend: totalSpend,
     comm: totalComm,
     commEff: totalEff,
-    commPending: totalPending,
-    pendingPct: totalComm > 0 ? totalPending / totalComm * 100 : 0,
+    commPending: sum(t => t.commPending),
+    pendingPct: totalComm > 0 ? sum(t => t.commPending) / totalComm * 100 : 0,
     net: totalComm - totalSpend,
     netEff: totalEff - totalSpend,
     roas: totalSpend > 0 ? totalComm / totalSpend : 0,
     roasEff: totalSpend > 0 ? totalEff / totalSpend : 0,
     roi: totalSpend > 0 ? (totalEff - totalSpend) / totalSpend * 100 : 0,
+    paidSpend, paidComm,
+    paidRoas: paidSpend > 0 ? paidComm / paidSpend : 0,
+    paidNet: paidComm - paidSpend,
+    organicComm,
+    organicShare: totalEff > 0 ? organicComm / totalEff * 100 : 0,
     orders: allOrders.size,
     gmv: sum(t => t.gmv),
     qty: sum(t => t.qty),
-    clicks: sum(t => t.clicks),
+    refund: sum(t => t.refund),
+    clicks: totalClicks,
+    impr: totalImpr,
+    reach: sum(t => t.reach),
+    lpv: sum(t => t.lpv),
+    cpc: totalClicks > 0 ? totalSpend / totalClicks : 0,
+    cpm: totalImpr > 0 ? totalSpend / totalImpr * 1000 : 0,
+    ctr: totalImpr > 0 ? totalClicks / totalImpr * 100 : 0,
+    convRate: totalClicks > 0 ? allOrders.size / totalClicks * 100 : 0,
+    costPerOrder: allOrders.size > 0 ? totalSpend / allOrders.size : 0,
+    avgComm: allOrders.size > 0 ? totalComm / allOrders.size : 0,
+    avgOrder: allOrders.size > 0 ? sum(t => t.gmv) / allOrders.size : 0,
+    commRate: sum(t => t.gmv) > 0 ? totalComm / sum(t => t.gmv) * 100 : 0,
     shopeeClicks: fClk.length,
     wasted: tags.reduce((s, t) => s + (t.leak ? t.leak.wasted : 0), 0),
-    excluded,
+    leakTags: tags.filter(t => t.leak && t.leak.severity === 'bad').length,
+    excluded, statusCount,
+    counts: { scale: 0, pantau: 0, stop: 0, organik: 0, evaluasi: 0 },
   };
+  tags.forEach(t => { kpi.counts[t.status] = (kpi.counts[t.status] || 0) + 1; });
 
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
+    const commEffDay = v.comm; // per-day status split is not tracked; raw comm is honest here
     return {
-      date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks,
+      date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
+      shopeeClicks: clickDaily[d] || 0,
       orders: v.orders.size, net: v.comm - v.spend,
       roas: v.spend > 0 ? v.comm / v.spend : 0,
+      roi: v.spend > 0 ? (v.comm - v.spend) / v.spend * 100 : 0,
+      cpc: v.clicks > 0 ? v.spend / v.clicks : 0,
+      convRate: v.clicks > 0 ? v.orders.size / v.clicks * 100 : 0,
       mature: isMature(d),
     };
   });
 
-  const rank = (obj, key) => Object.keys(obj)
-    .map(k => (typeof obj[k] === 'object' ? obj[k] : { name: k, comm: obj[k] }))
-    .sort((a, b) => (b[key] || b.comm) - (a[key] || a.comm)).slice(0, 10);
-
   return {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
-    kpi, tags, daily, matchLog, lagProfile,
+    kpi, tags, adUnits, daily, matchLog, lagProfile, settlement,
     breakdown: {
-      platform: Object.keys(platform).map(k => ({ name: k, comm: platform[k] })).sort((a, b) => b.comm - a.comm),
-      category: Object.keys(category).map(k => ({ name: k, comm: category[k] })).sort((a, b) => b.comm - a.comm).slice(0, 10),
-      productByComm: rank(product, 'comm'),
-      productByQty: Object.values(product).sort((a, b) => b.qty - a.qty).slice(0, 10),
-      clickSource: Object.keys(clickSrc).map(k => ({ name: k, count: clickSrc[k] })).sort((a, b) => b.count - a.count),
+      platform: topOf(platform).map(x => ({ name: x.name, comm: x.value })),
+      category: topOf(category, 10).map(x => ({ name: x.name, comm: x.value })),
+      category2: topOf(category2, 10).map(x => ({ name: x.name, comm: x.value })),
+      shop: topOf(shop, 10).map(x => ({ name: x.name, comm: x.value })),
+      offerType: topOf(offerType).map(x => ({ name: x.name, comm: x.value })),
+      contentType: topOf(contentType).map(x => ({ name: x.name, comm: x.value })),
+      clickSource: topOf(clickSrc).map(x => ({ name: x.name, count: x.value })),
+      clickRegion: topOf(clickRegion, 8).map(x => ({ name: x.name, count: x.value })),
+      hourly: hourly.map((c, h) => ({ hour: h, comm: c, orders: hourlyOrders[h] })),
+      productByComm: Object.values(product).map(p => ({ ...p, orders: p.orders.size }))
+        .sort((a, b) => b.comm - a.comm).slice(0, 15),
+      productByQty: Object.values(product).map(p => ({ ...p, orders: p.orders.size }))
+        .sort((a, b) => b.qty - a.qty).slice(0, 15),
     },
     counts: { affiliate: fAff.length, ads: fAds.length, clicks: fClk.length },
   };
 }
 
+/* ── Snapshot compaction + trend across saved snapshots ──────────────────── */
+function toSnapshot(result, meta) {
+  return {
+    id: (meta && meta.id) || Date.now(),
+    account: (meta && meta.account) || 'default',
+    saved: (meta && meta.saved) || new Date().toISOString().slice(0, 19).replace('T', ' '),
+    range: result.range,
+    options: result.options,
+    kpi: {
+      spend: result.kpi.spend, comm: result.kpi.comm, commEff: result.kpi.commEff,
+      commPending: result.kpi.commPending, netEff: result.kpi.netEff,
+      roasEff: result.kpi.roasEff, roi: result.kpi.roi,
+      paidRoas: result.kpi.paidRoas, paidSpend: result.kpi.paidSpend, paidNet: result.kpi.paidNet,
+      organicComm: result.kpi.organicComm, organicShare: result.kpi.organicShare,
+      orders: result.kpi.orders, gmv: result.kpi.gmv, clicks: result.kpi.clicks,
+      cpc: result.kpi.cpc, convRate: result.kpi.convRate, costPerOrder: result.kpi.costPerOrder,
+      wasted: result.kpi.wasted, leakTags: result.kpi.leakTags, counts: result.kpi.counts,
+    },
+    tags: result.tags.filter(t => t.spend > 0 || t.comm > 0).map(t => ({
+      tag: t.tag, status: t.status, label: t.label, reason: t.reason,
+      spend: t.spend, commEff: t.commEff, netEff: t.netEff, roasEff: t.roasEff, roi: t.roi,
+      cpc: t.cpc, cpcIdeal: t.cpcIdeal, orders: t.orders, convRate: t.convRate,
+      leakPct: t.leak ? t.leak.pct : null,
+    })),
+  };
+}
+
+/* Build a comparable series from saved snapshots of ONE account.
+   Snapshots are deduped by period end so re-saving the same day does not
+   double-plot; the newest save for a period wins. */
+function buildTrend(snapshots, account) {
+  const rows = (snapshots || [])
+    .filter(s => !account || (s.account || 'default') === account)
+    .slice()
+    .sort((a, b) => String(a.saved).localeCompare(String(b.saved)));
+
+  const byPeriod = {};
+  rows.forEach(s => { byPeriod[s.range && s.range.end ? s.range.end : s.saved] = s; });
+
+  const series = Object.keys(byPeriod).sort().map(k => {
+    const s = byPeriod[k];
+    return {
+      period: k, saved: s.saved,
+      start: s.range ? s.range.start : '', end: s.range ? s.range.end : '',
+      spend: s.kpi.spend || 0,
+      commEff: s.kpi.commEff || 0,
+      netEff: s.kpi.netEff || 0,
+      roasEff: s.kpi.roasEff || 0,
+      paidRoas: s.kpi.paidRoas || 0,
+      organicComm: s.kpi.organicComm || 0,
+      organicShare: s.kpi.organicShare || 0,
+      orders: s.kpi.orders || 0,
+      cpc: s.kpi.cpc || 0,
+      convRate: s.kpi.convRate || 0,
+      wasted: s.kpi.wasted || 0,
+      counts: s.kpi.counts || {},
+      tags: s.tags || [],
+    };
+  });
+
+  // Per-tag trajectory: how each tag's verdict and ROAS moved between saves
+  const tagTrend = {};
+  series.forEach((pt, i) => {
+    (pt.tags || []).forEach(t => {
+      if (!tagTrend[t.tag]) tagTrend[t.tag] = { tag: t.tag, points: [] };
+      tagTrend[t.tag].points.push({
+        period: pt.period, roasEff: t.roasEff, status: t.status,
+        spend: t.spend, netEff: t.netEff, cpc: t.cpc, cpcIdeal: t.cpcIdeal,
+      });
+    });
+  });
+
+  const movers = Object.values(tagTrend).map(tt => {
+    const p = tt.points;
+    if (p.length < 2) return null;
+    const first = p[0], last = p[p.length - 1];
+    return {
+      tag: tt.tag, from: first.roasEff, to: last.roasEff,
+      delta: (last.roasEff || 0) - (first.roasEff || 0),
+      fromStatus: first.status, toStatus: last.status,
+      changed: first.status !== last.status,
+      points: p,
+    };
+  }).filter(Boolean).sort((a, b) => a.delta - b.delta);
+
+  const latest = series[series.length - 1] || null;
+  const prev = series.length > 1 ? series[series.length - 2] : null;
+  const delta = latest && prev ? {
+    spend: latest.spend - prev.spend,
+    netEff: latest.netEff - prev.netEff,
+    roasEff: latest.roasEff - prev.roasEff,
+    paidRoas: latest.paidRoas - prev.paidRoas,
+    orders: latest.orders - prev.orders,
+    wasted: latest.wasted - prev.wasted,
+  } : null;
+
+  return { series, tagTrend, movers, latest, prev, delta };
+}
+
 return {
-  DEFAULTS, analyze, detectFileType, matchAdToTag,
-  normalize, escapeHtml, num, int, dayOnly, isDate, addDays, diffDays, cleanTag, COL, pick,
+  DEFAULTS, analyze, detectFileType, matchAdToTag, toSnapshot, buildTrend,
+  normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
+  cleanTag, COL, pick, topOf,
 };
 });

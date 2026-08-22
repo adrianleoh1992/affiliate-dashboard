@@ -1,137 +1,96 @@
 const { chromium } = require('playwright');
-const path = require('path');
-
 const D = '/Users/hadipradata/Downloads/';
 const FILES = [
   D + 'AffiliateCommissionReport_202608222201.csv',
   D + 'AW-Adrian-Ads-Jul-23-2026-Aug-21-2026.csv',
   D + 'WebsiteClickReport202608222201.csv',
 ];
+const PAGE = 'http://127.0.0.1:8899/index.html';
+const EXE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+  const browser = await chromium.launch({ executablePath: EXE, headless: true });
+  const page = await browser.newPage({ viewport: { width: 1560, height: 1050 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 
-  await page.goto('http://127.0.0.1:8899/v2.html', { waitUntil: 'networkidle' });
+  await page.goto(PAGE, { waitUntil: 'networkidle' });
   await page.setInputFiles('#files', FILES);
-  await page.waitForSelector('#main:not(.hidden)', { timeout: 60000 });
-  await page.waitForTimeout(3500);
+  await page.waitForSelector('#main:not(.hidden)', { timeout: 90000 });
+  await page.waitForTimeout(4000);
 
-  const kpis = await page.$$eval('.kpi', els => els.map(e => ({
-    label: e.querySelector('.lbl').textContent,
-    value: e.querySelector('.val').textContent,
-    sub: e.querySelector('.sub').textContent,
-  })));
   console.log('=== KPI ===');
-  kpis.forEach(k => console.log(' ', k.label.padEnd(20), k.value.padEnd(14), k.sub));
+  for (const k of await page.$$eval('.kpi', e => e.map(x => ({
+    l: x.querySelector('.lbl').textContent, v: x.querySelector('.val').textContent,
+    s: x.querySelector('.sub').textContent }))))
+    console.log(' ', k.l.padEnd(21), k.v.padEnd(13), k.s);
 
-  console.log('\n=== BANNER ===');
-  for (const b of await page.$$eval('.banner', e => e.map(x => x.textContent.trim()))) {
-    console.log('  •', b.replace(/\s+/g, ' ').slice(0, 130));
-  }
-
-  console.log('\n=== KEPUTUSAN ===');
-  const rows = await page.$$eval('#tblMain tbody tr', trs => trs.map(tr => {
-    const c = [...tr.querySelectorAll('td')].map(t => t.innerText.replace(/\n/g, ' | ').trim());
-    return c;
-  }));
-  rows.slice(0, 8).forEach(r => console.log('  ', r[0].slice(0, 78)));
+  console.log('\n=== KEPUTUSAN (6 teratas) ===');
+  const rows = await page.$$eval('#tblMain tbody tr', t => t.map(r =>
+    [...r.querySelectorAll('td')].map(c => c.innerText.replace(/\n/g, ' | ').trim())));
+  rows.slice(0, 6).forEach(r => console.log('  ', r[0].split('|')[0].trim().padEnd(30),
+    'ROAS', r[4].padEnd(7), 'CPM', r[6].padEnd(9), 'CPC', r[7].padEnd(6), 'ideal', r[8]));
   console.log('  total baris:', rows.length);
 
-  console.log('\n=== TABEL: kolom CPC ideal ===');
-  rows.slice(0, 6).forEach(r => console.log('  ', r[0].split('|')[0].trim().padEnd(28),
-    'biaya', r[1].padEnd(10), 'ROAS', r[4].padEnd(7), 'CPC', r[6].padEnd(6), 'ideal', r[7].padEnd(6), 'selisih', r[8]));
+  await page.click('[data-tab="adunit"]'); await page.waitForTimeout(700);
+  const units = await page.$$eval('#tblUnit tbody tr', t => t.map(r =>
+    [...r.querySelectorAll('td')].map(c => c.innerText.replace(/\n/g, ' ').trim())));
+  console.log('\n=== PER AD UNIT ===');
+  units.forEach(u => console.log('  ', u[0].slice(0, 34).padEnd(36), u[1].padEnd(7),
+    u[2].padEnd(11), 'CPM', u[3].padEnd(8), 'CTR', u[8].padEnd(6), 'ROI', u[13]));
 
-  // Leakage tab
-  await page.click('[data-tab="kebocoran"]');
-  await page.waitForTimeout(600);
-  const leak = await page.$$eval('#tblLeak tbody tr', trs => trs.map(tr =>
-    [...tr.querySelectorAll('td')].map(t => t.innerText.trim())));
-  console.log('\n=== KEBOCORAN KLIK ===');
-  leak.forEach(r => console.log('  ', (r[0]||'').padEnd(26), 'meta', (r[1]||'').padEnd(8),
-    'shopee', (r[2]||'').padEnd(8), 'masuk', (r[3]||'').padEnd(8), 'hangus', r[5]||''));
+  await page.click('[data-tab="kebocoran"]'); await page.waitForTimeout(700);
+  const leak = await page.$$eval('#tblLeak tbody tr', t => t.map(r =>
+    [...r.querySelectorAll('td')].map(c => c.innerText.trim())));
+  console.log('\n=== KEBOCORAN ===');
+  leak.forEach(r => console.log('  ', (r[0]||'').padEnd(26), 'masuk', (r[3]||'').padEnd(8), 'hangus', r[5]||''));
 
-  // Matching tab
-  await page.click('[data-tab="matching"]');
-  await page.waitForTimeout(400);
-  const match = await page.$$eval('#tblMatch tbody tr', trs => trs.map(tr =>
-    [...tr.querySelectorAll('td')].map(t => t.innerText.trim())));
-  console.log('\n=== MATCHING ===');
-  match.forEach(r => console.log('  ', (r[0]||'').padEnd(26), '->', (r[1]||'').padEnd(26), (r[2]||'').padEnd(10), r[3]||''));
+  await page.click('[data-tab="harian"]'); await page.waitForTimeout(900);
+  const strip = await page.$$eval('#dailyStrip .s', e => e.map(x =>
+    x.querySelector('.l').textContent + '=' + x.querySelector('.v').textContent));
+  console.log('\n=== STRIP HARIAN ===\n  ', strip.join('  '));
+  console.log('   baris harian:', (await page.$$('#tblDaily tbody tr')).length);
 
-  // Charts rendered?
-  await page.click('[data-tab="harian"]');
-  await page.waitForTimeout(900);
-  const canvases = await page.$$eval('canvas', cs => cs.map(c => ({ id: c.id, w: c.width, h: c.height })));
-  console.log('\n=== CHART ===');
-  canvases.forEach(c => console.log('  ', c.id.padEnd(12), c.w + 'x' + c.h, c.w > 0 && c.h > 0 ? 'ok' : 'KOSONG'));
-
-  // Sorting works?
-  await page.click('[data-tab="keputusan"]');
+  // Snapshot + trend: save two DIFFERENT periods to prove per-account history.
+  // Start from a clean slate so a previous run's snapshots can't mask a bug,
+  // and open the collapsed settings panel before touching the date inputs.
+  await page.click('[data-tab="keputusan"]'); await page.waitForTimeout(300);
+  await page.evaluate(() => localStorage.removeItem('adash_snaps_v3_default'));
+  await page.click('#btnSave'); await page.waitForTimeout(600);
+  await page.evaluate(() => { document.getElementById('settingsCard').open = true; });
   await page.waitForTimeout(300);
-  await page.click('#tblMain th[data-sort="roasEff"]');
-  await page.waitForTimeout(300);
-  const sorted = await page.$$eval('#tblMain tbody tr td:nth-child(5)', t => t.slice(0,4).map(x=>x.textContent.trim()));
-  console.log('\n=== SORT by ROAS ===\n  ', sorted.join('  '));
+  await page.fill('#dateEnd', '2026-08-10'); await page.waitForTimeout(2400);
+  await page.click('#btnSave'); await page.waitForTimeout(700);
+  await page.fill('#dateEnd', '2026-08-21'); await page.waitForTimeout(2400);
 
-  // Dark mode
-  await page.click('#btnTheme');
-  await page.waitForTimeout(700);
-  const theme = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  console.log('\n=== DARK MODE ===\n  theme:', theme, '| bg:', bg);
-  await page.screenshot({ path: '/tmp/v2-dark.png', fullPage: false });
-  await page.click('#btnTheme');
-  await page.waitForTimeout(700);
-  await page.screenshot({ path: '/tmp/v2-light.png', fullPage: false });
+  await page.click('[data-tab="perkembangan"]'); await page.waitForTimeout(1200);
+  const trendVisible = await page.$eval('#trendBody', e => !e.classList.contains('hidden'));
+  const tstrip = await page.$$eval('#trendStrip .s', e => e.map(x =>
+    x.querySelector('.l').textContent + '=' + x.querySelector('.v').textContent.trim()));
+  const movers = await page.$$eval('#tblMovers tbody tr', t => t.length);
+  console.log('\n=== PERKEMBANGAN ===');
+  console.log('  tampil:', trendVisible, '| movers:', movers);
+  console.log('  ', tstrip.join('  '));
 
-  // Snapshot save
-  await page.click('#btnSave');
-  await page.waitForTimeout(500);
-  const snaps = await page.evaluate(() => JSON.parse(localStorage.getItem('adash_snaps_v2')||'[]').length);
-  console.log('\n=== SNAPSHOT === tersimpan:', snaps);
+  await page.click('[data-tab="rincian"]'); await page.waitForTimeout(1000);
+  const canv = await page.$$eval('canvas', c => c.map(x => x.id + ':' + (x.width > 0 ? 'ok' : 'KOSONG')));
+  console.log('\n=== CHART ===\n  ', canv.join('  '));
 
-  // Decision cards act as filters
-  await page.click('[data-tab="keputusan"]');
-  await page.waitForTimeout(300);
-  const before = await page.$$eval('#tblMain tbody tr', t => t.length);
-  await page.click('.dcard.stop');
-  await page.waitForTimeout(400);
-  const after = await page.$$eval('#tblMain tbody tr', t => t.length);
-  const note = await page.$eval('#filterNote', e => e.textContent);
-  console.log('\n=== FILTER KARTU ===');
-  console.log('  sebelum', before, '-> setelah klik STOP', after, '|', note);
-  await page.click('#btnClearFilter');
-  await page.waitForTimeout(300);
-  const cleared = await page.$$eval('#tblMain tbody tr', t => t.length);
-  console.log('  setelah reset:', cleared);
-
-  // Contrast audit on coloured surfaces
-  const contrast = await page.evaluate(() => {
-    const lum = c => { const [r,g,b] = c.match(/\d+/g).map(Number).map(v => {
-      v/=255; return v<=.03928 ? v/12.92 : Math.pow((v+.055)/1.055, 2.4); });
-      return .2126*r + .7152*g + .0722*b; };
-    const ratio = (a,b) => { const l1=lum(a), l2=lum(b);
-      return ((Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05)).toFixed(2); };
-    const out = [];
-    document.querySelectorAll('.dcard h4, .badge, .kpi .val').forEach(el => {
-      const s = getComputedStyle(el);
-      let bg = s.backgroundColor, p = el;
-      while ((bg==='rgba(0, 0, 0, 0)'||bg==='transparent') && p.parentElement) { p=p.parentElement; bg=getComputedStyle(p).backgroundColor; }
-      out.push({ t: el.textContent.trim().slice(0,18), r: +ratio(s.color, bg) });
-    });
-    return out;
-  });
-  console.log('\n=== KONTRAS (min 4.5) ===');
-  const fails = contrast.filter(c => c.r < 4.5);
-  console.log('  diperiksa:', contrast.length, '| gagal:', fails.length);
-  fails.slice(0,8).forEach(c => console.log('   ✗', c.t.padEnd(20), c.r));
+  // Multi-account isolation
+  page.on('dialog', async d => { await d.accept('akun-kedua'); });
+  await page.click('#btnNewAcct'); await page.waitForTimeout(900);
+  const acctOpts = await page.$$eval('#account option', o => o.map(x => x.value));
+  const emptyShown = await page.$eval('#emptyState', e => !e.classList.contains('hidden'));
+  console.log('\n=== MULTI-AKUN ===');
+  console.log('  akun:', acctOpts.join(', '), '| data direset:', emptyShown);
+  const snapCounts = await page.evaluate(() => ({
+    def: JSON.parse(localStorage.getItem('adash_snaps_v3_default') || '[]').length,
+    dua: JSON.parse(localStorage.getItem('adash_snaps_v3_akun-kedua') || '[]').length,
+  }));
+  console.log('  snapshot default:', snapCounts.def, '| akun-kedua:', snapCounts.dua);
 
   console.log('\n=== CONSOLE ERRORS ===');
-  console.log(errors.length ? errors.slice(0,10).join('\n') : '  (tidak ada)');
-
+  console.log(errors.length ? errors.slice(0, 8).join('\n') : '  (tidak ada)');
   await browser.close();
 })();

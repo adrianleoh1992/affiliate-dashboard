@@ -3,2001 +3,276 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Affiliate Ads Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23e0653a'/><text x='16' y='22' font-size='15' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>BD</text></svg>">
+<title>Affiliate Decision Dashboard · Berlima Digital</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:linear-gradient(135deg,#f0f4ff 0%,#f8fafc 50%,#f0fdf4 100%);color:#1e293b;line-height:1.6;min-height:100vh}
-.container{max-width:1440px;margin:0 auto;padding:20px 24px}
-.card{background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.03);padding:24px;margin-bottom:20px;border:1px solid rgba(226,232,240,.6);transition:box-shadow .2s,transform .1s}
-.card:hover{box-shadow:0 2px 6px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.04)}
-.header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
-.header h1{font-size:24px;font-weight:800;background:linear-gradient(135deg,#1e293b,#334155);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.5px}
-.header p{color:#64748b;font-size:13px;margin-top:4px;font-weight:400}
-.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-.controls input[type="date"],.controls input[type="number"]{border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;font-size:13px;font-family:inherit;transition:border-color .2s,box-shadow .2s;background:#f8fafc}
-.controls input[type="date"]:focus,.controls input[type="number"]:focus{border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.1);outline:none}
-.controls label{font-size:12px;color:#64748b;font-weight:500}
-.upload-area{background:#fff;border:2px dashed #cbd5e1;border-radius:16px;padding:32px 24px;margin-bottom:20px;transition:all .3s;position:relative;overflow:hidden}
-.upload-area::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(59,130,246,.02),rgba(16,185,129,.02));pointer-events:none}
-.upload-area:hover{border-color:#60a5fa;background:#f8fbff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.08)}
-.upload-area.drag-over{border-color:#3b82f6;background:#eff6ff;box-shadow:0 0 0 4px rgba(59,130,246,.1)}
-.upload-area h3{font-size:16px;font-weight:700;margin-bottom:6px;color:#1e293b}
-.upload-area p{font-size:13px;color:#64748b;margin-bottom:16px;line-height:1.5}
-.upload-area input[type="file"]{font-size:13px;font-family:inherit}
-.file-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-.file-tag{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:0.2px;transition:transform .15s}
-.file-tag:hover{transform:scale(1.03)}
-.file-tag.affiliate{background:#dcfce7;color:#166534}
-.file-tag.ads{background:#dbeafe;color:#1e40af}
-.file-tag.clicks{background:#fef3c7;color:#92400e}
-.file-tag.unknown{background:#f1f5f9;color:#475569}
-.tabs{display:flex;gap:4px;background:#fff;border-radius:14px;padding:5px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.03);overflow-x:auto;border:1px solid rgba(226,232,240,.6);position:sticky;top:12px;z-index:100;backdrop-filter:blur(8px)}
-.tab-btn{flex:1;padding:11px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:#64748b;transition:all .25s;white-space:nowrap;font-family:inherit;letter-spacing:-0.1px}
-.tab-btn.active{background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.3)}
-.tab-btn:hover:not(.active){background:#f1f5f9;color:#334155}
-.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
-@media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:600px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
-.kpi{border-radius:14px;padding:16px;color:#fff;position:relative;overflow:hidden;transition:transform .15s,box-shadow .15s}
-.kpi:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.15)}
-.kpi::after{content:'';position:absolute;top:-50%;right:-50%;width:100%;height:100%;background:radial-gradient(circle,rgba(255,255,255,.1) 0%,transparent 70%);pointer-events:none}
-.kpi .label{font-size:11px;opacity:.9;font-weight:500;letter-spacing:0.3px;text-transform:uppercase}
-.kpi .value{font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px}
-.kpi .sub{font-size:10px;opacity:.75;margin-top:4px;font-weight:500}
-.decision-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
-@media(max-width:768px){.decision-grid{grid-template-columns:1fr}}
-.decision-card{border-radius:14px;border:1px solid;padding:18px;transition:transform .15s,box-shadow .15s}
-.decision-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.06)}
-.decision-card h4{font-size:14px;font-weight:700;margin-bottom:12px;letter-spacing:-0.2px}
-.decision-card .item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px;border-bottom:1px solid rgba(0,0,0,.04)}
-.decision-card .item:last-child{border-bottom:none}
-.decision-card .item .tag{font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
-.decision-card .item .roas{font-weight:700}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{background:#f8fafc;padding:11px 14px;text-align:left;font-weight:600;color:#475569;border-bottom:2px solid #e2e8f0;white-space:nowrap;font-size:12px;letter-spacing:0.3px;text-transform:uppercase}
-td{padding:10px 14px;border-bottom:1px solid #f1f5f9;transition:background .1s}
-tr:hover td{background:#f8fafc}
-.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.2px}
-.badge-scale{background:#dcfce7;color:#166534}
-.badge-pantau{background:#fef3c7;color:#92400e}
-.badge-matikan{background:#fee2e2;color:#991b1b}
-.badge-organik{background:#ede9fe;color:#5b21b6}
-.badge-evaluasi{background:#f1f5f9;color:#475569}
-.chart-container{position:relative;height:280px;margin-top:16px}
-.empty-state{text-align:center;padding:80px 24px}
-.empty-state .icon{font-size:56px;margin-bottom:16px;animation:float 3s ease-in-out infinite}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-.empty-state h2{font-size:20px;color:#1e293b;margin-bottom:10px;font-weight:700}
-.empty-state p{color:#64748b;font-size:14px;max-width:400px;margin:0 auto}
-.threshold-section{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:16px}
-.threshold-section label{font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;font-weight:500}
-.threshold-section input{width:64px;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;transition:border-color .2s}
-.threshold-section input:focus{border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.1);outline:none}
-.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-.cal-header{text-align:center;font-size:11px;font-weight:700;color:#94a3b8;padding:8px;letter-spacing:0.5px}
-.cal-day{border:1px solid #e2e8f0;border-radius:10px;padding:8px;font-size:10px;min-height:64px;transition:transform .15s,box-shadow .15s,border-color .15s;cursor:default}
-.cal-day:hover{transform:scale(1.04);box-shadow:0 4px 12px rgba(0,0,0,.08);z-index:2;position:relative}
-.cal-day .day-num{font-weight:800;font-size:13px;color:#374151}
-.cal-day .day-comm{color:#059669;font-weight:700;margin-top:3px}
-.cal-day .day-spend{color:#94a3b8;font-size:9px;margin-top:1px}
-.cal-day.positive{background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border-color:#86efac}
-.cal-day.negative{background:linear-gradient(135deg,#fef2f2,#fff1f2);border-color:#fca5a5}
-.reset-btn{font-size:12px;color:#ef4444;cursor:pointer;border:1px solid #fecaca;background:#fff;padding:6px 14px;border-radius:8px;font-weight:600;font-family:inherit;transition:all .2s}
-.reset-btn:hover{background:#fef2f2;border-color:#ef4444}
-.organik-section{border:1px solid #e9d5ff;border-radius:14px;padding:18px;background:linear-gradient(135deg,#faf5ff,#f5f3ff);margin-bottom:20px}
-.organik-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-top:12px}
-.organik-item{background:#fff;border:1px solid #e9d5ff;border-radius:10px;padding:12px;transition:transform .15s}
-.organik-item:hover{transform:translateY(-2px)}
-.organik-item .name{font-weight:700;font-size:12px;color:#374151}
-.organik-item .val{color:#7c3aed;font-weight:800;font-size:14px;margin-top:4px}
-.organik-item .orders{color:#6b7280;font-size:10px;margin-top:2px}
-.hidden{display:none}
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-@media(max-width:768px){.two-col{grid-template-columns:1fr}}
-@media(max-width:900px){#tagPlatformCard .two-col,#tagPlatformCard [style*="grid-template-columns: 1fr 1fr 1fr"]{grid-template-columns:1fr!important}}
-.click-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-top:12px}
-.click-item{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px}
-.click-item .click-tag{font-weight:700;font-size:13px;color:#1e293b}
-.click-item .click-stats{font-size:11px;color:#64748b;margin-top:4px}
-.period-btn{padding:6px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;background:#fff;color:#64748b;transition:all .2s;font-family:inherit}
-.period-btn.active{background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;border-color:#2563eb;box-shadow:0 2px 6px rgba(37,99,235,.2)}
-.period-btn:hover:not(.active){background:#f1f5f9;border-color:#cbd5e1}
-th.sortable{cursor:pointer;user-select:none;position:relative;transition:background .15s}
-th.sortable:hover{background:#eff6ff}
-th.sortable::after{content:'\2195';margin-left:6px;font-size:10px;opacity:.4}
-th.sortable.sort-asc::after{content:'\2191';opacity:1;color:#2563eb}
-th.sortable.sort-desc::after{content:'\2193';opacity:1;color:#2563eb}
-.cal-tooltip{position:fixed;z-index:9999;background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;border-radius:14px;padding:16px 18px;font-size:12px;pointer-events:none;opacity:0;transition:opacity .2s;box-shadow:0 12px 40px rgba(0,0,0,.35);min-width:210px;border:1px solid rgba(255,255,255,.05)}
-.cal-tooltip.visible{opacity:1}
-.cal-tooltip .tt-date{font-size:14px;font-weight:800;margin-bottom:10px;color:#fff}
-.cal-tooltip .tt-row{display:flex;justify-content:space-between;gap:16px;padding:3px 0}
-.cal-tooltip .tt-label{color:#94a3b8;font-weight:500}
-.cal-tooltip .tt-val{font-weight:700}
-.cal-tooltip .tt-val.green{color:#4ade80}
-.cal-tooltip .tt-val.red{color:#f87171}
-.cal-tooltip .tt-val.yellow{color:#fbbf24}
-.cal-tooltip .tt-val.blue{color:#60a5fa}
-.cal-tooltip .tt-profit{margin-top:10px;padding-top:10px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:center}
-.cal-tooltip .tt-profit-label{background:#334155;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:0.5px}
-.rank-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:14px}
-.rank-item{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;position:relative;transition:transform .15s,box-shadow .15s}
-.rank-item:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.06)}
-.rank-item .rank-num{font-size:13px;font-weight:800;color:#0d9488}
-.rank-item .rank-name{font-size:12px;font-weight:600;color:#1e293b;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
-.rank-item .rank-sub{font-size:10px;color:#64748b;margin-top:3px;font-weight:500}
-.rank-item .rank-value{position:absolute;top:16px;right:18px;font-size:16px;font-weight:800;color:#059669}
-.rank-item .rank-badge{display:inline-block;font-size:10px;border:1px solid #e2e8f0;border-radius:6px;padding:2px 8px;margin-top:5px;color:#475569;font-weight:600}
-.rank-item .rank-bar{margin-top:10px;height:7px;background:#f1f5f9;border-radius:4px;overflow:hidden}
-.rank-item .rank-bar-fill{height:100%;border-radius:4px}
-.search-input{width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px 10px 36px;font-size:13px;font-family:inherit;transition:border-color .2s,box-shadow .2s;background:#f8fafc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.44 1.168a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z'/%3E%3C/svg%3E") 12px center no-repeat}
-.search-input:focus{border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.1);outline:none;background-color:#fff}
-.export-btn{padding:8px 16px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:#374151;transition:all .2s;font-family:inherit;display:flex;align-items:center;gap:6px}
-.export-btn:hover{background:#f1f5f9;border-color:#cbd5e1}
-.toast{position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;z-index:10000;opacity:0;transform:translateY(16px);transition:all .3s;box-shadow:0 8px 24px rgba(0,0,0,.2)}
-.toast.show{opacity:1;transform:translateY(0)}
-</style>
 </head>
 <body>
-<div class="cal-tooltip" id="calTooltip"></div>
-<div class="toast" id="toast"></div>
-<div class="container">
-  <div class="card">
-    <div class="header">
+
+<header>
+  <div class="hdr">
+    <div class="brand">
+      <div class="logo">BD</div>
       <div>
-        <h1>Affiliate Ads Dashboard</h1>
-        <p>Analisis performa & keputusan Scale / Pantau / Matikan berdasarkan ROAS</p>
-      </div>
-      <div class="controls">
-        <div>
-          <label>PPN Meta:</label>
-          <input type="number" id="ppnMeta" value="0" min="0" max="100" style="width:54px" onchange="recalculate()">
-          <span style="font-size:12px;color:#64748b">%</span>
-        </div>
-        <div>
-          <input type="date" id="dateStart" value="2026-04-01" onchange="recalculate()">
-          <span style="color:#94a3b8;font-weight:600">—</span>
-          <input type="date" id="dateEnd" value="2026-04-30" onchange="recalculate()">
-        </div>
+        <h1>Affiliate Decision Dashboard</h1>
+        <p>Meta Ads × Shopee Affiliate</p>
       </div>
     </div>
-  </div>
-
-  <div class="upload-area" id="uploadArea">
-    <h3>Upload Semua File CSV</h3>
-    <p>Drag & drop file atau klik untuk memilih. Mendukung multi-file (Affiliate Commission, Meta Ads, Website Click Report). Sistem otomatis mendeteksi tipe file.</p>
-    <input type="file" accept=".csv" id="allFiles" multiple onchange="handleUpload(event)">
-    <div class="file-tags" id="fileTags"></div>
-    <div id="uploadStatus" style="font-size:12px;color:#059669;margin-top:10px;font-weight:600"></div>
-  </div>
-
-  <div class="card empty-state" id="emptyState">
-    <div class="icon">📊</div>
-    <h2>Upload data untuk mulai</h2>
-    <p>Upload file CSV Affiliate Commission dan Meta Ads Report di atas. Bisa sekaligus multi-file.</p>
-  </div>
-
-  <div id="mainContent" class="hidden">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-      <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;cursor:pointer;background:#fff;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0"><input type="checkbox" id="globalHideOrganik" onchange="toggleGlobalOrganik()"> <span style="font-weight:500">Sembunyikan semua ORGANIK</span></label>
-      <button class="reset-btn" onclick="resetAll()">Reset semua data</button>
+    <div class="acct">
+      <select id="account" title="Akun aktif"></select>
+      <button class="btn sm" id="btnNewAcct" title="Tambah akun">+</button>
     </div>
+    <button class="btn ghost" id="btnMap">Kelola Tag</button>
+    <button class="btn ghost" id="btnHist">Riwayat</button>
+    <button class="btn ghost" id="btnTheme">Mode Gelap</button>
+    <button class="btn" id="btnExport">Export CSV</button>
+    <button class="btn primary" id="btnSave">Simpan Snapshot</button>
+  </div>
+</header>
 
-    <div class="card" id="dataInfoCard" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;padding:16px 20px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="background:#dcfce7;border-radius:12px;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:20px">📋</span>
-        <div>
-          <h3 style="font-size:15px;font-weight:700;color:#166534">Rentang Tanggal Sinkronisasi</h3>
-          <p id="dataInfoDateRange" style="font-size:13px;color:#374151;margin-top:2px"></p>
-        </div>
+<div class="wrap">
+
+  <div class="card" id="uploadCard">
+    <div class="card-head">
+      <h2>Muat Data</h2>
+      <span class="sub" id="uploadStatus"></span>
+      <button class="btn ghost" id="btnReset">Kosongkan</button>
+    </div>
+    <div class="drop" id="drop">
+      <div class="ic">📂</div>
+      <h3>Tarik file CSV ke sini</h3>
+      <p>Affiliate Commission Report · Meta Ads Report · Website Click Report</p>
+    </div>
+    <input type="file" id="files" multiple accept=".csv" class="hidden">
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="empty-state" id="emptyState">
+    <div class="ic">📊</div>
+    <h3>Belum ada data untuk akun ini</h3>
+    <p>Muat laporan komisi affiliate untuk mulai menganalisis, atau buka Riwayat untuk melihat snapshot tersimpan.</p>
+  </div>
+
+  <div id="main" class="hidden">
+
+    <details class="card" id="settingsCard">
+      <summary class="settings-summary">Pengaturan Analisis <span id="settingsPeek"></span></summary>
+      <div class="ctrls" style="margin-top:15px">
+        <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
+        <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
+        <div class="field"><label>PPN Iklan %</label><input type="number" id="ppn" value="11" min="0" step="1"></div>
+        <div class="field"><label>Target ROI %</label><input type="number" id="targetROI" value="80" min="0" step="5">
+          <div class="tip">dasar CPC ideal</div></div>
+        <div class="field"><label>ROAS Scale</label><input type="number" id="thScale" value="2" step="0.1"></div>
+        <div class="field"><label>ROAS Pantau</label><input type="number" id="thPantau" value="1" step="0.1"></div>
+        <div class="field"><label>Min Spend</label><input type="number" id="minSpend" value="50000" step="10000"></div>
+        <div class="field"><label>Min Hari</label><input type="number" id="minDays" value="3" min="1"></div>
+        <div class="field"><label>Lag Atribusi</label><input type="number" id="lagDays" value="3" min="0">
+          <div class="tip">hari terakhir diabaikan</div></div>
+        <div class="field"><label>Streak Stop</label><input type="number" id="streakDays" value="3" min="1">
+          <div class="tip">hari ROAS &lt; 1</div></div>
+        <div class="field"><label>Bobot Tertunda</label><input type="number" id="pendingFactor" value="0.95" step="0.01" max="1" min="0"></div>
       </div>
-      <div id="dataInfoDetails" style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px"></div>
-    </div>
+    </details>
+
+    <div id="banners"></div>
+    <div class="kpis" id="kpis"></div>
+    <p class="lagnote" id="lagNote"></p>
 
     <div class="tabs">
-      <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Ringkasan</button>
-      <button class="tab-btn" data-tab="campaigns" onclick="switchTab('campaigns')">Campaigns & ROAS</button>
-      <button class="tab-btn" data-tab="tagdaily" onclick="switchTab('tagdaily')">Tag Harian</button>
-      <button class="tab-btn" data-tab="daily" onclick="switchTab('daily')">Harian</button>
-      <button class="tab-btn" data-tab="correlation" onclick="switchTab('correlation')">Korelasi & Efisiensi</button>
-      <button class="tab-btn" data-tab="breakdown" onclick="switchTab('breakdown')">Kategori & Platform</button>
+      <button class="tab active" data-tab="keputusan">Keputusan</button>
+      <button class="tab" data-tab="adunit">Per Ad Unit</button>
+      <button class="tab" data-tab="kebocoran">Kebocoran Klik</button>
+      <button class="tab" data-tab="harian">Harian</button>
+      <button class="tab" data-tab="perkembangan">Perkembangan</button>
+      <button class="tab" data-tab="rincian">Rincian</button>
+      <button class="tab" data-tab="matching">Matching</button>
     </div>
 
-    <div id="tab-overview">
-      <div class="kpi-grid" id="kpiGrid"></div>
-      <div class="decision-grid" id="decisionGrid"></div>
-      <div id="organikSection"></div>
-      <div class="card" id="rankRoasCard" style="display:none;background:#fffbeb">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px"><span style="background:#fef3c7;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">📊</span> Top 10 Tag Tertinggi (Berdasarkan ROAS)</h3>
-        <div class="rank-grid" id="rankRoasGrid"></div>
-      </div>
-      <div class="card" id="rankTagCard" style="display:none;background:#f8fdf9">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px"><span style="background:#f0fdf4;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">🏆</span> Top 10 Tag Tertinggi (Berdasarkan Komisi)</h3>
-        <div class="rank-grid" id="rankTagGrid"></div>
-      </div>
-      <div class="card" id="rankProdCommCard" style="display:none;background:#f8fdf9">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px"><span style="background:#f0fdf4;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">💰</span> Top 10 Produk Terjual (Berdasarkan Komisi)</h3>
-        <div class="rank-grid" id="rankProdCommGrid"></div>
-      </div>
-      <div class="card" id="rankProdQtyCard" style="display:none;background:#f0f9ff">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px"><span style="background:#dbeafe;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">📦</span> Top 10 Produk Terjual (Berdasarkan Qty)</h3>
-        <div class="rank-grid" id="rankProdQtyGrid"></div>
-      </div>
-      <div class="two-col">
-        <div class="card" id="trafficPlatformCard" style="display:none">
-          <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Sumber Order (Platform Shopee)</h3>
-          <p style="font-size:11px;color:#94a3b8;margin-bottom:8px">Dari mana pembeli masuk (Mobile, Web, dll)</p>
-          <div class="chart-container" style="height:220px"><canvas id="trafficPlatformChart"></canvas></div>
-          <div id="trafficPlatformDetail" style="margin-top:12px"></div>
-        </div>
-        <div class="card" id="trafficTagCard" style="display:none">
-          <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Distribusi Klik per Tag (Meta Ads)</h3>
-          <p style="font-size:11px;color:#94a3b8;margin-bottom:8px">Bagaimana budget iklan terdistribusi ke tag</p>
-          <div class="chart-container" style="height:220px"><canvas id="trafficTagChart"></canvas></div>
-          <div id="trafficTagDetail" style="margin-top:12px"></div>
-        </div>
-      </div>
-      <div class="card" id="placementCard" style="display:none">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="background:#eff6ff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">📍</span> Analisis Placement Meta Ads</h3>
-        <p style="font-size:12px;color:#64748b;margin-bottom:16px">Performa setiap placement berdasarkan spend, klik, CPC, dan estimasi ROAS. Hijau = bagus, Merah = kurang efektif.</p>
-        <div class="two-col" style="margin-bottom:16px">
-          <div>
-            <h4 style="font-size:13px;font-weight:700;color:#166534;margin-bottom:8px">Top Placement (Efektif)</h4>
-            <div id="placementGood"></div>
-          </div>
-          <div>
-            <h4 style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:8px">Kurang Efektif (CPC Tinggi)</h4>
-            <div id="placementBad"></div>
-          </div>
-        </div>
-        <h4 style="font-size:13px;font-weight:700;color:#374151;margin-bottom:10px">Detail Semua Placement</h4>
-        <div style="overflow-x:auto">
-          <table id="placementTable"></table>
-        </div>
-      </div>
+    <div class="panel active" data-panel="keputusan">
+      <p class="synth" id="synth"></p>
+      <div class="dgrid" id="dgrid"></div>
       <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Komisi vs Spend Harian</h3>
-        <div class="chart-container"><canvas id="dailyLineChart"></canvas></div>
+        <div class="card-head"><h2>Semua Tag</h2>
+          <span class="sub" id="filterNote"></span>
+          <button class="btn ghost hidden" id="btnClearFilter">Tampilkan Semua</button>
+          <span class="sub">Klik judul kolom untuk mengurutkan</span></div>
+        <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
       </div>
     </div>
 
-    <div id="tab-campaigns" class="hidden">
+    <div class="panel" data-panel="adunit">
       <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Pengaturan Threshold</h3>
-        <div class="threshold-section">
-          <label>Scale ROAS &ge; <input type="number" id="thScale" value="2" step="0.5" onchange="recalculate()"></label>
-          <label>Pantau ROAS &ge; <input type="number" id="thPantau" value="1" step="0.5" onchange="recalculate()"></label>
-          <label>Min Hari: <input type="number" id="thMinDays" value="3" onchange="recalculate()"></label>
-          <label>Min Spend (Rp): <input type="number" id="thMinSpend" value="50000" step="10000" style="width:80px" onchange="recalculate()"></label>
-        </div>
-        <p style="font-size:11px;color:#94a3b8">Iklan yang belum mencapai min hari ATAU min spend = "Belum cukup data"</p>
-      </div>
-      <div class="card" style="padding:0;overflow-x:auto">
-        <div style="padding:18px 22px;border-bottom:1px solid #f1f5f9;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
-          <h3 style="font-size:15px;font-weight:700">Metrik Campaign — Tag, Komisi & ROAS</h3>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:5px;cursor:pointer;background:#f8fafc;padding:5px 10px;border-radius:8px;border:1px solid #e2e8f0"><input type="checkbox" id="hideOrganikCampaign" onchange="toggleOrganikCampaign()"> <span style="font-weight:600">Sembunyikan Organik</span></label>
-            <button class="export-btn" onclick="exportCampaignCSV()">Export CSV</button>
-          </div>
-        </div>
-        <div style="padding:12px 22px;border-bottom:1px solid #f1f5f9;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
-          <div style="display:flex;gap:4px;flex-wrap:wrap" id="periodFilterBtns">
-            <button class="period-btn active" onclick="setPeriodFilter('all')">Semua</button>
-            <button class="period-btn" onclick="setPeriodFilter(1)">1 Hari</button>
-            <button class="period-btn" onclick="setPeriodFilter(3)">3 Hari</button>
-            <button class="period-btn" onclick="setPeriodFilter(7)">7 Hari</button>
-            <button class="period-btn" onclick="setPeriodFilter(15)">15 Hari</button>
-            <button class="period-btn" onclick="setPeriodFilter(30)">30 Hari</button>
-          </div>
-          <input type="text" class="search-input" id="campaignSearch" placeholder="Cari tag..." oninput="filterCampaignSearch()" style="max-width:220px">
-        </div>
-        <table id="campaignTable"></table>
-      </div>
-      <div class="card" id="matchingCard" style="display:none">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">🔗 Mapping Ad Name → Tag Affiliate</h3>
-        <p style="font-size:11px;color:#94a3b8;margin-bottom:10px">Bagaimana nama iklan Meta di-match ke tag affiliate Shopee</p>
-        <table id="matchingTable" style="font-size:12px"></table>
-      </div>
-      <div class="card" id="periodDecisionCard" style="display:none">
-        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-          <h3 style="font-size:14px;font-weight:600">⏱️ Keputusan Berdasarkan Periode</h3>
-          <label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="hideOrganik" onchange="toggleOrganikRows()"> Sembunyikan ORGANIK</label>
-        </div>
-        <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">ROAS & keputusan untuk setiap tag berdasarkan data Hari Ini, 3 Hari, 7 Hari, 15 Hari, dan 30 Hari terakhir</p>
-        <div style="overflow-x:auto">
-          <table id="periodDecisionTable" style="font-size:12px"></table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Top 10 Tag — Komisi vs Spend</h3>
-        <div class="chart-container"><canvas id="tagBarChart"></canvas></div>
+        <div class="card-head"><h2>Performa Per Ad Unit</h2>
+          <span class="sub" id="adunitNote"></span></div>
+        <p class="hint">Satu baris per iklan di Meta, lengkap dengan CPM, CTR, reach, dan CPC ideal.
+          Komisi dibagi proporsional dari tag induknya sesuai porsi biaya, karena Shopee hanya melaporkan komisi per tag.</p>
+        <div class="tscroll"><table id="tblUnit"><thead></thead><tbody></tbody></table></div>
       </div>
     </div>
 
-    <div id="tab-tagdaily" class="hidden">
+    <div class="panel" data-panel="kebocoran">
       <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">📈 Performa Tag Harian</h3>
-        <p style="font-size:12px;color:#94a3b8;margin-bottom:12px">Pilih tag untuk melihat tren harian komisi, spend, dan ROAS</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px">
-          <label style="font-size:12px;color:#64748b">Pilih Tag:</label>
-          <select id="tagDailySelect" onchange="renderTagDaily()" style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;font-size:13px;min-width:200px"></select>
-        </div>
-        <div id="tagDailySummary" style="margin-bottom:16px"></div>
-        <div class="chart-container" style="height:250px"><canvas id="tagDailyChart"></canvas></div>
+        <div class="card-head"><h2>Kebocoran Klik</h2><span class="sub" id="leakRange"></span></div>
+        <p class="hint">Selisih antara klik yang Anda bayar di Meta dan klik yang tercatat di Shopee.
+          Di atas 100% itu wajar — satu orang bisa klik berkali-kali dan trafik organik ikut terhitung.
+          Yang perlu dicurigai adalah yang jauh di bawah 100%.</p>
+        <div class="tscroll"><table id="tblLeak"><thead></thead><tbody></tbody></table></div>
       </div>
-      <div class="card" id="tagPlatformCard" style="display:none">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">📡 Sumber Trafik & Order Tag Ini</h3>
-        <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Dari kanal mana pembelian tag ini masuk dan persentase keberhasilan order per kanal</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-          <div>
-            <h4 style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Sumber Order (Kanal)</h4>
-            <div id="tagPlatformOrders"></div>
-          </div>
-          <div>
-            <h4 style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Distribusi Komisi per Kanal</h4>
-            <div id="tagPlatformComm"></div>
-          </div>
-          <div>
-            <h4 style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px">Ads Spend per Kanal (Meta)</h4>
-            <div id="tagPlatformAdsSpend"></div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">📊 Tabel Detail Tag Harian</h3>
-        <div style="overflow-x:auto">
-          <table id="tagDailyTable"></table>
-        </div>
-      </div>
-      <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">🔥 Semua Tag — Tren 3 Hari Terakhir</h3>
-        <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Perbandingan performa 3 hari terakhir vs sebelumnya untuk semua tag aktif</p>
-        <div style="overflow-x:auto">
-          <table id="tagTrendTable"></table>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-daily" class="hidden">
-      <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">ROAS Harian</h3>
-        <div class="chart-container"><canvas id="roasBarChart"></canvas></div>
-      </div>
-      <div class="card">
-        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Kalender Performa</h3>
-        <div class="calendar-grid" id="calendarGrid"></div>
-      </div>
-    </div>
-
-    <div id="tab-correlation" class="hidden">
-      <div class="card" id="correlationCard">
-        <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="background:#eff6ff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px">🔗</span> Korelasi Kanal: Ads Spend vs Konversi</h3>
-        <p style="font-size:12px;color:#64748b;margin-bottom:16px">Membandingkan spend iklan (Meta Ads) dengan konversi (Order & Komisi) yang terjadi per kanal/platform. Membantu melihat apakah budget di kanal tertentu menghasilkan konversi yang sepadan.</p>
-        <div id="correlationContent"></div>
-      </div>
-      <div class="two-col">
-        <div class="card" id="clickConvCard">
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:4px">📊 Click-to-Order Conversion Rate</h3>
-          <p style="font-size:11px;color:#64748b;margin-bottom:12px">Berapa % klik dari setiap kanal yang berhasil jadi order</p>
-          <div id="clickConvContent"></div>
-        </div>
-        <div class="card" id="costPerConvCard">
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:4px">💰 Cost per Conversion (per Kanal)</h3>
-          <p style="font-size:11px;color:#64748b;margin-bottom:12px">Biaya iklan yang dikeluarkan untuk setiap order berhasil per kanal</p>
-          <div id="costPerConvContent"></div>
-        </div>
-      </div>
-      <div class="card" id="hourlyCard">
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:4px">⏰ Performa per Jam (Waktu Konversi)</h3>
-        <p style="font-size:11px;color:#64748b;margin-bottom:12px">Di jam berapa klik paling banyak menghasilkan order? Berguna untuk menentukan jadwal iklan.</p>
-        <div class="chart-container" style="height:200px"><canvas id="hourlyChart"></canvas></div>
-      </div>
-      <div class="card" id="funnelCard">
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:4px">🔄 Funnel Konversi per Kanal</h3>
-        <p style="font-size:11px;color:#64748b;margin-bottom:12px">Dari impresi/klik Meta Ads → Klik Shopee → Order. Melihat di mana "bocor" terjadi.</p>
-        <div id="funnelContent"></div>
-      </div>
-    </div>
-
-    <div id="tab-breakdown" class="hidden">
-      <div class="two-col">
+      <div class="grid2">
         <div class="card">
-          <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Komisi per Platform</h3>
-          <div class="chart-container"><canvas id="platformChart"></canvas></div>
+          <div class="card-head"><h2>Sumber Klik</h2></div>
+          <div class="chartbox"><canvas id="chSrc"></canvas></div>
         </div>
         <div class="card">
-          <h3 style="font-size:14px;font-weight:600;margin-bottom:4px">Top 10 Kategori Produk</h3>
-          <div class="chart-container"><canvas id="categoryChart"></canvas></div>
+          <div class="card-head"><h2>Wilayah Klik</h2></div>
+          <div class="chartbox"><canvas id="chRegion"></canvas></div>
         </div>
       </div>
+    </div>
+
+    <div class="panel" data-panel="harian">
+      <div class="strip" id="dailyStrip"></div>
+      <div class="card">
+        <div class="card-head"><h2>Komisi vs Biaya Iklan</h2><span class="sub" id="matureNote"></span></div>
+        <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>ROAS Harian</h2></div>
+          <div class="chartbox"><canvas id="chRoas"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Klik &amp; Konversi Harian</h2></div>
+          <div class="chartbox"><canvas id="chClicks"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Rincian Harian</h2></div>
+        <div class="tscroll"><table id="tblDaily"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="perkembangan">
+      <div id="trendEmpty" class="empty-state hidden">
+        <div class="ic">📈</div>
+        <h3>Butuh minimal dua snapshot</h3>
+        <p>Simpan snapshot secara berkala untuk melihat perkembangan akun ini dari waktu ke waktu.</p>
+      </div>
+      <div id="trendBody">
+        <p class="lagnote" id="trendBase"></p>
+        <div class="strip" id="trendStrip"></div>
+        <div class="card">
+          <div class="card-head"><h2>Laba &amp; Biaya Antar Periode</h2>
+            <span class="sub" id="trendRange"></span></div>
+          <div class="chartbox tall"><canvas id="chTrend"></canvas></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><h2>ROAS Berbayar vs Gabungan</h2></div>
+            <div class="chartbox"><canvas id="chTrendRoas"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Komposisi Keputusan</h2></div>
+            <div class="chartbox"><canvas id="chTrendMix"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Pergerakan Tag</h2>
+            <span class="sub">Dibanding snapshot pertama</span></div>
+          <p class="hint">Tag yang naik atau turun paling jauh sejak snapshot terlama pada akun ini.</p>
+          <div class="tscroll"><table id="tblMovers"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="rincian">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Komisi per Platform</h2></div>
+          <div class="chartbox"><canvas id="chPlat"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Kategori Teratas</h2></div>
+          <div class="chartbox"><canvas id="chCat"></canvas></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Komisi per Jam</h2></div>
+          <p class="hint">Jam pemesanan, bukan jam klik. Berguna untuk mengatur jadwal tayang iklan.</p>
+          <div class="chartbox"><canvas id="chHour"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Jeda Klik ke Pesanan</h2></div>
+          <p class="hint">Dasar pengaturan lag atribusi.</p>
+          <div class="chartbox"><canvas id="chLag"></canvas></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Produk Teratas</h2></div>
+          <div class="tscroll"><table id="tblProd"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Toko Teratas</h2></div>
+          <div class="tscroll"><table id="tblShop"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Kurva Penyelesaian Komisi</h2></div>
+        <p class="hint">Berapa persen pesanan masih berstatus Tertunda menurut umurnya.
+          Ini yang mendasari bobot komisi tertunda.</p>
+        <div class="chartbox"><canvas id="chSettle"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="matching">
+      <div class="card">
+        <div class="card-head"><h2>Iklan ke Tag</h2>
+          <button class="btn" id="btnMap2">Kelola Mapping</button></div>
+        <p class="hint">Metode bertanda <b>Lemah</b> atau <b>Tidak cocok</b> perlu diperiksa —
+          biaya iklannya bisa menempel ke tag yang keliru.</p>
+        <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="modal" id="mapModal">
+  <div class="modal-box">
+    <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate.
+      Mapping di sini selalu menang atas pencocokan otomatis, dan disimpan terpisah per akun.</p>
+    <div id="mapRows"></div>
+    <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>
+    <div style="margin-top:15px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn ghost" data-close>Batal</button>
+      <button class="btn primary" id="btnSaveMap">Simpan</button>
     </div>
   </div>
 </div>
 
-<script>
-// ═══ STATE ═══════════════════════════════════════════════════════════════════
-let affiliateData = [];
-let adsData = [];
-let clickData = [];
-let charts = {};
-let fileLog = [];
-
-// ═══ UTILITIES ══════════════════════════════════════════════════════════════
-function formatRp(n){if(n==null||isNaN(n))return'Rp 0';if(Math.abs(n)>=1e6)return'Rp '+(n/1e6).toFixed(1)+' jt';if(Math.abs(n)>=1e3)return'Rp '+(n/1e3).toFixed(0)+'k';return'Rp '+Math.round(n).toLocaleString('id-ID')}
-function formatNum(n){return Math.round(n||0).toLocaleString('id-ID')}
-function gv(id){return document.getElementById(id).value}
-function gn(id){return Number(document.getElementById(id).value)||0}
-function extractTag(name){const p=(name||'').split('|').map(s=>s.trim());return p.length>=3?p[2]:(name||'')}
-
-// Normalize string for fuzzy matching: lowercase, remove spaces/special chars
-function normalize(s) { return (s||'').toLowerCase().replace(/[^a-z0-9]/g, ''); }
-
-// Manual mapping table (user can edit this)
-const TAG_MAP = {
-  'telesinvideo2': 'TelesinGripvideo2',
-  'telesinvideo1': 'TelesinGripvideo2',
-  'telesinvideo3': 'TelesinGripvideo3',
-  'telesingrip': 'TelesinGripvideo2',
-  'lemariolymp': 'OlymplastLemari',
-  'lemariolympic': 'OlymplastLemari',
-  'minilayarportable': 'minilayarportable',
-  'helmrsixsolid': 'HelmRsixSolid',
-  'spinningreelokuma': 'Spinningreelokuma',
-  'seeouokacamatapolarized': 'seeouokacamatapolarized',
-  'vtomanjumperaki': 'VtomanJumperAki',
-};
-
-// Match an ad name to the best affiliate tag using fuzzy contains logic
-function matchAdToTag(adName, affiliateTags) {
-  const normAd = normalize(adName);
-  if (!normAd) return adName;
-
-  // Check manual mapping first
-  for (const [key, val] of Object.entries(TAG_MAP)) {
-    if (normAd.includes(key) || key.includes(normAd)) return val;
-  }
-
-  // Exact normalized match
-  for (const tag of affiliateTags) {
-    if (normalize(tag) === normAd) return tag;
-  }
-  // Ad name contains tag or tag contains ad name
-  for (const tag of affiliateTags) {
-    const normTag = normalize(tag);
-    if (normTag && normAd && (normAd.includes(normTag) || normTag.includes(normAd))) return tag;
-  }
-  // Partial overlap: check significant substring
-  for (const tag of affiliateTags) {
-    const normTag = normalize(tag);
-    if (normTag.length >= 5 && normAd.length >= 5) {
-      // Check overlapping substrings of length 5+
-      for (let len = Math.min(normTag.length, normAd.length); len >= 5; len--) {
-        for (let i = 0; i <= normAd.length - len; i++) {
-          if (normTag.includes(normAd.slice(i, i+len))) return tag;
-        }
-        break; // only try the longest possible match
-      }
-    }
-  }
-  return adName; // No match found, use original name
-}
-
-// ═══ AUTO-DETECT & UPLOAD ═══════════════════════════════════════════════════
-function detectFileType(headers) {
-  const h = headers.map(x => (x||'').toLowerCase());
-  // Affiliate Commission Report
-  if (h.some(x => x.includes('waktu pemesanan') || x.includes('id pemesanan'))) return 'affiliate';
-  if (h.some(x => x.includes('total komisi per pesanan') || x.includes('tag_link1'))) return 'affiliate';
-  // Meta Ads Report (campaign level OR ad level)
-  if (h.some(x => x.includes('reporting starts') || x.includes('campaign name') || x.includes('ad name'))) return 'ads';
-  if (h.some(x => x.includes('amount spent') || x.includes('link clicks'))) return 'ads';
-  // Website Click Report (Shopee)
-  if (h.some(x => x.includes('klik') && x.includes('tag')) || h.some(x => x.includes('website click'))) return 'clicks';
-  if (h.some(x => x.includes('click_time') || x.includes('waktu klik'))) return 'clicks';
-  return 'unknown';
-}
-
-function handleUpload(e) {
-  const files = e.target.files;
-  if (!files.length) return;
-  let loaded = 0;
-  fileLog = [];
-
-  for (let f of files) {
-    Papa.parse(f, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (result) => {
-        loaded++;
-        if (!result.data.length) { done(); return; }
-        const headers = Object.keys(result.data[0]);
-        const type = detectFileType(headers);
-
-        fileLog.push({ name: f.name, type, rows: result.data.length });
-
-        if (type === 'affiliate') {
-          affiliateData = affiliateData.concat(result.data);
-        } else if (type === 'ads') {
-          adsData = adsData.concat(result.data);
-        } else if (type === 'clicks') {
-          clickData = clickData.concat(result.data);
-        } else {
-          // Heuristic fallback: check if rows have Waktu Pemesanan values
-          if (result.data[0] && result.data[0]['Waktu Pemesanan']) {
-            affiliateData = affiliateData.concat(result.data);
-            fileLog[fileLog.length-1].type = 'affiliate';
-          } else if (result.data[0] && result.data[0]['Reporting starts']) {
-            adsData = adsData.concat(result.data);
-            fileLog[fileLog.length-1].type = 'ads';
-          }
-        }
-        done();
-      }
-    });
-  }
-
-  function done() {
-    // Show file tags
-    const tagsEl = document.getElementById('fileTags');
-    tagsEl.innerHTML = fileLog.map(f => {
-      const cls = f.type === 'affiliate' ? 'affiliate' : f.type === 'ads' ? 'ads' : f.type === 'clicks' ? 'clicks' : 'unknown';
-      const label = f.type === 'affiliate' ? 'Affiliate' : f.type === 'ads' ? 'Meta Ads' : f.type === 'clicks' ? 'Click Report' : 'Unknown';
-      return `<span class="file-tag ${cls}">${label}: ${f.name} (${formatNum(f.rows)} baris)</span>`;
-    }).join('');
-
-    let parts = [];
-    if (affiliateData.length) parts.push('Affiliate: ' + formatNum(affiliateData.length));
-    if (adsData.length) parts.push('Meta Ads: ' + formatNum(adsData.length));
-    if (clickData.length) parts.push('Clicks: ' + formatNum(clickData.length));
-    document.getElementById('uploadStatus').textContent = parts.join(' | ');
-
-    if (loaded === files.length) {
-      autoDetectDateRange();
-      recalculate();
-      showToast('File berhasil dimuat! ' + fileLog.length + ' file terdeteksi.');
-    }
-  }
-}
-
-function resetAll() {
-  affiliateData = []; adsData = []; clickData = []; fileLog = [];
-  document.getElementById('uploadStatus').textContent = '';
-  document.getElementById('fileTags').innerHTML = '';
-  document.getElementById('allFiles').value = '';
-  document.getElementById('mainContent').classList.add('hidden');
-  document.getElementById('emptyState').classList.remove('hidden');
-  const dic = document.getElementById('dataInfoCard'); if (dic) dic.style.display = 'none';
-  Object.values(charts).forEach(c => { try { c.destroy() } catch(e){} });
-  charts = {};
-}
-
-// ═══ MAIN CALCULATION ═══════════════════════════════════════════════════════
-function recalculate() {
-  if (!affiliateData.length && !adsData.length) return;
-  document.getElementById('emptyState').classList.add('hidden');
-  document.getElementById('mainContent').classList.remove('hidden');
-
-  const ds = gv('dateStart'), de = gv('dateEnd');
-  const ppn = gn('ppnMeta') / 100;
-  const thScale = gn('thScale'), thPantau = gn('thPantau');
-  const minDays = gn('thMinDays'), minSpend = gn('thMinSpend');
-
-  // Filter affiliate (exclude cancelled and unpaid)
-  const fAff = affiliateData.filter(r => {
-    const d = (r['Waktu Pemesanan']||'').split(' ')[0];
-    const status = r['Status Pesanan']||'';
-    return d >= ds && d <= de && status !== 'Dibatalkan' && status !== 'Belum Dibayar';
-  });
-
-  // Filter ads
-  const fAds = adsData.filter(r => {
-    const d = r['Reporting starts']||'';
-    return d >= ds && d <= de;
-  });
-
-  // Filter click data (Shopee clicks)
-  const fClicks = clickData.filter(r => {
-    const d = (r['click_time']||r['Waktu Klik']||r['Date']||'').split(' ')[0];
-    return d >= ds && d <= de;
-  });
-  const totalShopeeClicks = fClicks.length;
-
-  // ─── Data Info Card ───────────────────────────────────────────────────────
-  const dataInfoCard = document.getElementById('dataInfoCard');
-  if (dataInfoCard) {
-    dataInfoCard.style.display = '';
-    const formatDate = d => { const m = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des']; const p = d.split('-'); return parseInt(p[2]) + ' ' + m[parseInt(p[1])-1] + ' ' + p[0]; };
-    document.getElementById('dataInfoDateRange').innerHTML = `Mendeteksi data dari <strong style="color:#059669">${formatDate(ds)}</strong> hingga <strong style="color:#059669">${formatDate(de)}</strong>`;
-    const details = [];
-    if (affiliateData.length) details.push(`<span style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:12px;font-weight:500">✓ Affiliate Commission — ${formatNum(fAff.length)} transaksi</span>`);
-    if (adsData.length) details.push(`<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:12px;font-weight:500">✓ Meta Ads — ${formatNum(fAds.length)} baris</span>`);
-    if (clickData.length) details.push(`<span style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-weight:500">✓ Click Report — ${formatNum(fClicks.length)} klik</span>`);
-    if (!adsData.length) details.push(`<span style="background:#fee2e2;color:#991b1b;padding:4px 10px;border-radius:12px;font-weight:500">✗ Meta Ads belum diupload</span>`);
-    if (!clickData.length) details.push(`<span style="background:#f1f5f9;color:#475569;padding:4px 10px;border-radius:12px;font-weight:500">○ Click Report (opsional)</span>`);
-    document.getElementById('dataInfoDetails').innerHTML = details.join('');
-  }
-
-  // ─── KPI Metrics ──────────────────────────────────────────────────────────
-  const totalComm = fAff.reduce((s,r) => s + (parseFloat(r['Total Komisi per Pesanan(Rp)'])||0), 0);
-  const orderIds = new Set(fAff.map(r => r['ID Pemesanan']));
-  const totalOrders = orderIds.size;
-  const totalGMV = fAff.reduce((s,r) => s + (parseFloat(r['Nilai Pembelian(Rp)'])||0), 0);
-  const totalClicks = fAds.reduce((s,r) => s + (parseInt(r['Link clicks'])||0), 0);
-  const rawSpend = fAds.reduce((s,r) => s + (parseFloat(r['Amount spent (IDR)'])||0), 0);
-  const totalSpend = rawSpend * (1 + ppn);
-  const netProfit = totalComm - totalSpend;
-  const roas = totalSpend > 0 ? totalComm / totalSpend : 0;
-  const roi = totalSpend > 0 ? (netProfit / totalSpend) * 100 : 0;
-  const prodSold = fAff.reduce((s,r) => s + (parseInt(r['Jumlah'])||0), 0);
-
-  // ─── Per-Tag Analysis ─────────────────────────────────────────────────────
-  const tagComm = {};
-  fAff.forEach(r => {
-    const tag = r['Tag_link1']||'';
-    if (!tag) return;
-    if (!tagComm[tag]) tagComm[tag] = { comm: 0, orders: new Set(), gmv: 0, produk: 0 };
-    tagComm[tag].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    tagComm[tag].gmv += parseFloat(r['Nilai Pembelian(Rp)'])||0;
-    tagComm[tag].orders.add(r['ID Pemesanan']);
-    tagComm[tag].produk += parseInt(r['Jumlah'])||0;
-  });
-
-  // Get all affiliate tags for fuzzy matching
-  const allAffiliateTags = Object.keys(tagComm);
-
-  const tagSpend = {}, tagDays = {}, tagClicks = {};
-  const matchLog = []; // Track how each ad was matched
-  const matchSeen = new Set(); // Deduplicate
-  fAds.forEach(r => {
-    // Get the ad/campaign name from whichever column exists
-    let rawName = r['Ad name'] || r['Campaign name'] || '';
-    // For campaign-level: extract tag from "1204 | Mentok | TagName"
-    let tag, matchMethod = '';
-    if (rawName.includes('|')) {
-      tag = extractTag(rawName);
-      matchMethod = 'Pipe Split';
-    } else {
-      // For ad-level: use fuzzy match to affiliate tags
-      tag = matchAdToTag(rawName, allAffiliateTags);
-      // Determine match method
-      const normAd = normalize(rawName);
-      if (TAG_MAP[normAd] || Object.keys(TAG_MAP).some(k => normAd.includes(k) || k.includes(normAd))) {
-        matchMethod = 'TAG_MAP';
-      } else if (tag !== rawName) {
-        matchMethod = 'Fuzzy';
-      } else {
-        matchMethod = 'Tidak match';
-      }
-    }
-    // Log unique ad→tag matches
-    const matchKey = rawName + '→' + tag;
-    if (rawName && !matchSeen.has(matchKey)) {
-      matchSeen.add(matchKey);
-      matchLog.push({ adName: rawName, matchedTag: tag, method: matchMethod });
-    }
-    const sp = parseFloat(r['Amount spent (IDR)'])||0;
-    const cl = parseInt(r['Link clicks'])||0;
-    const date = r['Reporting starts'];
-    if (!tag) return;
-    if (!tagSpend[tag]) { tagSpend[tag] = 0; tagDays[tag] = new Set(); tagClicks[tag] = 0; }
-    tagSpend[tag] += sp;
-    tagClicks[tag] += cl;
-    if (sp > 0) tagDays[tag].add(date);
-  });
-
-  const allTags = new Set([...Object.keys(tagComm), ...Object.keys(tagSpend)]);
-  let tagResults = [];
-  allTags.forEach(tag => {
-    if (!tag) return;
-    const c = tagComm[tag] || { comm: 0, orders: new Set(), gmv: 0, produk: 0 };
-    const sp = (tagSpend[tag]||0) * (1+ppn);
-    const days = tagDays[tag] ? tagDays[tag].size : 0;
-    const clicks = tagClicks[tag]||0;
-    const net = c.comm - sp;
-    const r = sp > 0 ? c.comm / sp : (c.comm > 0 ? Infinity : 0);
-    const ords = c.orders ? c.orders.size : 0;
-    const produk = c.produk || 0;
-    const cpc = clicks > 0 ? sp / clicks : 0;
-    const convRate = clicks > 0 ? (ords / clicks * 100) : 0;
-    const avgComm = ords > 0 ? c.comm / ords : 0;
-    let status = 'evaluasi', label = 'Belum cukup data';
-    if (sp >= minSpend || days >= minDays) {
-      if (sp === 0 && c.comm > 0) { status = 'organik'; label = 'ORGANIK'; }
-      else if (r >= thScale) { status = 'scale'; label = 'SCALE UP'; }
-      else if (r >= thPantau) { status = 'pantau'; label = 'PANTAU'; }
-      else { status = 'matikan'; label = 'MATIKAN'; }
-    }
-    tagResults.push({ tag, comm: c.comm, spend: sp, net, roas: r, orders: ords, days, clicks, status, label, gmv: c.gmv, produk, cpc, convRate, avgComm });
-  });
-  tagResults.sort((a,b) => b.comm - a.comm);
-
-  // ─── Daily ────────────────────────────────────────────────────────────────
-  const dailyMap = {};
-  fAff.forEach(r => {
-    const d = (r['Waktu Pemesanan']||'').split(' ')[0]; if (!d) return;
-    if (!dailyMap[d]) dailyMap[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
-    dailyMap[d].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    dailyMap[d].gmv += parseFloat(r['Nilai Pembelian(Rp)'])||0;
-    dailyMap[d].orders.add(r['ID Pemesanan']);
-  });
-  fAds.forEach(r => {
-    const d = r['Reporting starts']; if (!d) return;
-    if (!dailyMap[d]) dailyMap[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
-    dailyMap[d].spend += (parseFloat(r['Amount spent (IDR)'])||0) * (1+ppn);
-    dailyMap[d].clicks += parseInt(r['Link clicks'])||0;
-  });
-  const daily = Object.entries(dailyMap).map(([date,v]) => ({
-    date, comm: v.comm, spend: v.spend, net: v.comm-v.spend,
-    roas: v.spend>0 ? v.comm/v.spend : 0, orders: v.orders.size, clicks: v.clicks, gmv: v.gmv
-  })).sort((a,b) => a.date.localeCompare(b.date));
-
-  // ─── Per-Tag Daily (for Tag Harian tab) ───────────────────────────────────
-  const tagDailyMap = {}; // { tag: { date: { comm, spend, clicks, orders } } }
-  fAff.forEach(r => {
-    const d = (r['Waktu Pemesanan']||'').split(' ')[0]; if (!d) return;
-    const tag = r['Tag_link1']||''; if (!tag) return;
-    if (!tagDailyMap[tag]) tagDailyMap[tag] = {};
-    if (!tagDailyMap[tag][d]) tagDailyMap[tag][d] = { comm: 0, spend: 0, clicks: 0, orders: new Set() };
-    tagDailyMap[tag][d].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    tagDailyMap[tag][d].orders.add(r['ID Pemesanan']);
-  });
-  fAds.forEach(r => {
-    const d = r['Reporting starts']; if (!d) return;
-    let rawName = r['Ad name'] || r['Campaign name'] || '';
-    let tag;
-    if (rawName.includes('|')) { tag = extractTag(rawName); }
-    else { tag = matchAdToTag(rawName, allAffiliateTags); }
-    if (!tag) return;
-    if (!tagDailyMap[tag]) tagDailyMap[tag] = {};
-    if (!tagDailyMap[tag][d]) tagDailyMap[tag][d] = { comm: 0, spend: 0, clicks: 0, orders: new Set() };
-    tagDailyMap[tag][d].spend += (parseFloat(r['Amount spent (IDR)'])||0) * (1+ppn);
-    tagDailyMap[tag][d].clicks += parseInt(r['Link clicks'])||0;
-  });
-
-  // Per-tag platform breakdown (from which channel orders come)
-  const tagPlatformMap = {}; // { tag: { platform: { orders: Set, comm: 0 } } }
-  fAff.forEach(r => {
-    const tag = r['Tag_link1']||''; if (!tag) return;
-    const plat = r['Platform']||'Unknown';
-    if (!tagPlatformMap[tag]) tagPlatformMap[tag] = {};
-    if (!tagPlatformMap[tag][plat]) tagPlatformMap[tag][plat] = { orders: new Set(), comm: 0 };
-    tagPlatformMap[tag][plat].orders.add(r['ID Pemesanan']);
-    tagPlatformMap[tag][plat].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-  });
-
-  // Per-tag ads platform spend breakdown (from Meta Ads Platform column)
-  const tagAdsPlatformMap = {}; // { tag: { platform: { spend, clicks } } }
-  fAds.forEach(r => {
-    const adsPlatform = r['Platform'] || '';
-    if (!adsPlatform) return;
-    let rawName = r['Ad name'] || r['Campaign name'] || '';
-    let tag;
-    if (rawName.includes('|')) { tag = extractTag(rawName); }
-    else { tag = matchAdToTag(rawName, allAffiliateTags); }
-    if (!tag) return;
-    if (!tagAdsPlatformMap[tag]) tagAdsPlatformMap[tag] = {};
-    if (!tagAdsPlatformMap[tag][adsPlatform]) tagAdsPlatformMap[tag][adsPlatform] = { spend: 0, clicks: 0, impressions: 0 };
-    tagAdsPlatformMap[tag][adsPlatform].spend += (parseFloat(r['Amount spent (IDR)'])||0) * (1+ppn);
-    tagAdsPlatformMap[tag][adsPlatform].clicks += parseInt(r['Link clicks'])||0;
-    tagAdsPlatformMap[tag][adsPlatform].impressions += parseInt(r['Impressions'])||0;
-  });
-
-  // Store globally for tag daily rendering
-  window._tagDailyData = tagDailyMap;
-  window._tagPlatformData = tagPlatformMap;
-  window._tagAdsPlatformData = tagAdsPlatformMap;
-  window._tagResults = tagResults;
-  window._dateRange = { ds, de };
-
-  // ─── Platform & Category ──────────────────────────────────────────────────
-  const platMap = {};
-  fAff.forEach(r => {
-    const p = r['Platform']||'Unknown';
-    if (!platMap[p]) platMap[p] = { comm: 0, orders: new Set() };
-    platMap[p].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    platMap[p].orders.add(r['ID Pemesanan']);
-  });
-  const platforms = Object.entries(platMap).map(([n,v]) => ({ name: n, comm: v.comm })).sort((a,b) => b.comm-a.comm);
-
-  const catMap = {};
-  fAff.forEach(r => {
-    const c = r['L1 Kategori Global']||'Lainnya';
-    if (!catMap[c]) catMap[c] = { comm: 0 };
-    catMap[c].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-  });
-  const categories = Object.entries(catMap).map(([n,v]) => ({ name: n, comm: v.comm })).sort((a,b) => b.comm-a.comm).slice(0,10);
-
-  // ─── Product Rankings ─────────────────────────────────────────────────────
-  const prodMap = {};
-  fAff.forEach(r => {
-    const name = r['Nama Barange']||'';
-    if (!name) return;
-    if (!prodMap[name]) prodMap[name] = { comm: 0, qty: 0, gmv: 0 };
-    prodMap[name].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    prodMap[name].qty += parseInt(r['Jumlah'])||0;
-    prodMap[name].gmv += parseFloat(r['Nilai Pembelian(Rp)'])||0;
-  });
-  const topByComm = Object.entries(prodMap).map(([n,v]) => ({ name: n, ...v })).sort((a,b) => b.comm-a.comm).slice(0,10);
-  const topByQty = Object.entries(prodMap).map(([n,v]) => ({ name: n, ...v })).sort((a,b) => b.qty-a.qty).slice(0,10);
-
-  // ─── RENDER ALL ───────────────────────────────────────────────────────────
-  renderKPIs({ totalComm, netProfit, totalSpend, totalClicks, totalShopeeClicks, roas, totalOrders, prodSold, totalGMV, roi, ppn });
-  renderDecisions(tagResults);
-  renderRankings(topByComm, topByQty, tagResults);
-  renderCampaignTable(tagResults);
-  renderMatchingTable(matchLog);
-  renderPeriodDecisions(tagResults, tagDailyMap, de);
-  renderDailyChart(daily);
-  renderROASChart(daily);
-  renderCalendar(daily, ds, de);
-  renderTagChart(tagResults);
-  renderPlatformChart(platforms);
-  renderCategoryChart(categories);
-  renderTrafficCharts(platforms, tagResults);
-  renderPlacementAnalysis(fAds, tagResults, ppn);
-  renderCorrelation(fAff, fAds, fClicks, tagResults, ppn);
-  populateTagDailySelect(tagResults);
-  renderTagTrendTable(tagResults, tagDailyMap, ds, de);
-}
-
-// ═══ RENDER FUNCTIONS ═══════════════════════════════════════════════════════
-function renderKPIs(m) {
-  const rc = m.roas>=2?'#059669':m.roas>=1?'#d97706':'#dc2626';
-  const nc = m.netProfit>=0?'#16a34a':'#dc2626';
-  const ric = m.roi>=0?'#16a34a':'#dc2626';
-  const commRate = m.totalGMV > 0 ? (m.totalComm / m.totalGMV * 100).toFixed(2) : 0;
-  const convRate = m.totalClicks > 0 ? (m.totalOrders / m.totalClicks * 100).toFixed(2) : 0;
-  const avgOrder = m.totalOrders > 0 ? m.totalGMV / m.totalOrders : 0;
-  document.getElementById('kpiGrid').innerHTML = `
-    <div class="kpi" style="background:#059669"><div class="label">Total Komisi</div><div class="value">${formatRp(m.totalComm)}</div><div class="sub">Rate: ${commRate}% dari GMV</div></div>
-    <div class="kpi" style="background:${nc}"><div class="label">Net Profit</div><div class="value">${formatRp(m.netProfit)}</div><div class="sub">Margin: ${m.totalComm>0?((m.netProfit/m.totalComm)*100).toFixed(1):0}%</div></div>
-    <div class="kpi" style="background:#2563eb"><div class="label">Total Spend</div><div class="value">${formatRp(m.totalSpend)}</div>${m.ppn>0?'<div class="sub">+PPN '+(m.ppn*100).toFixed(0)+'%</div>':''}</div>
-    <div class="kpi" style="background:#7c3aed"><div class="label">Total Klik Meta</div><div class="value">${formatNum(m.totalClicks)}</div><div class="sub">Conv: ${convRate}%</div></div>
-    <div class="kpi" style="background:#f59e0b"><div class="label">Klik Shopee</div><div class="value">${formatNum(m.totalShopeeClicks)}</div>${m.totalClicks>0?'<div class="sub">Rasio: '+(m.totalShopeeClicks/m.totalClicks*100).toFixed(1)+'%</div>':''}</div>
-    <div class="kpi" style="background:${rc}"><div class="label">ROAS</div><div class="value">${m.roas.toFixed(2)}x</div><div class="sub">${m.roas>=2?'Bagus':'Perlu perhatian'}</div></div>
-    <div class="kpi" style="background:#4f46e5"><div class="label">Total Pesanan</div><div class="value">${formatNum(m.totalOrders)}</div><div class="sub">Avg ${formatRp(avgOrder)}/order</div></div>
-    <div class="kpi" style="background:#0d9488"><div class="label">Produk Terjual</div><div class="value">${formatNum(m.prodSold)}</div><div class="sub">${m.totalOrders>0?(m.prodSold/m.totalOrders).toFixed(1):0} pcs/order</div></div>
-    <div class="kpi" style="background:#db2777"><div class="label">Total GMV</div><div class="value">${formatRp(m.totalGMV)}</div></div>
-    <div class="kpi" style="background:${ric}"><div class="label">ROI</div><div class="value">${m.roi.toFixed(1)}%</div></div>
-  `;
-}
-
-function renderDecisions(tags) {
-  const scale = tags.filter(t=>t.status==='scale');
-  const pantau = tags.filter(t=>t.status==='pantau');
-  const matikan = tags.filter(t=>t.status==='matikan');
-  const organik = tags.filter(t=>t.status==='organik');
-
-  function items(arr, color) {
-    if (!arr.length) return '<p style="font-size:12px;color:#94a3b8">Tidak ada</p>';
-    return arr.slice(0,8).map(i => `<div class="item"><span class="tag">${i.tag}</span><span class="roas" style="color:${color}">${i.roas===Infinity?'Organik':i.roas.toFixed(1)+'x'}</span></div>`).join('')
-      + (arr.length>8?`<p style="font-size:11px;color:#94a3b8">+${arr.length-8} lainnya</p>`:'');
-  }
-
-  document.getElementById('decisionGrid').innerHTML = `
-    <div class="decision-card" style="background:#f0fdf4;border-color:#bbf7d0"><h4 style="color:#166534">🔥 SCALE UP (${scale.length})</h4>${items(scale,'#166534')}</div>
-    <div class="decision-card" style="background:#fffbeb;border-color:#fde68a"><h4 style="color:#92400e">⚠️ PANTAU (${pantau.length})</h4>${items(pantau,'#92400e')}</div>
-    <div class="decision-card" style="background:#fef2f2;border-color:#fecaca"><h4 style="color:#991b1b">🛑 MATIKAN (${matikan.length})</h4>${items(matikan,'#991b1b')}</div>
-  `;
-
-  if (organik.length) {
-    document.getElementById('organikSection').innerHTML = `
-      <div class="organik-section"><h4 style="font-size:14px;font-weight:700;color:#5b21b6">🌱 ORGANIK (${organik.length})</h4>
-      <div class="organik-grid">${organik.map(i=>`<div class="organik-item"><div class="name">${i.tag}</div><div class="val">${formatRp(i.comm)}</div><div class="orders">${i.orders} orders</div></div>`).join('')}</div></div>`;
-  } else {
-    document.getElementById('organikSection').innerHTML = '';
-  }
-}
-
-function renderRankings(topByComm, topByQty, tagResults) {
-  // Top 10 Tags by Commission
-  const tagCard = document.getElementById('rankTagCard');
-  const top10Tags = tagResults.filter(t => t.tag && t.comm > 0).slice(0, 10);
-  if (top10Tags.length) {
-    tagCard.style.display = '';
-    const maxTagComm = top10Tags[0].comm;
-    document.getElementById('rankTagGrid').innerHTML = top10Tags.map((t, i) => {
-      const pct = maxTagComm > 0 ? (t.comm / maxTagComm * 100) : 0;
-      return `<div class="rank-item">
-        <div class="rank-num">#${i+1}  <strong>${t.tag || '&lt;Tanpa Tag&gt;'}</strong></div>
-        <div class="rank-sub">${formatNum(t.clicks)} Klik &bull; ${formatNum(t.orders)} Pesanan</div>
-        <div class="rank-badge">Avg ${formatRp(t.avgComm)}</div>
-        <div class="rank-value">${formatRp(t.comm)}</div>
-        <div class="rank-bar"><div class="rank-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#059669,#10b981)"></div></div>
-      </div>`;
-    }).join('');
-  } else { tagCard.style.display = 'none'; }
-
-  // Top 10 Products by Commission
-  const commCard = document.getElementById('rankProdCommCard');
-  if (topByComm.length) {
-    commCard.style.display = '';
-    const maxComm = topByComm[0].comm;
-    document.getElementById('rankProdCommGrid').innerHTML = topByComm.map((p, i) => {
-      const pct = maxComm > 0 ? (p.comm / maxComm * 100) : 0;
-      return `<div class="rank-item">
-        <div class="rank-num">#${i+1}  <strong style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom" title="${p.name}">${p.name}</strong></div>
-        <div class="rank-sub">GMV: ${formatRp(p.gmv)}</div>
-        <div class="rank-badge">Terjual: ${formatNum(p.qty)} Qty</div>
-        <div class="rank-value">${formatRp(p.comm)}</div>
-        <div class="rank-bar"><div class="rank-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#059669,#10b981)"></div></div>
-      </div>`;
-    }).join('');
-  } else { commCard.style.display = 'none'; }
-
-  // Top 10 Products by Qty
-  const qtyCard = document.getElementById('rankProdQtyCard');
-  if (topByQty.length) {
-    qtyCard.style.display = '';
-    const maxQty = topByQty[0].qty;
-    document.getElementById('rankProdQtyGrid').innerHTML = topByQty.map((p, i) => {
-      const pct = maxQty > 0 ? (p.qty / maxQty * 100) : 0;
-      return `<div class="rank-item">
-        <div class="rank-num">#${i+1}  <strong style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom" title="${p.name}">${p.name}</strong></div>
-        <div class="rank-sub">GMV: ${formatRp(p.gmv)}</div>
-        <div class="rank-badge">Komisi: ${formatRp(p.comm)}</div>
-        <div class="rank-value">${formatNum(p.qty)} <span style="font-size:11px;color:#64748b">Qty</span></div>
-        <div class="rank-bar"><div class="rank-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#2563eb,#60a5fa)"></div></div>
-      </div>`;
-    }).join('');
-  } else { qtyCard.style.display = 'none'; }
-
-  // Top 10 Tags by ROAS (only those with ads spend)
-  const roasCard = document.getElementById('rankRoasCard');
-  const hideOrg = document.getElementById('globalHideOrganik') && document.getElementById('globalHideOrganik').checked;
-  const roasTags = tagResults.filter(t => t.spend > 0 && t.roas !== Infinity && t.roas > 0).sort((a,b) => b.roas - a.roas).slice(0, 10);
-  if (roasTags.length) {
-    roasCard.style.display = '';
-    const maxRoas = roasTags[0].roas;
-    document.getElementById('rankRoasGrid').innerHTML = roasTags.map((t, i) => {
-      const pct = maxRoas > 0 ? (t.roas / maxRoas * 100) : 0;
-      const roasColor = t.roas >= 2 ? '#059669' : t.roas >= 1 ? '#d97706' : '#dc2626';
-      return `<div class="rank-item">
-        <div class="rank-num">#${i+1}  <strong>${t.tag}</strong></div>
-        <div class="rank-sub">Spend: ${formatRp(t.spend)} &bull; Komisi: ${formatRp(t.comm)}</div>
-        <div class="rank-badge">${t.days} hari &bull; ${formatNum(t.clicks)} klik</div>
-        <div class="rank-value" style="color:${roasColor}">${t.roas.toFixed(2)}x</div>
-        <div class="rank-bar"><div class="rank-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#d97706,#f59e0b)"></div></div>
-      </div>`;
-    }).join('');
-  } else { roasCard.style.display = 'none'; }
-}
-
-let campaignSortCol = 'comm', campaignSortDir = 'desc';
-let currentPeriodFilter = 'all';
-
-function renderCampaignTable(tags) {
-  window._lastCampaignTags = tags;
-  renderCampaignTableSorted(tags);
-}
-
-function renderCampaignTableSorted(tags) {
-  // Sort
-  const col = campaignSortCol;
-  const dir = campaignSortDir === 'asc' ? 1 : -1;
-  const sorted = [...tags].sort((a, b) => {
-    let va = a[col], vb = b[col];
-    if (col === 'tag') return dir * (va||'').localeCompare(vb||'');
-    if (col === 'status') return dir * (va||'').localeCompare(vb||'');
-    if (va === Infinity) va = 999999;
-    if (vb === Infinity) vb = 999999;
-    return dir * ((va||0) - (vb||0));
-  });
-
-  const cols = [
-    { key:'tag', label:'Tag', align:'left' },
-    { key:'spend', label:'Spend', align:'right' },
-    { key:'comm', label:'Komisi', align:'right' },
-    { key:'roas', label:'ROAS', align:'center' },
-    { key:'net', label:'Net', align:'right' },
-    { key:'gmv', label:'GMV', align:'right' },
-    { key:'cpc', label:'CPC', align:'right' },
-    { key:'convRate', label:'Conv%', align:'right' },
-    { key:'avgComm', label:'Avg Komisi', align:'right' },
-    { key:'produk', label:'Produk', align:'right' },
-    { key:'orders', label:'Orders', align:'right' },
-    { key:'clicks', label:'Klik', align:'right' },
-    { key:'days', label:'Hari', align:'right' },
-    { key:'status', label:'Keputusan', align:'center' },
-  ];
-
-  let html = '<thead><tr>';
-  cols.forEach(c => {
-    const sortCls = campaignSortCol === c.key ? (campaignSortDir === 'asc' ? 'sort-asc' : 'sort-desc') : '';
-    html += `<th class="sortable ${sortCls}" style="text-align:${c.align}" onclick="sortCampaignTable('${c.key}')">${c.label}</th>`;
-  });
-  html += '</tr></thead><tbody>';
-
-  sorted.forEach(t => {
-    const rc = t.roas===Infinity?'#7c3aed':t.roas>=2?'#059669':t.roas>=1?'#d97706':'#dc2626';
-    const rt = t.roas===Infinity?'Organik':t.roas===0?'-':t.roas.toFixed(2)+'x';
-    const nc = t.net>=0?'#059669':'#dc2626';
-    const bg = t.status==='matikan'?'#fef2f2':t.status==='scale'?'#f0fdf4':'';
-    const isOrganik = t.roas === Infinity || (t.spend === 0 && t.comm > 0);
-    html += `<tr style="background:${bg}" ${isOrganik ? 'data-organik="true"' : ''}><td style="font-weight:600">${t.tag}</td><td style="text-align:right">${t.spend>0?formatRp(t.spend):'<span style="color:#d1d5db">-</span>'}</td><td style="text-align:right;color:#059669;font-weight:600">${formatRp(t.comm)}</td><td style="text-align:center;color:${rc};font-weight:700">${rt}</td><td style="text-align:right;color:${nc};font-weight:600">${t.net>=0?'+':''}${formatRp(t.net)}</td><td style="text-align:right">${formatRp(t.gmv)}</td><td style="text-align:right">${t.cpc>0?formatRp(t.cpc):'—'}</td><td style="text-align:right">${t.convRate>0?t.convRate.toFixed(1)+'%':'—'}</td><td style="text-align:right">${t.avgComm>0?formatRp(t.avgComm):'—'}</td><td style="text-align:right">${formatNum(t.produk)}</td><td style="text-align:right">${t.orders}</td><td style="text-align:right">${formatNum(t.clicks)}</td><td style="text-align:right">${t.days}</td><td style="text-align:center"><span class="badge badge-${t.status}">${t.label}</span></td></tr>`;
-  });
-  document.getElementById('campaignTable').innerHTML = html + '</tbody>';
-  // Re-apply organik hide state after re-render
-  const campCb = document.getElementById('hideOrganikCampaign');
-  if (campCb && campCb.checked) toggleOrganikCampaign();
-}
-
-function sortCampaignTable(col) {
-  if (campaignSortCol === col) {
-    campaignSortDir = campaignSortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    campaignSortCol = col;
-    campaignSortDir = col === 'tag' ? 'asc' : 'desc';
-  }
-  if (currentPeriodFilter === 'all') {
-    renderCampaignTableSorted(window._lastCampaignTags || []);
-  } else {
-    applyPeriodFilter(currentPeriodFilter);
-  }
-}
-
-function setPeriodFilter(days) {
-  currentPeriodFilter = days;
-  // Update button active state
-  document.querySelectorAll('.period-btn').forEach(btn => {
-    const btnVal = btn.textContent.includes('Semua') ? 'all' : parseInt(btn.textContent);
-    btn.classList.toggle('active', btnVal === days);
-  });
-  if (days === 'all') {
-    renderCampaignTableSorted(window._lastCampaignTags || []);
-    return;
-  }
-  applyPeriodFilter(days);
-}
-
-function applyPeriodFilter(days) {
-  const tagDailyMap = window._tagDailyData || {};
-  const { de } = window._dateRange || {};
-  if (!de) return;
-
-  const thScale = gn('thScale'), thPantau = gn('thPantau');
-  const ppn = gn('ppnMeta') / 100;
-
-  // Get dates for last N days
-  const dates = [];
-  const end = new Date(de);
-  for (let i = 0; i < days; i++) {
-    const d = new Date(end);
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().split('T')[0]);
-  }
-
-  const allTags = window._lastCampaignTags || [];
-  const filtered = allTags.map(t => {
-    const daily = tagDailyMap[t.tag] || {};
-    let comm = 0, spend = 0, clicks = 0, ordersSet = new Set();
-    dates.forEach(d => {
-      if (daily[d]) {
-        comm += daily[d].comm || 0;
-        spend += daily[d].spend || 0;
-        clicks += daily[d].clicks || 0;
-        if (daily[d].orders) daily[d].orders.forEach(o => ordersSet.add(o));
-      }
-    });
-    const orders = ordersSet.size;
-    const net = comm - spend;
-    const roas = spend > 0 ? comm / spend : (comm > 0 ? Infinity : 0);
-    const cpc = clicks > 0 ? spend / clicks : 0;
-    const convRate = clicks > 0 ? (orders / clicks * 100) : 0;
-    const avgComm = orders > 0 ? comm / orders : 0;
-    let status = 'evaluasi', label = 'Belum cukup data';
-    const activeDays = dates.filter(d => daily[d] && (daily[d].comm > 0 || daily[d].spend > 0)).length;
-    if (spend > 0 || activeDays >= 1) {
-      if (spend === 0 && comm > 0) { status = 'organik'; label = 'ORGANIK'; }
-      else if (roas >= thScale) { status = 'scale'; label = 'SCALE UP'; }
-      else if (roas >= thPantau) { status = 'pantau'; label = 'PANTAU'; }
-      else { status = 'matikan'; label = 'MATIKAN'; }
-    }
-    return { tag: t.tag, comm, spend, net, roas, orders, days: activeDays, clicks, status, label, gmv: t.gmv, produk: t.produk, cpc, convRate, avgComm };
-  }).filter(t => t.comm > 0 || t.spend > 0);
-
-  renderCampaignTableSorted(filtered);
-}
-
-function renderMatchingTable(matchLog) {
-  const card = document.getElementById('matchingCard');
-  const tbl = document.getElementById('matchingTable');
-  if (!matchLog.length) { card.style.display = 'none'; return; }
-  card.style.display = '';
-  let html = `<thead><tr><th>Ad Name (Meta)</th><th>Matched Tag (Affiliate)</th><th style="text-align:center">Metode</th><th style="text-align:center">Status</th></tr></thead><tbody>`;
-  matchLog.forEach(m => {
-    const isMatched = m.method !== 'Tidak match';
-    const methodColor = m.method === 'TAG_MAP' ? '#7c3aed' : m.method === 'Fuzzy' ? '#2563eb' : m.method === 'Pipe Split' ? '#059669' : '#dc2626';
-    const statusIcon = isMatched ? '✅' : '❌';
-    const rowBg = !isMatched ? '#fef2f2' : '';
-    html += `<tr style="background:${rowBg}">
-      <td style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.adName}">${m.adName}</td>
-      <td style="font-weight:600;color:#059669;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.matchedTag}">${isMatched ? m.matchedTag : '<span style="color:#94a3b8">—</span>'}</td>
-      <td style="text-align:center"><span style="font-size:10px;font-weight:600;color:${methodColor};background:${methodColor}15;padding:2px 6px;border-radius:8px">${m.method}</span></td>
-      <td style="text-align:center">${statusIcon}</td>
-    </tr>`;
-  });
-  html += '</tbody>';
-  tbl.innerHTML = html;
-}
-
-function renderPeriodDecisions(tagResults, tagDailyMap, dateEnd) {
-  const card = document.getElementById('periodDecisionCard');
-  const tbl = document.getElementById('periodDecisionTable');
-  const activeTags = tagResults.filter(t => t.comm > 0 || t.spend > 0);
-  if (!activeTags.length) { card.style.display = 'none'; return; }
-  card.style.display = '';
-
-  const thScale = gn('thScale'), thPantau = gn('thPantau');
-  const ppn = gn('ppnMeta') / 100;
-
-  // Helper: get dates for last N days from dateEnd
-  function getLastNDates(n) {
-    const dates = [];
-    const end = new Date(dateEnd);
-    for (let i = 0; i < n; i++) {
-      const d = new Date(end);
-      d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().split('T')[0]);
-    }
-    return dates;
-  }
-
-  const today = [dateEnd];
-  const last3 = getLastNDates(3);
-  const last7 = getLastNDates(7);
-  const last15 = getLastNDates(15);
-  const last30 = getLastNDates(30);
-
-  function calcPeriod(tag, dates) {
-    const daily = tagDailyMap[tag] || {};
-    let comm = 0, spend = 0;
-    dates.forEach(d => {
-      if (daily[d]) {
-        comm += daily[d].comm || 0;
-        spend += daily[d].spend || 0;
-      }
-    });
-    const roas = spend > 0 ? comm / spend : (comm > 0 ? Infinity : 0);
-    let decision, cls;
-    if (comm === 0 && spend === 0) { decision = '—'; cls = ''; }
-    else if (spend === 0 && comm > 0) { decision = 'ORGANIK'; cls = 'badge-organik'; }
-    else if (roas >= thScale) { decision = 'SCALE'; cls = 'badge-scale'; }
-    else if (roas >= thPantau) { decision = 'PANTAU'; cls = 'badge-pantau'; }
-    else { decision = 'MATIKAN'; cls = 'badge-matikan'; }
-    return { roas, decision, cls, comm, spend };
-  }
-
-  let html = `<thead><tr><th>Tag</th><th style="text-align:center">Hari Ini</th><th style="text-align:center">3 Hari</th><th style="text-align:center">7 Hari</th><th style="text-align:center">15 Hari</th><th style="text-align:center">30 Hari</th><th style="text-align:center">Insight</th></tr></thead><tbody>`;
-
-  activeTags.forEach(t => {
-    const p1 = calcPeriod(t.tag, today);
-    const p3 = calcPeriod(t.tag, last3);
-    const p7 = calcPeriod(t.tag, last7);
-    const p15 = calcPeriod(t.tag, last15);
-    const p30 = calcPeriod(t.tag, last30);
-
-    // Generate insight
-    let insight = '';
-    if (p1.decision === 'MATIKAN' && p3.decision === 'SCALE') insight = '⚠️ Turun hari ini';
-    else if (p1.decision === 'SCALE' && p3.decision === 'MATIKAN') insight = '🚀 Naik hari ini';
-    else if (p3.decision === 'SCALE' && p30.decision === 'MATIKAN') insight = '📈 Mulai bagus';
-    else if (p3.decision === 'MATIKAN' && p30.decision === 'SCALE') insight = '📉 Sedang turun';
-    else if (p1.decision === p3.decision && p3.decision === p15.decision && p15.decision === 'SCALE') insight = '🔥 Konsisten bagus';
-    else if (p1.decision === p3.decision && p3.decision === p15.decision && p15.decision === 'MATIKAN') insight = '💀 Konsisten jelek';
-    else if (p1.decision === '—' && p3.decision !== '—') insight = '⏸️ Tidak aktif hari ini';
-
-    function cell(p) {
-      if (p.decision === '—') return '<td style="text-align:center;color:#d1d5db">—</td>';
-      const roasText = p.roas === Infinity ? '' : ' (' + p.roas.toFixed(1) + 'x)';
-      return `<td style="text-align:center"><span class="badge ${p.cls}">${p.decision}</span><div style="font-size:9px;color:#64748b;margin-top:2px">${roasText}</div></td>`;
-    }
-
-    // Check if all periods are organik
-    const allOrganik = [p1,p3,p7,p15,p30].every(p => p.decision === 'ORGANIK' || p.decision === '—');
-
-    html += `<tr class="${allOrganik?'organik-row':''}"><td style="font-weight:600">${t.tag}</td>${cell(p1)}${cell(p3)}${cell(p7)}${cell(p15)}${cell(p30)}<td style="text-align:center;font-size:11px">${insight}</td></tr>`;
-  });
-
-  html += '</tbody>';
-  tbl.innerHTML = html;
-}
-
-function renderDailyChart(daily) {
-  if (charts.dailyLine) charts.dailyLine.destroy();
-  charts.dailyLine = new Chart(document.getElementById('dailyLineChart').getContext('2d'), {
-    type:'line', data:{
-      labels:daily.map(d=>d.date.slice(5)),
-      datasets:[
-        {label:'Komisi',data:daily.map(d=>d.comm),borderColor:'#10b981',backgroundColor:'rgba(16,185,129,.1)',fill:true,tension:.3,pointRadius:1},
-        {label:'Spend',data:daily.map(d=>d.spend),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.05)',fill:true,tension:.3,pointRadius:1},
-        {label:'Net Profit',data:daily.map(d=>d.net),borderColor:'#3b82f6',borderDash:[5,5],tension:.3,pointRadius:0,fill:false}
-      ]
-    }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{y:{ticks:{callback:v=>formatRp(v),font:{size:10}}},x:{ticks:{font:{size:10}}}}}
-  });
-}
-
-function renderROASChart(daily) {
-  if (charts.roasBar) charts.roasBar.destroy();
-  charts.roasBar = new Chart(document.getElementById('roasBarChart').getContext('2d'), {
-    type:'bar', data:{
-      labels:daily.map(d=>d.date.slice(8)),
-      datasets:[{label:'ROAS',data:daily.map(d=>d.roas),backgroundColor:daily.map(d=>d.roas>=2?'#10b981':d.roas>=1?'#f59e0b':'#ef4444'),borderRadius:4}]
-    }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v.toFixed(1)+'x',font:{size:10}}},x:{ticks:{font:{size:10}}}}}
-  });
-}
-
-function renderCalendar(daily, ds, de) {
-  const start=new Date(ds),end=new Date(de);
-  let html=['MIN','SEN','SEL','RAB','KAM','JUM','SAB'].map(d=>`<div class="cal-header">${d}</div>`).join('');
-  for(let i=0;i<start.getDay();i++) html+='<div></div>';
-  const cur=new Date(start);
-  while(cur<=end){
-    const ds2=cur.toISOString().split('T')[0];
-    const dd=daily.find(d=>d.date===ds2);
-    const net=dd?dd.net:0;
-    const cls=net>0?'positive':net<0?'negative':'';
-    const dateLabel = cur.getDate() + ' ' + ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][cur.getMonth()] + ' ' + cur.getFullYear();
-    const tooltipData = dd ? `data-date="${dateLabel}" data-clicks="${formatNum(dd.clicks)}" data-orders="${dd.orders}" data-spend="${formatRp(dd.spend)}" data-comm="${formatRp(dd.comm)}" data-gmv="${formatRp(dd.gmv||0)}" data-profit="${(dd.net>=0?'+':'')+(formatRp(dd.net))}"` : '';
-    html+=`<div class="cal-day ${cls}" ${tooltipData} onmouseenter="showCalTooltip(event,this)" onmouseleave="hideCalTooltip()"><div class="day-num">${cur.getDate()}</div>${dd&&dd.comm>0?`<div class="day-comm">+${formatRp(dd.comm)}</div>`:''}${dd&&dd.spend>0?`<div class="day-spend">SPND ${formatRp(dd.spend)}</div>`:''}</div>`;
-    cur.setDate(cur.getDate()+1);
-  }
-  document.getElementById('calendarGrid').innerHTML=html;
-}
-
-function renderTagChart(tags) {
-  if (charts.tagBar) charts.tagBar.destroy();
-  const t10=tags.slice(0,10);
-  charts.tagBar = new Chart(document.getElementById('tagBarChart').getContext('2d'), {
-    type:'bar', data:{
-      labels:t10.map(t=>t.tag.length>15?t.tag.slice(0,15)+'...':t.tag),
-      datasets:[{label:'Komisi',data:t10.map(t=>t.comm),backgroundColor:'#10b981',borderRadius:4},{label:'Spend',data:t10.map(t=>t.spend),backgroundColor:'#ef4444',borderRadius:4}]
-    }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{y:{ticks:{callback:v=>formatRp(v),font:{size:10}}},x:{ticks:{font:{size:9}}}}}
-  });
-}
-
-function renderPlatformChart(platforms) {
-  if (charts.platform) charts.platform.destroy();
-  const colors=['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6'];
-  charts.platform = new Chart(document.getElementById('platformChart').getContext('2d'), {
-    type:'doughnut', data:{
-      labels:platforms.map(p=>p.name),
-      datasets:[{data:platforms.map(p=>p.comm),backgroundColor:colors.slice(0,platforms.length),borderWidth:2}]
-    }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}
-  });
-}
-
-function renderCategoryChart(cats) {
-  if (charts.category) charts.category.destroy();
-  const colors=['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16'];
-  charts.category = new Chart(document.getElementById('categoryChart').getContext('2d'), {
-    type:'bar', data:{
-      labels:cats.map(c=>c.name.length>18?c.name.slice(0,18)+'...':c.name),
-      datasets:[{label:'Komisi',data:cats.map(c=>c.comm),backgroundColor:colors,borderRadius:4}]
-    }, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>formatRp(v),font:{size:9}}},y:{ticks:{font:{size:10}}}}}
-  });
-}
-
-// ═══ TAG DAILY FUNCTIONS ════════════════════════════════════════════════════
-function populateTagDailySelect(tagResults) {
-  const sel = document.getElementById('tagDailySelect');
-  const activeTags = tagResults.filter(t => t.comm > 0 || t.spend > 0);
-  sel.innerHTML = '<option value="">— Pilih Tag —</option>' +
-    activeTags.map(t => `<option value="${t.tag}">${t.tag} (${formatRp(t.comm)})</option>`).join('');
-}
-
-function renderTagDaily() {
-  const tag = document.getElementById('tagDailySelect').value;
-  if (!tag || !window._tagDailyData || !window._tagDailyData[tag]) {
-    document.getElementById('tagDailySummary').innerHTML = '';
-    document.getElementById('tagDailyTable').innerHTML = '';
-    if (charts.tagDaily) { charts.tagDaily.destroy(); charts.tagDaily = null; }
-    return;
-  }
-
-  const data = window._tagDailyData[tag];
-  const { ds, de } = window._dateRange;
-
-  // Build daily array for this tag
-  const days = [];
-  const cur = new Date(ds);
-  const end = new Date(de);
-  while (cur <= end) {
-    const d = cur.toISOString().split('T')[0];
-    const entry = data[d] || { comm: 0, spend: 0, clicks: 0, orders: new Set() };
-    days.push({
-      date: d,
-      comm: entry.comm,
-      spend: entry.spend,
-      clicks: entry.clicks,
-      orders: entry.orders ? (entry.orders.size || 0) : 0,
-      roas: entry.spend > 0 ? entry.comm / entry.spend : (entry.comm > 0 ? Infinity : 0),
-      net: entry.comm - entry.spend
-    });
-    cur.setDate(cur.getDate() + 1);
-  }
-
-  // Summary stats
-  const totalComm = days.reduce((s,d) => s+d.comm, 0);
-  const totalSpend = days.reduce((s,d) => s+d.spend, 0);
-  const activeDays = days.filter(d => d.comm > 0 || d.spend > 0).length;
-  const avgDaily = activeDays > 0 ? totalComm / activeDays : 0;
-  const last3 = days.slice(-3);
-  const prev3 = days.slice(-6, -3);
-  const last3Comm = last3.reduce((s,d) => s+d.comm, 0);
-  const prev3Comm = prev3.reduce((s,d) => s+d.comm, 0);
-  const trend = prev3Comm > 0 ? ((last3Comm - prev3Comm) / prev3Comm * 100) : (last3Comm > 0 ? 100 : 0);
-  const trendIcon = trend > 0 ? '📈' : trend < 0 ? '📉' : '➡️';
-  const trendColor = trend > 0 ? '#059669' : trend < 0 ? '#dc2626' : '#64748b';
-
-  document.getElementById('tagDailySummary').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
-      <div style="background:#f0fdf4;border-radius:8px;padding:10px"><div style="font-size:10px;color:#6b7280">Total Komisi</div><div style="font-size:16px;font-weight:700;color:#059669">${formatRp(totalComm)}</div></div>
-      <div style="background:#fef2f2;border-radius:8px;padding:10px"><div style="font-size:10px;color:#6b7280">Total Spend</div><div style="font-size:16px;font-weight:700;color:#dc2626">${formatRp(totalSpend)}</div></div>
-      <div style="background:#f0f9ff;border-radius:8px;padding:10px"><div style="font-size:10px;color:#6b7280">Rata-rata/Hari</div><div style="font-size:16px;font-weight:700;color:#2563eb">${formatRp(avgDaily)}</div></div>
-      <div style="background:#faf5ff;border-radius:8px;padding:10px"><div style="font-size:10px;color:#6b7280">Hari Aktif</div><div style="font-size:16px;font-weight:700;color:#7c3aed">${activeDays}</div></div>
-      <div style="background:${trend>=0?'#f0fdf4':'#fef2f2'};border-radius:8px;padding:10px"><div style="font-size:10px;color:#6b7280">Tren 3 Hari</div><div style="font-size:16px;font-weight:700;color:${trendColor}">${trendIcon} ${trend>=0?'+':''}${trend.toFixed(0)}%</div></div>
-    </div>`;
-
-  // Chart
-  if (charts.tagDaily) charts.tagDaily.destroy();
-  const activeDayData = days.filter(d => d.comm > 0 || d.spend > 0);
-  charts.tagDaily = new Chart(document.getElementById('tagDailyChart').getContext('2d'), {
-    type: 'line',
-    data: {
-      labels: activeDayData.map(d => d.date.slice(5)),
-      datasets: [
-        { label: 'Komisi', data: activeDayData.map(d => d.comm), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.1)', fill: true, tension: .3, pointRadius: 3 },
-        { label: 'Spend', data: activeDayData.map(d => d.spend), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,.05)', fill: true, tension: .3, pointRadius: 3 }
-      ]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } }, scales: { y: { ticks: { callback: v => formatRp(v), font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } } }
-  });
-
-  // Table
-  let html = `<thead><tr><th>Tanggal</th><th style="text-align:right">Komisi</th><th style="text-align:right">Spend</th><th style="text-align:center">ROAS</th><th style="text-align:right">Net</th><th style="text-align:right">Klik</th><th style="text-align:right">Orders</th><th style="text-align:center">Tren</th></tr></thead><tbody>`;
-  const activeDaysAll = days.filter(d => d.comm > 0 || d.spend > 0);
-  activeDaysAll.forEach((d, i) => {
-    const rc = d.roas===Infinity?'#7c3aed':d.roas>=2?'#059669':d.roas>=1?'#d97706':'#dc2626';
-    const rt = d.roas===Infinity?'Organik':d.roas===0?'-':d.roas.toFixed(2)+'x';
-    const nc = d.net>=0?'#059669':'#dc2626';
-    const prevComm = i > 0 ? activeDaysAll[i-1].comm : 0;
-    const dayTrend = prevComm > 0 ? ((d.comm - prevComm) / prevComm * 100) : 0;
-    const dayTrendIcon = dayTrend > 10 ? '🟢' : dayTrend < -10 ? '🔴' : '🟡';
-    html += `<tr><td>${d.date}</td><td style="text-align:right;color:#059669;font-weight:600">${formatRp(d.comm)}</td><td style="text-align:right">${d.spend>0?formatRp(d.spend):'—'}</td><td style="text-align:center;color:${rc};font-weight:700">${rt}</td><td style="text-align:right;color:${nc};font-weight:600">${d.net>=0?'+':''}${formatRp(d.net)}</td><td style="text-align:right">${formatNum(d.clicks)}</td><td style="text-align:right">${d.orders}</td><td style="text-align:center">${i>0?dayTrendIcon+' '+(dayTrend>=0?'+':'')+dayTrend.toFixed(0)+'%':'—'}</td></tr>`;
-  });
-  html += '</tbody>';
-  document.getElementById('tagDailyTable').innerHTML = html;
-
-  // Render platform breakdown for this tag
-  const platCard = document.getElementById('tagPlatformCard');
-  const tagPlatData = window._tagPlatformData && window._tagPlatformData[tag];
-  if (tagPlatData && Object.keys(tagPlatData).length > 0) {
-    platCard.style.display = '';
-    const platforms = Object.entries(tagPlatData).map(([name, v]) => ({
-      name, orders: v.orders.size, comm: v.comm
-    })).sort((a, b) => b.orders - a.orders);
-
-    const totalOrders = platforms.reduce((s, p) => s + p.orders, 0);
-    const totalComm = platforms.reduce((s, p) => s + p.comm, 0);
-    const colors = ['#2563eb','#10b981','#f59e0b','#ec4899','#8b5cf6','#dc2626','#14b8a6'];
-
-    // Orders per channel
-    document.getElementById('tagPlatformOrders').innerHTML = platforms.map((p, i) => {
-      const pct = totalOrders > 0 ? (p.orders / totalOrders * 100) : 0;
-      const barWidth = Math.max(pct, 2);
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="width:70px;font-size:11px;font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</span>
-        <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${colors[i%colors.length]};border-radius:4px"></div></div>
-        <span style="font-size:11px;font-weight:700;color:${colors[i%colors.length]};min-width:35px;text-align:right">${pct.toFixed(0)}%</span>
-        <span style="font-size:10px;color:#94a3b8;min-width:50px">${formatNum(p.orders)} ord</span>
-      </div>`;
-    }).join('');
-
-    // Commission per channel
-    document.getElementById('tagPlatformComm').innerHTML = platforms.map((p, i) => {
-      const pct = totalComm > 0 ? (p.comm / totalComm * 100) : 0;
-      const barWidth = Math.max(pct, 2);
-      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="width:70px;font-size:11px;font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.name}">${p.name}</span>
-        <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${colors[i%colors.length]};border-radius:4px"></div></div>
-        <span style="font-size:11px;font-weight:700;color:${colors[i%colors.length]};min-width:35px;text-align:right">${pct.toFixed(0)}%</span>
-        <span style="font-size:10px;color:#94a3b8;min-width:60px">${formatRp(p.comm)}</span>
-      </div>`;
-    }).join('');
-
-    // Ads Spend per channel (from Meta Ads)
-    const tagAdsPlat = window._tagAdsPlatformData && window._tagAdsPlatformData[tag];
-    const adsSpendEl = document.getElementById('tagPlatformAdsSpend');
-    if (tagAdsPlat && Object.keys(tagAdsPlat).length > 0) {
-      const adsChannels = Object.entries(tagAdsPlat).map(([name, v]) => ({
-        name, spend: v.spend, clicks: v.clicks, impressions: v.impressions
-      })).sort((a, b) => b.spend - a.spend);
-      const totalAdsSpend = adsChannels.reduce((s, c) => s + c.spend, 0);
-      const totalAdsClicks = adsChannels.reduce((s, c) => s + c.clicks, 0);
-      const adsColors = ['#dc2626','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#10b981','#2563eb'];
-      adsSpendEl.innerHTML = adsChannels.map((c, i) => {
-        const pct = totalAdsSpend > 0 ? (c.spend / totalAdsSpend * 100) : 0;
-        const barWidth = Math.max(pct, 2);
-        const cpc = c.clicks > 0 ? c.spend / c.clicks : 0;
-        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <span style="width:70px;font-size:11px;font-weight:500;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${c.name}">${c.name}</span>
-          <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${adsColors[i%adsColors.length]};border-radius:4px"></div></div>
-          <span style="font-size:11px;font-weight:700;color:${adsColors[i%adsColors.length]};min-width:35px;text-align:right">${pct.toFixed(0)}%</span>
-          <span style="font-size:10px;color:#94a3b8;min-width:60px">${formatRp(c.spend)}</span>
-        </div>`;
-      }).join('') + `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#64748b">Total: ${formatRp(totalAdsSpend)} | ${formatNum(totalAdsClicks)} klik | CPC: ${totalAdsClicks>0?formatRp(totalAdsSpend/totalAdsClicks):'—'}</div>`;
-    } else {
-      adsSpendEl.innerHTML = '<p style="font-size:11px;color:#94a3b8">Tidak ada data ads platform</p>';
-    }
-  } else {
-    platCard.style.display = 'none';
-  }
-}
-
-function renderTagTrendTable(tagResults, tagDailyMap, ds, de) {
-  // Get the last 3 days and previous 3 days
-  const allDates = [];
-  const cur = new Date(ds);
-  const end = new Date(de);
-  while (cur <= end) { allDates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate()+1); }
-  const last3Dates = allDates.slice(-3);
-  const prev3Dates = allDates.slice(-6, -3);
-
-  const activeTags = tagResults.filter(t => t.comm > 0 || t.spend > 0);
-  let rows = activeTags.map(t => {
-    const daily = tagDailyMap[t.tag] || {};
-    const last3Comm = last3Dates.reduce((s, d) => s + ((daily[d]||{}).comm||0), 0);
-    const prev3Comm = prev3Dates.reduce((s, d) => s + ((daily[d]||{}).comm||0), 0);
-    const last3Spend = last3Dates.reduce((s, d) => s + ((daily[d]||{}).spend||0), 0);
-    const trend = prev3Comm > 0 ? ((last3Comm - prev3Comm) / prev3Comm * 100) : (last3Comm > 0 ? 100 : 0);
-    const roas3 = last3Spend > 0 ? last3Comm / last3Spend : (last3Comm > 0 ? Infinity : 0);
-    return { tag: t.tag, last3Comm, prev3Comm, last3Spend, trend, roas3, status: t.status, label: t.label };
-  });
-  rows.sort((a, b) => b.trend - a.trend);
-
-  let html = `<thead><tr><th>Tag</th><th style="text-align:right">3 Hari Terakhir</th><th style="text-align:right">3 Hari Sebelumnya</th><th style="text-align:center">Tren</th><th style="text-align:center">ROAS 3H</th><th style="text-align:center">Signal</th></tr></thead><tbody>`;
-  rows.forEach(r => {
-    const trendColor = r.trend > 0 ? '#059669' : r.trend < 0 ? '#dc2626' : '#64748b';
-    const trendIcon = r.trend > 20 ? '🚀' : r.trend > 0 ? '📈' : r.trend < -20 ? '💀' : r.trend < 0 ? '📉' : '➡️';
-    const signal = r.trend > 20 && r.roas3 >= 2 ? '🔥 Scale!' : r.trend < -20 && r.roas3 < 1 ? '🛑 Matikan?' : r.trend < -20 ? '⚠️ Turun' : r.trend > 0 ? '✅ Naik' : '—';
-    const rc = r.roas3===Infinity?'#7c3aed':r.roas3>=2?'#059669':r.roas3>=1?'#d97706':'#dc2626';
-    const rt = r.roas3===Infinity?'Organik':r.roas3===0?'-':r.roas3.toFixed(2)+'x';
-    html += `<tr><td style="font-weight:600">${r.tag}</td><td style="text-align:right;color:#059669;font-weight:600">${formatRp(r.last3Comm)}</td><td style="text-align:right">${formatRp(r.prev3Comm)}</td><td style="text-align:center;color:${trendColor};font-weight:700">${trendIcon} ${r.trend>=0?'+':''}${r.trend.toFixed(0)}%</td><td style="text-align:center;color:${rc};font-weight:700">${rt}</td><td style="text-align:center;font-size:12px">${signal}</td></tr>`;
-  });
-  html += '</tbody>';
-  document.getElementById('tagTrendTable').innerHTML = html;
-}
-
-// ═══ TRAFFIC SOURCE CHARTS ══════════════════════════════════════════════════
-function renderTrafficCharts(platforms, tagResults) {
-  // Platform Traffic (from Shopee affiliate data)
-  const platCard = document.getElementById('trafficPlatformCard');
-  if (platforms.length) {
-    platCard.style.display = '';
-    const totalPlatComm = platforms.reduce((s,p) => s+p.comm, 0);
-    if (charts.trafficPlatform) charts.trafficPlatform.destroy();
-    const colors = ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6'];
-    charts.trafficPlatform = new Chart(document.getElementById('trafficPlatformChart').getContext('2d'), {
-      type:'doughnut', data:{
-        labels:platforms.map(p=>p.name),
-        datasets:[{data:platforms.map(p=>p.comm),backgroundColor:colors.slice(0,platforms.length),borderWidth:2}]
-      }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10}}}}}
-    });
-    // Detail with percentages
-    document.getElementById('trafficPlatformDetail').innerHTML = platforms.map((p,i) => {
-      const pct = totalPlatComm > 0 ? (p.comm / totalPlatComm * 100) : 0;
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid #f1f5f9"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${colors[i%colors.length]}"></span>${p.name}</span><span><strong style="color:#059669">${formatRp(p.comm)}</strong> <span style="color:#64748b;font-size:10px">(${pct.toFixed(1)}%)</span></span></div>`;
-    }).join('');
-  } else { platCard.style.display = 'none'; }
-
-  // Tag Click Distribution (from Meta Ads)
-  const tagCard = document.getElementById('trafficTagCard');
-  const adsTagsWithClicks = tagResults.filter(t => t.clicks > 0).sort((a,b) => b.clicks - a.clicks).slice(0, 8);
-  if (adsTagsWithClicks.length) {
-    tagCard.style.display = '';
-    const totalTagClicks = adsTagsWithClicks.reduce((s,t) => s+t.clicks, 0);
-    if (charts.trafficTag) charts.trafficTag.destroy();
-    const colors2 = ['#2563eb','#7c3aed','#059669','#dc2626','#d97706','#ec4899','#0d9488','#4f46e5'];
-    charts.trafficTag = new Chart(document.getElementById('trafficTagChart').getContext('2d'), {
-      type:'doughnut', data:{
-        labels:adsTagsWithClicks.map(t=>t.tag.length>15?t.tag.slice(0,15)+'...':t.tag),
-        datasets:[{data:adsTagsWithClicks.map(t=>t.clicks),backgroundColor:colors2.slice(0,adsTagsWithClicks.length),borderWidth:2}]
-      }, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10}}}}}
-    });
-    // Detail with percentages
-    document.getElementById('trafficTagDetail').innerHTML = adsTagsWithClicks.map((t,i) => {
-      const pct = totalTagClicks > 0 ? (t.clicks / totalTagClicks * 100) : 0;
-      const spendPct = t.spend > 0 ? ((tagResults.reduce((s,x)=>s+x.spend,0)) > 0 ? (t.spend / tagResults.reduce((s,x)=>s+x.spend,0) * 100) : 0) : 0;
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid #f1f5f9"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${colors2[i%colors2.length]}"></span>${t.tag}</span><span><strong style="color:#2563eb">${formatNum(t.clicks)}</strong> <span style="color:#64748b;font-size:10px">(${pct.toFixed(1)}%)</span></span></div>`;
-    }).join('');
-  } else { tagCard.style.display = 'none'; }
-}
-
-// ═══ CORRELATION & EFFICIENCY ANALYSIS ═════════════════════════════════════
-function renderCorrelation(fAff, fAds, fClicks, tagResults, ppn) {
-  // === 1. Platform-level: Ads Spend vs Commission earned per channel ===
-  // Ads spend by platform (Meta Ads Platform column)
-  const adsSpendByPlat = {};
-  fAds.forEach(r => {
-    const p = r['Platform'] || '';
-    if (!p) return;
-    if (!adsSpendByPlat[p]) adsSpendByPlat[p] = { spend: 0, clicks: 0, impressions: 0 };
-    adsSpendByPlat[p].spend += (parseFloat(r['Amount spent (IDR)'])||0) * (1+ppn);
-    adsSpendByPlat[p].clicks += parseInt(r['Link clicks'])||0;
-    adsSpendByPlat[p].impressions += parseInt(r['Impressions'])||0;
-  });
-
-  // Commission/orders by platform (Affiliate Platform column)
-  const commByPlat = {};
-  const ordersByPlat = {};
-  fAff.forEach(r => {
-    const p = r['Platform'] || 'Unknown';
-    if (!commByPlat[p]) commByPlat[p] = { comm: 0, orders: new Set(), gmv: 0 };
-    commByPlat[p].comm += parseFloat(r['Total Komisi per Pesanan(Rp)'])||0;
-    commByPlat[p].orders.add(r['ID Pemesanan']);
-    commByPlat[p].gmv += parseFloat(r['Nilai Pembelian(Rp)'])||0;
-  });
-
-  // Clicks by referrer (Shopee Click Report)
-  const clicksByRef = {};
-  fClicks.forEach(r => {
-    const ref = r['Perujuk'] || 'Unknown';
-    if (!clicksByRef[ref]) clicksByRef[ref] = 0;
-    clicksByRef[ref]++;
-  });
-
-  // Build correlation table
-  const allChannels = new Set([...Object.keys(adsSpendByPlat), ...Object.keys(commByPlat), ...Object.keys(clicksByRef)]);
-  const channels = [...allChannels].map(ch => {
-    const ads = adsSpendByPlat[ch] || { spend: 0, clicks: 0, impressions: 0 };
-    const comm = commByPlat[ch] || { comm: 0, orders: new Set(), gmv: 0 };
-    const shopeeClicks = clicksByRef[ch] || 0;
-    const orders = comm.orders ? comm.orders.size : 0;
-    const roas = ads.spend > 0 ? comm.comm / ads.spend : (comm.comm > 0 ? Infinity : 0);
-    const costPerOrder = orders > 0 && ads.spend > 0 ? ads.spend / orders : 0;
-    const convRate = shopeeClicks > 0 ? (orders / shopeeClicks * 100) : 0;
-    const clickLeakage = ads.clicks > 0 && shopeeClicks > 0 ? (shopeeClicks / ads.clicks * 100) : 0;
-    return { channel: ch, spend: ads.spend, adsClicks: ads.clicks, impressions: ads.impressions, shopeeClicks, orders, comm: comm.comm, gmv: comm.gmv, roas, costPerOrder, convRate, clickLeakage };
-  }).filter(c => c.spend > 0 || c.comm > 0 || c.shopeeClicks > 0).sort((a, b) => b.spend - a.spend);
-
-  // Render main correlation table
-  let html = `<div style="overflow-x:auto"><table><thead><tr>
-    <th>Kanal</th>
-    <th style="text-align:right">Ads Spend</th>
-    <th style="text-align:right">Klik Meta</th>
-    <th style="text-align:right">Klik Shopee</th>
-    <th style="text-align:right">Orders</th>
-    <th style="text-align:right">Komisi</th>
-    <th style="text-align:center">ROAS</th>
-    <th style="text-align:right">Cost/Order</th>
-    <th style="text-align:right">Conv Rate</th>
-    <th style="text-align:center">Verdict</th>
-  </tr></thead><tbody>`;
-
-  channels.forEach(c => {
-    const roasColor = c.roas === Infinity ? '#7c3aed' : c.roas >= 2 ? '#059669' : c.roas >= 1 ? '#d97706' : '#dc2626';
-    const roasText = c.roas === Infinity ? 'Organik' : c.roas === 0 ? '—' : c.roas.toFixed(2) + 'x';
-    let verdict = '', verdictBg = '', verdictColor = '';
-    if (c.spend > 0 && c.roas >= 2) { verdict = 'Sangat Bagus'; verdictBg = '#dcfce7'; verdictColor = '#166534'; }
-    else if (c.spend > 0 && c.roas >= 1) { verdict = 'Cukup'; verdictBg = '#fef3c7'; verdictColor = '#92400e'; }
-    else if (c.spend > 0 && c.roas > 0) { verdict = 'Rugi'; verdictBg = '#fee2e2'; verdictColor = '#991b1b'; }
-    else if (c.spend === 0 && c.comm > 0) { verdict = 'Gratis!'; verdictBg = '#ede9fe'; verdictColor = '#5b21b6'; }
-    else { verdict = '—'; verdictBg = '#f1f5f9'; verdictColor = '#475569'; }
-
-    html += `<tr>
-      <td style="font-weight:700">${c.channel}</td>
-      <td style="text-align:right">${c.spend > 0 ? formatRp(c.spend) : '<span style="color:#d1d5db">—</span>'}</td>
-      <td style="text-align:right">${c.adsClicks > 0 ? formatNum(c.adsClicks) : '—'}</td>
-      <td style="text-align:right">${c.shopeeClicks > 0 ? formatNum(c.shopeeClicks) : '—'}</td>
-      <td style="text-align:right;font-weight:600">${c.orders > 0 ? formatNum(c.orders) : '—'}</td>
-      <td style="text-align:right;color:#059669;font-weight:700">${c.comm > 0 ? formatRp(c.comm) : '—'}</td>
-      <td style="text-align:center;color:${roasColor};font-weight:800">${roasText}</td>
-      <td style="text-align:right">${c.costPerOrder > 0 ? formatRp(c.costPerOrder) : '—'}</td>
-      <td style="text-align:right">${c.convRate > 0 ? c.convRate.toFixed(2) + '%' : '—'}</td>
-      <td style="text-align:center"><span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:${verdictBg};color:${verdictColor}">${verdict}</span></td>
-    </tr>`;
-  });
-  html += '</tbody></table></div>';
-
-  // Add insight summary
-  const paidChannels = channels.filter(c => c.spend > 0);
-  const bestChannel = paidChannels.sort((a, b) => b.roas - a.roas)[0];
-  const worstChannel = [...paidChannels].sort((a, b) => a.roas - b.roas)[0];
-  const freeChannels = channels.filter(c => c.spend === 0 && c.comm > 0);
-
-  let insight = '<div style="margin-top:16px;padding:14px 16px;background:linear-gradient(135deg,#f0f9ff,#eff6ff);border:1px solid #bfdbfe;border-radius:12px;font-size:12px;line-height:1.7">';
-  insight += '<strong style="font-size:13px;color:#1e40af">💡 Insight Utama:</strong><br>';
-  if (bestChannel) insight += `• Kanal paling menguntungkan: <strong style="color:#059669">${bestChannel.channel}</strong> (ROAS ${bestChannel.roas.toFixed(2)}x, Cost/Order ${formatRp(bestChannel.costPerOrder)})<br>`;
-  if (worstChannel && worstChannel !== bestChannel) insight += `• Kanal paling boros: <strong style="color:#dc2626">${worstChannel.channel}</strong> (ROAS ${worstChannel.roas.toFixed(2)}x, Cost/Order ${formatRp(worstChannel.costPerOrder)})<br>`;
-  if (freeChannels.length) insight += `• ${freeChannels.length} kanal menghasilkan komisi <strong>tanpa biaya iklan</strong>: ${freeChannels.map(c => c.channel).join(', ')}<br>`;
-  const fbAds = adsSpendByPlat['Facebook'] || { clicks: 0 };
-  const fbShopee = clicksByRef['Facebook'] || 0;
-  if (fbAds.clicks > 0 && fbShopee > 0) {
-    const leakage = (1 - fbShopee / fbAds.clicks) * 100;
-    if (leakage > 20) insight += `• ⚠️ <strong>${leakage.toFixed(0)}% klik Facebook</strong> tidak sampai ke Shopee (dari ${formatNum(fbAds.clicks)} klik Meta, hanya ${formatNum(fbShopee)} masuk Shopee). Cek landing page atau link redirect.<br>`;
-  }
-  insight += '</div>';
-
-  document.getElementById('correlationContent').innerHTML = html + insight;
-
-  // === 2. Click-to-Order Conversion by Channel ===
-  const convChannels = channels.filter(c => c.shopeeClicks > 0).sort((a, b) => b.convRate - a.convRate);
-  if (convChannels.length) {
-    const maxConv = convChannels[0].convRate || 1;
-    document.getElementById('clickConvContent').innerHTML = convChannels.map((c, i) => {
-      const barW = Math.max((c.convRate / maxConv * 100), 3);
-      const color = c.convRate >= 5 ? '#059669' : c.convRate >= 2 ? '#d97706' : '#dc2626';
-      return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <span style="width:80px;font-size:12px;font-weight:600;color:#374151">${c.channel}</span>
-        <div style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><div style="height:100%;width:${barW}%;background:${color};border-radius:5px"></div></div>
-        <span style="font-size:12px;font-weight:800;color:${color};min-width:55px;text-align:right">${c.convRate.toFixed(2)}%</span>
-        <span style="font-size:10px;color:#94a3b8;min-width:70px">${formatNum(c.shopeeClicks)} klik</span>
-      </div>`;
-    }).join('');
-  }
-
-  // === 3. Cost per Conversion ===
-  const costChannels = paidChannels.filter(c => c.orders > 0).sort((a, b) => a.costPerOrder - b.costPerOrder);
-  if (costChannels.length) {
-    const maxCost = costChannels[costChannels.length - 1].costPerOrder || 1;
-    document.getElementById('costPerConvContent').innerHTML = costChannels.map((c, i) => {
-      const barW = Math.max((c.costPerOrder / maxCost * 100), 3);
-      const color = c.costPerOrder <= 5000 ? '#059669' : c.costPerOrder <= 15000 ? '#d97706' : '#dc2626';
-      return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <span style="width:80px;font-size:12px;font-weight:600;color:#374151">${c.channel}</span>
-        <div style="flex:1;height:10px;background:#f1f5f9;border-radius:5px;overflow:hidden"><div style="height:100%;width:${barW}%;background:${color};border-radius:5px"></div></div>
-        <span style="font-size:12px;font-weight:800;color:${color};min-width:70px;text-align:right">${formatRp(c.costPerOrder)}</span>
-        <span style="font-size:10px;color:#94a3b8;min-width:50px">${formatNum(c.orders)} ord</span>
-      </div>`;
-    }).join('');
-  }
-
-  // === 4. Hourly Performance ===
-  const hourlyOrders = new Array(24).fill(0);
-  const hourlyClicks = new Array(24).fill(0);
-  fAff.forEach(r => {
-    const t = r['Waktu Pemesanan'] || '';
-    const hour = parseInt(t.split(' ')[1]);
-    if (!isNaN(hour)) hourlyOrders[hour]++;
-  });
-  fClicks.forEach(r => {
-    const t = r['Waktu Klik'] || '';
-    const hour = parseInt(t.split(' ')[1]);
-    if (!isNaN(hour)) hourlyClicks[hour]++;
-  });
-
-  if (charts.hourly) charts.hourly.destroy();
-  const hourlyLabels = Array.from({length:24}, (_, i) => String(i).padStart(2,'0') + ':00');
-  charts.hourly = new Chart(document.getElementById('hourlyChart').getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: hourlyLabels,
-      datasets: [
-        { label: 'Orders', data: hourlyOrders, backgroundColor: '#10b981', borderRadius: 3, order: 2 },
-        { label: 'Klik Shopee', data: hourlyClicks, backgroundColor: 'rgba(59,130,246,.3)', borderRadius: 3, order: 1 }
-      ]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, scales: { y: { ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 }, maxRotation: 0 } } } }
-  });
-
-  // === 5. Funnel per Channel ===
-  const funnelChannels = channels.filter(c => c.adsClicks > 0 || c.shopeeClicks > 0);
-  if (funnelChannels.length) {
-    let funnelHtml = '<div style="overflow-x:auto"><table><thead><tr><th>Kanal</th><th style="text-align:right">Impresi (Meta)</th><th style="text-align:right">Klik Meta</th><th style="text-align:right">Klik Shopee</th><th style="text-align:right">Orders</th><th style="text-align:center">Meta→Shopee</th><th style="text-align:center">Shopee→Order</th><th style="text-align:center">Overall</th></tr></thead><tbody>';
-    funnelChannels.forEach(c => {
-      const metaToShopee = c.adsClicks > 0 && c.shopeeClicks > 0 ? (c.shopeeClicks / c.adsClicks * 100) : 0;
-      const shopeeToOrder = c.shopeeClicks > 0 ? (c.orders / c.shopeeClicks * 100) : 0;
-      const overall = c.adsClicks > 0 ? (c.orders / c.adsClicks * 100) : (c.shopeeClicks > 0 ? (c.orders / c.shopeeClicks * 100) : 0);
-      const m2sColor = metaToShopee >= 80 ? '#059669' : metaToShopee >= 50 ? '#d97706' : '#dc2626';
-      const s2oColor = shopeeToOrder >= 5 ? '#059669' : shopeeToOrder >= 2 ? '#d97706' : '#dc2626';
-      funnelHtml += `<tr>
-        <td style="font-weight:700">${c.channel}</td>
-        <td style="text-align:right">${c.impressions > 0 ? formatNum(c.impressions) : '—'}</td>
-        <td style="text-align:right">${c.adsClicks > 0 ? formatNum(c.adsClicks) : '—'}</td>
-        <td style="text-align:right">${c.shopeeClicks > 0 ? formatNum(c.shopeeClicks) : '—'}</td>
-        <td style="text-align:right;font-weight:700">${c.orders > 0 ? formatNum(c.orders) : '—'}</td>
-        <td style="text-align:center;color:${m2sColor};font-weight:700">${metaToShopee > 0 ? metaToShopee.toFixed(1) + '%' : '—'}</td>
-        <td style="text-align:center;color:${s2oColor};font-weight:700">${shopeeToOrder > 0 ? shopeeToOrder.toFixed(2) + '%' : '—'}</td>
-        <td style="text-align:center;font-weight:800">${overall > 0 ? overall.toFixed(2) + '%' : '—'}</td>
-      </tr>`;
-    });
-    funnelHtml += '</tbody></table></div>';
-    funnelHtml += '<div style="margin-top:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:11px;color:#64748b;line-height:1.6"><strong>Cara baca:</strong> Meta→Shopee = berapa % klik dari Meta yang berhasil masuk ke Shopee. Shopee→Order = berapa % klik Shopee yang jadi order. Jika Meta→Shopee rendah, artinya banyak klik yang "hilang" sebelum sampai Shopee (masalah di link/redirect). Jika Shopee→Order rendah, artinya produk/landing page perlu dioptimasi.</div>';
-    document.getElementById('funnelContent').innerHTML = funnelHtml;
-  }
-}
-
-// ═══ PLACEMENT ANALYSIS ═══════════════════════════════════════════════════
-function renderPlacementAnalysis(fAds, tagResults, ppn) {
-  const card = document.getElementById('placementCard');
-  // Check if we have placement data
-  const hasPlacement = fAds.some(r => r['Placement'] && r['Platform']);
-  if (!hasPlacement) { card.style.display = 'none'; return; }
-  card.style.display = '';
-
-  // Aggregate by Platform + Placement
-  const placementMap = {};
-  fAds.forEach(r => {
-    const platform = r['Platform'] || '';
-    const placement = r['Placement'] || '';
-    if (!platform || !placement) return;
-    const key = platform + ' — ' + placement;
-    if (!placementMap[key]) placementMap[key] = { platform, placement, spend: 0, clicks: 0, impressions: 0, reach: 0, results: 0 };
-    placementMap[key].spend += parseFloat(r['Amount spent (IDR)']) || 0;
-    placementMap[key].clicks += parseInt(r['Link clicks']) || 0;
-    placementMap[key].impressions += parseInt(r['Impressions']) || 0;
-    placementMap[key].reach += parseInt(r['Reach']) || 0;
-    placementMap[key].results += parseInt(r['Results']) || 0;
-  });
-
-  // Calculate metrics
-  const placements = Object.entries(placementMap).map(([key, v]) => {
-    const spend = v.spend * (1 + ppn);
-    const cpc = v.clicks > 0 ? spend / v.clicks : 0;
-    const ctr = v.impressions > 0 ? (v.clicks / v.impressions * 100) : 0;
-    const cpm = v.impressions > 0 ? (spend / v.impressions * 1000) : 0;
-    // Estimate ROAS: match this placement's tag spending to commission earned
-    // We use proportional spend to estimate the ROAS contribution
-    const totalAdSpend = tagResults.reduce((s, t) => s + t.spend, 0);
-    const totalComm = tagResults.reduce((s, t) => s + t.comm, 0);
-    const globalROAS = totalAdSpend > 0 ? totalComm / totalAdSpend : 0;
-    // Use click efficiency as a proxy — placements with lower CPC are more efficient
-    return { key, ...v, spend, cpc, ctr, cpm, globalROAS };
-  }).filter(p => p.spend > 0).sort((a, b) => b.spend - a.spend);
-
-  if (!placements.length) { card.style.display = 'none'; return; }
-
-  // Find avg CPC for comparison
-  const totalSpend = placements.reduce((s, p) => s + p.spend, 0);
-  const totalClicks = placements.reduce((s, p) => s + p.clicks, 0);
-  const avgCPC = totalClicks > 0 ? totalSpend / totalClicks : 0;
-  const avgCTR = placements.reduce((s, p) => s + p.impressions, 0) > 0 ? (totalClicks / placements.reduce((s, p) => s + p.impressions, 0) * 100) : 0;
-
-  // Good: below avg CPC & above avg CTR
-  const good = placements.filter(p => p.clicks > 0 && p.cpc <= avgCPC * 1.1).sort((a, b) => a.cpc - b.cpc).slice(0, 5);
-  const bad = placements.filter(p => p.clicks > 0 && p.cpc > avgCPC * 1.1).sort((a, b) => b.cpc - a.cpc).slice(0, 5);
-
-  // Render good placements
-  document.getElementById('placementGood').innerHTML = good.length ? good.map((p, i) => {
-    const savePct = avgCPC > 0 ? ((avgCPC - p.cpc) / avgCPC * 100) : 0;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;margin-bottom:8px">
-      <span style="font-size:12px;font-weight:800;color:#059669;min-width:24px">#${i+1}</span>
-      <div style="flex:1">
-        <div style="font-size:12px;font-weight:700;color:#1e293b">${p.key}</div>
-        <div style="font-size:10px;color:#64748b;margin-top:2px">CPC: ${formatRp(p.cpc)} | CTR: ${p.ctr.toFixed(2)}% | ${formatNum(p.clicks)} klik</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;font-weight:800;color:#059669">${savePct.toFixed(0)}% lebih hemat</div>
-        <div style="font-size:10px;color:#64748b">Spend: ${formatRp(p.spend)}</div>
-      </div>
-    </div>`;
-  }).join('') : '<p style="font-size:12px;color:#94a3b8">Tidak ada data</p>';
-
-  // Render bad placements
-  document.getElementById('placementBad').innerHTML = bad.length ? bad.map((p, i) => {
-    const overPct = avgCPC > 0 ? ((p.cpc - avgCPC) / avgCPC * 100) : 0;
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;margin-bottom:8px">
-      <span style="font-size:12px;font-weight:800;color:#dc2626;min-width:24px">#${i+1}</span>
-      <div style="flex:1">
-        <div style="font-size:12px;font-weight:700;color:#1e293b">${p.key}</div>
-        <div style="font-size:10px;color:#64748b;margin-top:2px">CPC: ${formatRp(p.cpc)} | CTR: ${p.ctr.toFixed(2)}% | ${formatNum(p.clicks)} klik</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;font-weight:800;color:#dc2626">${overPct.toFixed(0)}% lebih mahal</div>
-        <div style="font-size:10px;color:#64748b">Spend: ${formatRp(p.spend)}</div>
-      </div>
-    </div>`;
-  }).join('') : '<p style="font-size:12px;color:#94a3b8">Tidak ada data</p>';
-
-  // Full table
-  const maxSpend = placements[0] ? placements[0].spend : 1;
-  let html = `<thead><tr><th>Platform</th><th>Placement</th><th style="text-align:right">Spend</th><th style="text-align:right">Klik</th><th style="text-align:right">CPC</th><th style="text-align:right">CTR</th><th style="text-align:right">CPM</th><th style="text-align:right">Impresi</th><th style="text-align:center">Efisiensi</th></tr></thead><tbody>`;
-  placements.forEach(p => {
-    const efficiency = p.cpc > 0 ? (avgCPC / p.cpc) : 0;
-    const effColor = efficiency >= 1.2 ? '#059669' : efficiency >= 0.9 ? '#d97706' : '#dc2626';
-    const effLabel = efficiency >= 1.2 ? 'Bagus' : efficiency >= 0.9 ? 'Normal' : 'Mahal';
-    const effBg = efficiency >= 1.2 ? '#dcfce7' : efficiency >= 0.9 ? '#fef3c7' : '#fee2e2';
-    const spendBar = maxSpend > 0 ? (p.spend / maxSpend * 100) : 0;
-    html += `<tr>
-      <td style="font-weight:600;font-size:12px">${p.platform}</td>
-      <td style="font-weight:500">${p.placement}</td>
-      <td style="text-align:right">
-        <div style="font-weight:600">${formatRp(p.spend)}</div>
-        <div style="height:4px;background:#f1f5f9;border-radius:2px;margin-top:3px;width:80px"><div style="height:100%;width:${spendBar}%;background:linear-gradient(90deg,#3b82f6,#60a5fa);border-radius:2px"></div></div>
-      </td>
-      <td style="text-align:right;font-weight:600">${formatNum(p.clicks)}</td>
-      <td style="text-align:right;font-weight:700;color:${p.cpc <= avgCPC ? '#059669' : '#dc2626'}">${formatRp(p.cpc)}</td>
-      <td style="text-align:right">${p.ctr.toFixed(2)}%</td>
-      <td style="text-align:right">${formatRp(p.cpm)}</td>
-      <td style="text-align:right;color:#64748b">${formatNum(p.impressions)}</td>
-      <td style="text-align:center"><span style="font-size:10px;font-weight:700;color:${effColor};background:${effBg};padding:3px 8px;border-radius:6px">${effLabel}</span></td>
-    </tr>`;
-  });
-  html += '</tbody>';
-
-  // Add summary row
-  html = html.replace('</tbody>', `<tr style="background:#f8fafc;font-weight:700;border-top:2px solid #e2e8f0">
-    <td colspan="2" style="font-weight:800">RATA-RATA / TOTAL</td>
-    <td style="text-align:right;font-weight:700">${formatRp(totalSpend)}</td>
-    <td style="text-align:right;font-weight:700">${formatNum(totalClicks)}</td>
-    <td style="text-align:right;font-weight:700">${formatRp(avgCPC)}</td>
-    <td style="text-align:right;font-weight:700">${avgCTR.toFixed(2)}%</td>
-    <td style="text-align:right">—</td>
-    <td style="text-align:right;font-weight:700">${formatNum(placements.reduce((s,p)=>s+p.impressions,0))}</td>
-    <td style="text-align:center"><span style="font-size:10px;font-weight:700;color:#475569;background:#f1f5f9;padding:3px 8px;border-radius:6px">Baseline</span></td>
-  </tr></tbody>`);
-
-  document.getElementById('placementTable').innerHTML = html;
-}
-
-// ═══ GLOBAL ORGANIK TOGGLE ═════════════════════════════════════════════════
-function toggleGlobalOrganik() {
-  const hide = document.getElementById('globalHideOrganik').checked;
-  // Sync the period decision checkbox
-  const pdCb = document.getElementById('hideOrganik');
-  if (pdCb) { pdCb.checked = hide; toggleOrganikRows(); }
-  // Hide organik section in overview
-  const orgSection = document.getElementById('organikSection');
-  if (orgSection) orgSection.style.display = hide ? 'none' : '';
-  // Hide organik items in decision grid
-  document.querySelectorAll('.decision-card').forEach(card => {
-    // Check if it's an organik card — not applicable here since we have scale/pantau/matikan cards
-  });
-  // Hide organik in campaign table
-  document.querySelectorAll('#campaignTable tbody tr').forEach(row => {
-    if (row.dataset.organik === 'true') row.style.display = hide ? 'none' : '';
-  });
-  // Hide organik in tag ranking
-  const rankTagGrid = document.getElementById('rankTagGrid');
-  if (rankTagGrid) {
-    rankTagGrid.querySelectorAll('.rank-item').forEach(item => {
-      // Items without spend/clicks are organik
-      const sub = item.querySelector('.rank-sub');
-      if (sub && sub.textContent.includes('0 Klik') && hide) {
-        item.style.display = 'none';
-      } else {
-        item.style.display = '';
-      }
-    });
-  }
-  // Sync campaign table checkbox
-  const campCb = document.getElementById('hideOrganikCampaign');
-  if (campCb) { campCb.checked = hide; toggleOrganikCampaign(); }
-}
-
-function toggleOrganikCampaign() {
-  const hide = document.getElementById('hideOrganikCampaign').checked;
-  document.querySelectorAll('#campaignTable tbody tr').forEach(row => {
-    if (row.dataset.organik === 'true') row.style.display = hide ? 'none' : '';
-  });
-}
-
-// ═══ CALENDAR TOOLTIP ═══════════════════════════════════════════════════════
-function showCalTooltip(e, el) {
-  const tt = document.getElementById('calTooltip');
-  if (!el.dataset.date) return;
-  const profitColor = el.dataset.profit && el.dataset.profit.startsWith('+') ? 'green' : 'red';
-  tt.innerHTML = `
-    <div class="tt-date">${el.dataset.date}</div>
-    <div class="tt-row"><span class="tt-label">Meta Klik/Order</span><span class="tt-val"><span class="green">${el.dataset.clicks}</span> | <span class="blue">${el.dataset.orders}</span></span></div>
-    <div class="tt-row"><span class="tt-label">Biaya Iklan</span><span class="tt-val red">${el.dataset.spend}</span></div>
-    <div class="tt-row"><span class="tt-label">Komisi</span><span class="tt-val green">${el.dataset.comm}</span></div>
-    <div class="tt-row"><span class="tt-label">GMV</span><span class="tt-val blue">${el.dataset.gmv}</span></div>
-    <div class="tt-profit"><span class="tt-profit-label">PROFIT</span><span class="tt-val ${profitColor}" style="font-size:14px">${el.dataset.profit}</span></div>
-  `;
-  tt.classList.add('visible');
-  const rect = el.getBoundingClientRect();
-  let left = rect.left + rect.width/2 - 110;
-  let top = rect.top - tt.offsetHeight - 8;
-  if (top < 0) top = rect.bottom + 8;
-  if (left < 8) left = 8;
-  if (left + 220 > window.innerWidth) left = window.innerWidth - 228;
-  tt.style.left = left + 'px';
-  tt.style.top = top + 'px';
-}
-function hideCalTooltip() {
-  document.getElementById('calTooltip').classList.remove('visible');
-}
-
-function toggleOrganikRows() {
-  const hide = document.getElementById('hideOrganik').checked;
-  document.querySelectorAll('#periodDecisionTable .organik-row').forEach(row => {
-    row.style.display = hide ? 'none' : '';
-  });
-}
-
-// ═══ TAB SWITCHING ══════════════════════════════════════════════════════════
-function switchTab(tab) {
-  ['overview','campaigns','tagdaily','daily','correlation','breakdown'].forEach(t => {
-    document.getElementById('tab-'+t).classList.toggle('hidden', t!==tab);
-  });
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab===tab);
-  });
-}
-
-// ═══ DRAG & DROP ═══════════════════════════════════════════════════════════
-(function initDragDrop() {
-  const area = document.getElementById('uploadArea');
-  if (!area) return;
-  ['dragenter','dragover'].forEach(evt => {
-    area.addEventListener(evt, e => { e.preventDefault(); area.classList.add('drag-over'); });
-  });
-  ['dragleave','drop'].forEach(evt => {
-    area.addEventListener(evt, e => { e.preventDefault(); area.classList.remove('drag-over'); });
-  });
-  area.addEventListener('drop', e => {
-    const dt = e.dataTransfer;
-    if (dt.files.length) {
-      document.getElementById('allFiles').files = dt.files;
-      handleUpload({ target: { files: dt.files } });
-    }
-  });
-})();
-
-// ═══ SEARCH CAMPAIGN TABLE ═════════════════════════════════════════════════
-function filterCampaignSearch() {
-  const q = (document.getElementById('campaignSearch').value || '').toLowerCase().trim();
-  document.querySelectorAll('#campaignTable tbody tr').forEach(row => {
-    const tag = (row.querySelector('td') || {}).textContent || '';
-    if (!q || tag.toLowerCase().includes(q)) {
-      row.style.display = '';
-    } else {
-      row.style.display = 'none';
-    }
-  });
-}
-
-// ═══ EXPORT CSV ════════════════════════════════════════════════════════════
-function exportCampaignCSV() {
-  const table = document.getElementById('campaignTable');
-  if (!table) return;
-  let csv = [];
-  table.querySelectorAll('tr').forEach(row => {
-    const cols = [];
-    row.querySelectorAll('th,td').forEach(cell => {
-      cols.push('"' + (cell.textContent || '').replace(/"/g, '""') + '"');
-    });
-    if (cols.length) csv.push(cols.join(','));
-  });
-  if (!csv.length) return;
-  const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'campaign_data.csv'; a.click();
-  URL.revokeObjectURL(url);
-  showToast('Data berhasil diexport sebagai CSV');
-}
-
-// ═══ TOAST NOTIFICATION ═══════════════════════════════════════════════════
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
-}
-
-// ═══ AUTO-DETECT DATE RANGE ═══════════════════════════════════════════════
-function autoDetectDateRange() {
-  let dates = [];
-  affiliateData.forEach(r => {
-    const d = (r['Waktu Pemesanan']||'').split(' ')[0];
-    if (d && d.match(/^\d{4}-\d{2}-\d{2}$/)) dates.push(d);
-  });
-  adsData.forEach(r => {
-    const d = r['Reporting starts']||'';
-    if (d && d.match(/^\d{4}-\d{2}-\d{2}$/)) dates.push(d);
-  });
-  if (dates.length) {
-    dates.sort();
-    document.getElementById('dateStart').value = dates[0];
-    document.getElementById('dateEnd').value = dates[dates.length - 1];
-  }
-}
-</script>
+<div class="modal" id="histModal">
+  <div class="modal-box">
+    <div class="card-head"><h2>Riwayat Snapshot</h2>
+      <span class="sub" id="histAcct"></span>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Tersimpan di browser ini, terpisah per akun. Muat kembali tanpa mengunggah ulang CSV.</p>
+    <div id="histRows"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
