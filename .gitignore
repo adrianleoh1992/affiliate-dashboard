@@ -1,0 +1,18 @@
+# Data klien — jangan pernah di-commit
+*.csv
+*.xlsx
+*.xls
+AffiliateCommissionReport_*
+WebsiteClickReport*
+AW-*-Ads-*
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
