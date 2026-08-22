@@ -63,6 +63,8 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 /* Upload */
 .drop{border:2px dashed var(--border-strong);border-radius:var(--radius);padding:28px 18px;
   text-align:center;cursor:pointer;transition:.18s;background:var(--surface-2)}
+.drop-btn{margin-top:12px;min-height:40px;justify-content:center;text-align:center}
+.drop p{white-space:normal}.drop-hint{font-size:10.5px!important;margin-top:7px}
 .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .drop .ic{font-size:26px;margin-bottom:6px}
 .drop h3{font-size:14.5px;font-weight:700;margin-bottom:3px}
@@ -186,6 +188,42 @@ tbody tr:hover{background:var(--surface-2)}
 .strip .s .v{font-size:15px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
 
 /* Misc */
+.action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px}
+.action-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 14px;box-shadow:var(--shadow)}
+.action-card .a-label{font-size:10px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.45px}
+.action-card .a-val{font-size:20px;font-weight:800;letter-spacing:-.5px;margin:4px 0 2px}
+.action-card .a-copy{font-size:11px;color:var(--text-dim);line-height:1.45}
+.action-card.money .a-val{color:var(--ok)}.action-card.risk .a-val{color:var(--bad)}.action-card.info .a-val{color:var(--info)}
+.calibration{font-size:12px;line-height:1.55;background:var(--info-soft);border:1px solid var(--info);border-radius:10px;padding:10px 13px;margin-bottom:14px;color:var(--info)}
+.calibration.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+.calibration b{font-weight:800}
+.riskbox{padding:14px;border-radius:10px;background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);font-size:13px;line-height:1.55}
+.riskbox strong{font-weight:800}
+.file-row{display:flex;align-items:center;gap:8px;min-width:0}
+.file-row .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.file-row .rmfile{border:0;background:transparent;color:currentColor;font-size:17px;cursor:pointer;padding:0 3px;line-height:1}
+@media(max-width:640px){
+  .hdr{gap:6px}.brand{width:100%}.brand h1{font-size:14px}.acct{flex:1}.acct select{max-width:150px;min-height:44px}
+  .hdr .btn{min-height:44px;padding:8px 12px}#btnNewAcct{min-width:44px}
+  .hdr .btn.ghost{font-size:0;min-width:44px;padding:8px;border:1px solid var(--border-strong)}
+  .hdr .btn.ghost#btnMap:after{content:'⚙';font-size:18px}.hdr .btn.ghost#btnHist:after{content:'◷';font-size:18px}.hdr .btn.ghost#btnTheme:after{content:'◐';font-size:18px}
+  /* Keep the two named actions together instead of letting them wrap apart. */
+  #btnExport,#btnSave{flex:1 1 45%;justify-content:center}
+  .ctrls{grid-template-columns:1fr}.field input,.field select{min-height:44px;font-size:14px}.field label{font-size:11px;text-transform:none;letter-spacing:0}
+  .card-head{align-items:flex-start}.card-head .sub{width:100%;order:3}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{padding:11px}.kpi .val{font-size:18px}.kpi.lead .val{font-size:21px}
+  .drop{padding:22px 12px}.drop h3{font-size:15px}.drop .ic{font-size:24px}.drop-btn{min-height:44px;width:100%}
+  .chips{gap:6px}.chip{width:100%;border-radius:8px;padding:4px 4px 4px 10px}
+  /* Destructive targets need real hit areas, not 17px glyphs at the edge. */
+  .file-row .rmfile{min-width:44px;min-height:44px}
+  #btnReset{min-height:44px;padding:8px 12px;color:var(--bad);border:1px solid var(--border-strong)}
+  .action-grid{grid-template-columns:1fr}.dgrid{grid-template-columns:1fr}.dcard{min-height:0}
+  .tabs{margin-left:-13px;margin-right:-13px;padding:0 13px}.tab{min-height:44px;padding:11px 12px}
+  /* Title and meta were fighting for one row and both wrapped. */
+  .settings-summary{flex-wrap:wrap}.settings-summary span{margin-left:0;width:100%;font-size:11px;text-align:left;max-width:none;margin-top:3px}
+  .chartbox{height:240px}.chartbox.tall{height:270px}
+}
+@media(max-width:360px){.kpis{grid-template-columns:1fr}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .empty-state{text-align:center;padding:64px 20px;color:var(--text-dim)}
 .empty-state .ic{font-size:40px;margin-bottom:10px;opacity:.5}
 .empty-state h3{font-size:16px;font-weight:700;color:var(--text);margin-bottom:5px}

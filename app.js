@@ -1,6 +1,6 @@
 'use strict';
 const E=window.Engine,$=id=>document.getElementById(id);
-let DATA={affiliate:[],ads:[],clicks:[]},FILES=[],RESULT=null,CHARTS={},SORT={key:'spend',dir:-1},FILTER=null;
+let DATA={affiliate:[],ads:[],clicks:[]},FILES=[],RESULT=null,CHARTS={},SORT={key:'spend',dir:-1},FILTER=null,STAB=null;
 const LS={accounts:'adash_accounts_v3',active:'adash_active_v3',map:'adash_map_v3',snaps:'adash_snaps_v3',opts:'adash_opts_v3',theme:'adash_theme_v3'};
 const DEFAULT_MAP={'telesinvideo2':'TelesinGripvideo2','telesinvideo1':'TelesinGripvideo2','telesinvideo3':'TelesinGripvideo3','telesingrip':'TelesinGripvideo2','lemariolymp':'OlymplastLemari','lemariolympic':'OlymplastLemari','minilayarportable':'minilayarportable','helmrsixsolid':'HelmRsixSolid','spinningreelokuma':'Spinningreelokuma','seeouokacamatapolarized':'seeouokacamatapolarized'};
 const esc=E.escapeHtml;
@@ -21,21 +21,96 @@ $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data
 $('account').onchange=()=>{setActive($('account').value);reset();renderAccounts();renderHistory()};
 $('btnNewAcct').onclick=()=>{let n=prompt('Nama akun baru');if(!n)return;n=n.trim();if(!n)return;let a=accounts();if(!a.includes(n))a.push(n);localStorage.setItem(LS.accounts,JSON.stringify(a));setActive(n);reset();renderAccounts();toast('Akun dibuat: '+n)};
 const drop=$('drop');drop.onclick=()=>$('files').click();['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>files(e.dataTransfer.files));$('files').onchange=e=>files(e.target.files);
-function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';FILES.push({name:file.name,size:file.size,type,rows:rows.length});if(type==='affiliate')DATA.affiliate=DATA.affiliate.concat(rows);else if(type==='ads')DATA.ads=DATA.ads.concat(rows);else if(type==='clicks')DATA.clicks=DATA.clicks.concat(rows);if(!--pending)finish()},error:()=>{if(!--pending)finish()}})})}
+function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';
+  // Keep the parsed rows on the entry so removing one file can rebuild the
+  // dataset from the survivors instead of forcing a full re-upload.
+  FILES.push({name:file.name,size:file.size,type,rows:rows.length,rowsData:rows});
+  if(type==='affiliate')DATA.affiliate=DATA.affiliate.concat(rows);else if(type==='ads')DATA.ads=DATA.ads.concat(rows);else if(type==='clicks')DATA.clicks=DATA.clicks.concat(rows);else toast('Format tidak dikenali: '+file.name);if(!--pending)finish()},error:()=>{toast('Gagal membaca '+file.name);if(!--pending)finish()}})})}
 function finish(){renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active())}
-function renderChips(){$('chips').innerHTML=FILES.map(f=>`<span class="chip ${f.type}">${esc(f.name)} · ${nf(f.rows)} baris</span>`).join('');let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ')}
-function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;$('files').value='';$('chips').innerHTML='';$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
-$('btnReset').onclick=reset;
+function renderChips(){$('chips').innerHTML=FILES.map((f,i)=>`<span class="chip ${f.type}"><span class="file-row"><span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows)} baris</span><button class="rmfile" data-rm="${i}" title="Hapus file ini" aria-label="Hapus ${esc(f.name)}">×</button></span></span>`).join('');let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ');
+  // Removing one file rebuilds from the survivors, so a mis-drop no longer
+  // forces clearing everything and re-uploading all three reports.
+  $('chips').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});}
+function rmFile(i){
+  const f=FILES[i]; if(!f)return;
+  FILES.splice(i,1);
+  const keep=FILES.slice();
+  DATA={affiliate:[],ads:[],clicks:[]};FILES=[];
+  keep.forEach(k=>{FILES.push(k);if(k.rowsData){if(k.type==='affiliate')DATA.affiliate=DATA.affiliate.concat(k.rowsData);else if(k.type==='ads')DATA.ads=DATA.ads.concat(k.rowsData);else if(k.type==='clicks')DATA.clicks=DATA.clicks.concat(k.rowsData)}});
+  renderChips();
+  if(DATA.affiliate.length){recalc();toast('File dihapus: '+f.name)}
+  else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast('File dihapus')}
+}
+function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';$('chips').innerHTML='';$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
+// Clearing is destructive and used to fire on a single click.
+$('btnReset').onclick=()=>{if(!FILES.length)return reset();if(confirm(`Kosongkan ${FILES.length} file yang dimuat? Snapshot tersimpan tidak terhapus.`)){reset();toast('Data dikosongkan')}};
+$('btnPick').onclick=e=>{e.stopPropagation();$('files').click()};
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
 function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderTrend();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function renderActions(){
+  const A=RESULT.actions;
+  // The advice used to be scattered across rows and never added up. These are
+  // the same recommendations expressed as money, which is what gets acted on.
+  const cards=[];
+  if(A.bidSaving>0)cards.push(['money','Hemat dari Turunkan Bid',rp(A.bidSaving),
+    `${A.overbidCount} tag membayar di atas CPC ideal`]);
+  if(A.stopSpend>0)cards.push(['risk','Biaya di Tag STOP',rp(A.stopSpend),
+    `${A.stopCount} tag, rugi ${rp(A.stopLoss)} periode ini`]);
+  if(A.leakWaste>0)cards.push(['risk','Hilang karena Link',rp(A.leakWaste),
+    'klik dibayar tapi tak sampai Shopee']);
+  if(A.reclaimable>0)cards.push(['info','Total Bisa Dialihkan',rp(A.reclaimable),
+    'gabungan hemat bid dan biaya tag STOP']);
+  $('actionGrid').innerHTML=cards.map(c=>`<div class="action-card ${c[0]}">
+    <div class="a-label">${c[1]}</div><div class="a-val">${c[2]}</div><div class="a-copy">${c[3]}</div></div>`).join('');
+}
+function renderCalibration(){
+  const L=RESULT.lagCal,el=$('lagCal');
+  if(!L||!L.sampleSize){el.innerHTML='';el.className='calibration hidden';return}
+  // Lag is the single most decision-changing setting, so show whether the
+  // current value actually matches this account's observed behaviour.
+  let unstable=0;
+  try{const S=E.stability({...DATA,tagMap:map()},RESULT.options,[0,3,5,7]);unstable=S.unstable;STAB=S}catch(e){STAB=null}
+  const warn=!L.matches||unstable>0;
+  el.className='calibration'+(warn?' warn':'');
+  const parts=[];
+  parts.push(L.matches
+    ? `Lag atribusi <b>${L.current} hari</b> sudah sesuai data: ${L.coverage}% pesanan masuk dalam H+${L.suggested}.`
+    : `Lag atribusi disetel <b>${L.current} hari</b>, tapi data menunjukkan <b>${L.suggested} hari</b> (${L.coverage}% pesanan masuk dalam H+${L.suggested}). <button class="btn sm" id="btnApplyLag">Pakai ${L.suggested} hari</button>`);
+  if(unstable>0)parts.push(`<b>${unstable} vonis berubah</b> bila lag digeser — ditandai di kolom Tag.`);
+  el.innerHTML=parts.join(' ');
+  const b=$('btnApplyLag');
+  if(b)b.onclick=()=>{$('lagDays').value=L.suggested;recalc();toast('Lag disetel ke '+L.suggested+' hari')};
+}
+function renderOpportunity(){
+  const A=RESULT.actions,C=A.concentration;
+  $('tblOrganic').querySelector('thead').innerHTML='<tr>'+['Tag','Komisi','Order','Komisi/Order','Maks CPC','Kanal Utama'].map((h,i)=>`<th class="${i&&i<5?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblOrganic').querySelector('tbody').innerHTML=A.organicCandidates.length
+    ? A.organicCandidates.map(c=>`<tr><td><b>${esc(c.tag)}</b></td>
+      <td class="num">${rp(c.comm)}</td><td class="num">${nf(c.orders)}</td>
+      <td class="num">${rp(c.avgComm)}</td><td class="num col-ideal"><b>${rp(c.maxCpc)}</b></td>
+      <td>${esc(c.topPlatform||'—')}</td></tr>`).join('')
+    : `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:22px">Belum ada tag organik dengan komisi.</td></tr>`;
+  if(!C){$('concentration').innerHTML='<p class="hint">Belum ada tag berbayar.</p>';return}
+  const risky=C.topShare>=35;
+  $('concentration').innerHTML=risky
+    ? `<div class="riskbox"><strong>${esc(C.topTag)} menyerap ${C.topShare.toFixed(0)}% biaya iklan</strong>
+       dengan ROAS ${rx(C.topRoas)}. Dua tag teratas menguasai ${C.top2Share.toFixed(0)}% dari ${C.count} tag berbayar.
+       Kalau produk itu bermasalah, sebagian besar anggaran ikut terdampak.</div>`
+    : `<p class="hint">Sebaran anggaran wajar: tag terbesar ${C.topShare.toFixed(0)}% dari ${C.count} tag berbayar.</p>`;
+}
 function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
 function renderKpi(){let k=RESULT.kpi,p=RESULT.tags.filter(t=>t.spend>0),pc=p.reduce((s,t)=>s+t.commEff,0),ps=p.reduce((s,t)=>s+t.spend,0),org=k.organicComm,arr=[['Laba Bersih',rp(k.netEff),k.netEff>=0?'setelah biaya iklan':'rugi',k.netEff>=0?'good':'bad',1],['ROAS Iklan Berbayar',rx(k.paidRoas),'tanpa komisi organik',k.paidRoas>=1?'good':'bad',1],['ROAS Gabungan',rx(k.roasEff),'termasuk organik','',0],['Komisi Organik',rp(org),'tanpa biaya iklan','',0],['Biaya Iklan',rp(k.spend),'termasuk PPN','',0],['Komisi Efektif',rp(k.commEff),'tertunda 95%','',0],['Pesanan',nf(k.orders),nf(k.qty)+' produk','',0],['Klik Terbuang',rp(k.wasted),'tidak sampai Shopee','bad',0]];$('kpis').innerHTML=arr.map(x=>`<div class="kpi ${x[3]}${x[4]?' lead':''}"><div class="lbl">${x[0]}</div><div class="val">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join('')}
 function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
 function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()})}
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['cpc','CPC',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
-function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=RESULT.tags.filter(t=>!FILTER||t.status===FILTER).slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(y-x)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>`<tr><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span></span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`).join('');$('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()})}
+function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=RESULT.tags.filter(t=>!FILTER||t.status===FILTER).slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(y-x)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
+  // A verdict that flips when the lag setting moves is not safe to act on yet.
+  const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
+  const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
+  return `<tr><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+}).join('');$('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
 const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik',1],['cpc','CPC',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 function renderUnit(){
@@ -263,6 +338,36 @@ function renderHistory(){
     saveSnaps(snaps().filter(y=>y.id!==+b.dataset.del));renderHistory();renderTrend();toast('Snapshot dihapus')});
 }
 $('btnHist').onclick=()=>{renderHistory();$('histModal').classList.add('show')};
+// Snapshots are the only record of how an account developed. Keeping them
+// locked inside one browser makes them one cache-clear away from gone.
+$('btnExportSnaps').onclick=()=>{
+  const s=snaps(); if(!s.length)return toast('Belum ada snapshot untuk diekspor');
+  const blob=new Blob([JSON.stringify({account:active(),exported:new Date().toISOString(),snapshots:s},null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=`riwayat-${active()}-${new Date().toISOString().slice(0,10)}.json`;a.click();
+  URL.revokeObjectURL(url);toast(s.length+' snapshot diekspor');
+};
+$('btnImportSnaps').onclick=()=>$('importFile').click();
+$('importFile').onchange=e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const d=JSON.parse(rd.result);
+      const incoming=Array.isArray(d)?d:(d.snapshots||[]);
+      if(!incoming.length)return toast('File tidak berisi snapshot');
+      const cur=snaps(),ids=new Set(cur.map(x=>x.id));
+      // Re-stamp to the active account so importing into a different account
+      // does not silently mix two accounts' histories.
+      const add=incoming.filter(x=>!ids.has(x.id)).map(x=>({...x,account:active()}));
+      saveSnaps(cur.concat(add).sort((a,b)=>String(b.saved).localeCompare(String(a.saved))));
+      renderHistory();renderTrend();requestAnimationFrame(()=>renderCharts());
+      toast(add.length+' snapshot diimpor'+(incoming.length-add.length?', '+(incoming.length-add.length)+' duplikat dilewati':''));
+    }catch(err){toast('File tidak valid')}
+    $('importFile').value='';
+  };
+  rd.readAsText(f);
+};
 /* Export */
 $('btnExport').onclick=()=>{
   if(!RESULT)return toast('Belum ada hasil analisis');

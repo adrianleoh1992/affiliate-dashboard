@@ -45,8 +45,10 @@
     </div>
     <div class="drop" id="drop">
       <div class="ic">📂</div>
-      <h3>Tarik file CSV ke sini</h3>
+      <h3>Pilih file CSV</h3>
       <p>Affiliate Commission Report · Meta Ads Report · Website Click Report</p>
+      <button class="btn primary drop-btn" id="btnPick" type="button">Pilih File</button>
+      <p class="drop-hint">atau tarik file ke area ini</p>
     </div>
     <input type="file" id="files" multiple accept=".csv" class="hidden">
     <div class="chips" id="chips"></div>
@@ -90,12 +92,15 @@
       <button class="tab" data-tab="kebocoran">Kebocoran Klik</button>
       <button class="tab" data-tab="harian">Harian</button>
       <button class="tab" data-tab="perkembangan">Perkembangan</button>
+      <button class="tab" data-tab="peluang">Peluang</button>
       <button class="tab" data-tab="rincian">Rincian</button>
       <button class="tab" data-tab="matching">Matching</button>
     </div>
 
     <div class="panel active" data-panel="keputusan">
       <p class="synth" id="synth"></p>
+      <div class="action-grid" id="actionGrid"></div>
+      <div class="calibration" id="lagCal"></div>
       <div class="dgrid" id="dgrid"></div>
       <div class="card">
         <div class="card-head"><h2>Semua Tag</h2>
@@ -191,6 +196,19 @@
       </div>
     </div>
 
+    <div class="panel" data-panel="peluang">
+      <div class="card">
+        <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
+          <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
+        <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
+        <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
+        <div id="concentration"></div>
+      </div>
+    </div>
+
     <div class="panel" data-panel="rincian">
       <div class="grid2">
         <div class="card">
@@ -266,6 +284,11 @@
       <span class="sub" id="histAcct"></span>
       <button class="btn ghost" data-close>Tutup</button></div>
     <p class="hint">Tersimpan di browser ini, terpisah per akun. Muat kembali tanpa mengunggah ulang CSV.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn" id="btnExportSnaps">Ekspor Riwayat</button>
+      <button class="btn" id="btnImportSnaps">Impor Riwayat</button>
+      <input type="file" id="importFile" accept=".json" class="hidden">
+    </div>
     <div id="histRows"></div>
   </div>
 </div>

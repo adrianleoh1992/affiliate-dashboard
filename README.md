@@ -64,13 +64,51 @@ ditandai untuk diperiksa, bukan diam-diam dipakai.
 
 | Tab | Isi |
 |---|---|
-| **Keputusan** | Vonis per tag, alasan, saran bid, ROAS, ROI, CPM, CPC ideal, CR |
+| **Keputusan** | Proyeksi dampak dalam rupiah, kalibrasi lag, vonis per tag, alasan, saran bid, ROAS, ROI, CPM, CPC ideal |
 | **Per Ad Unit** | Satu baris per iklan Meta: status, CPM, impresi, reach, CTR, CPC ideal |
 | **Kebocoran Klik** | Klik Meta vs Shopee, % masuk, biaya terbuang, sumber & wilayah klik |
 | **Harian** | Komisi vs biaya, ROAS harian, klik & konversi, tabel rincian per tanggal |
 | **Perkembangan** | Tren antar snapshot: laba, ROAS, komposisi keputusan, pergerakan tag |
+| **Peluang** | Kandidat iklan dari tag organik + peringatan konsentrasi anggaran |
 | **Rincian** | Platform, kategori, jam terbaik, jeda klik, produk, toko, kurva penyelesaian |
 | **Matching** | Nama iklan ke tag beserta metode dan keyakinan |
+
+## Dari vonis ke tindakan
+
+Label saja tidak menggerakkan uang. Tab Keputusan membuka dengan angka gabungan:
+
+- **Hemat dari turunkan bid** — total selisih CPC aktual dan CPC ideal dikali klik
+- **Biaya di tag STOP** — anggaran yang sedang mengalir ke tag yang seharusnya berhenti
+- **Hilang karena link** — klik yang dibayar tapi tidak sampai Shopee
+- **Total bisa dialihkan** — gabungan keduanya
+
+Ini menjawab "kalau saya turuti semua saran ini, berapa yang saya dapat?"
+
+## Kalibrasi lag otomatis
+
+Lag atribusi adalah setelan yang paling mengubah keputusan. Pada data uji, menggesernya
+dari 0 ke 7 hari mengubah jumlah vonis STOP dari 5 menjadi 6, dan PANTAU dari 1 menjadi 0.
+
+Karena itu dashboard **menghitung sendiri** lag yang sesuai: hari ketika 90% pesanan sudah
+masuk. Kalau setelan Anda berbeda dari yang disarankan data, muncul peringatan beserta
+tombol untuk menerapkannya.
+
+## Penanda vonis rapuh
+
+Tiap tag diuji ulang pada beberapa nilai lag. Tag yang vonisnya berubah-ubah diberi label
+**rapuh** — artinya keputusannya bergantung pada asumsi, bukan pada bukti yang kuat.
+Pada data uji, 3 dari 6 tag berbayar masuk kategori ini.
+
+Vonis yang bertahan di semua nilai lag jauh lebih aman untuk ditindaklanjuti.
+
+## Peluang dari organik
+
+Tag yang menghasilkan komisi **tanpa biaya iklan sama sekali** adalah bukti permintaan
+yang sudah teruji. Dashboard menghitung batas CPC awal untuk tiap kandidat berdasarkan
+komisi aktual per order dan target ROI Anda.
+
+Disertai peringatan konsentrasi: kalau satu tag menyerap lebih dari 35% anggaran, itu
+risiko yang perlu disadari meski ROAS-nya terlihat wajar.
 
 ## Vonis
 
@@ -92,6 +130,22 @@ Komisi berstatus Tertunda dihitung dengan bobot 0,95, karena sebagian akan batal
 Semua ambang bisa diubah dan tersimpan otomatis: PPN iklan, target ROI, ambang ROAS
 scale/pantau, spend minimum, hari minimum, lag atribusi, panjang streak stop, dan bobot
 komisi tertunda.
+
+## Di ponsel
+
+Layout berubah satu kolom di bawah 640px, dan semua target sentuh minimal 44×44px —
+termasuk tombol hapus file dan tombol Kosongkan. Diuji pada 390px dan 320px tanpa
+meluber horizontal.
+
+Unggah file memakai tombol **Pilih File** yang terlihat jelas; drag-and-drop tetap ada
+sebagai pelengkap di desktop, bukan satu-satunya cara.
+
+## Perlindungan data
+
+- Tombol Kosongkan meminta konfirmasi sebelum menghapus
+- Tiap file bisa dihapus satu per satu tanpa mengunggah ulang yang lain
+- Riwayat snapshot bisa **diekspor ke JSON dan diimpor kembali**, jadi tidak terkunci
+  di satu browser
 
 ## Struktur
 

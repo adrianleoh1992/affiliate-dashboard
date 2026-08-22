@@ -16,6 +16,7 @@ const DEFAULTS = {
   minSpend: 50000,     // Rp minimum sebelum tag boleh divonis
   minDays: 3,          // hari produksi minimum sebelum tag boleh divonis
   lagDays: 3,          // hari terakhir dianggap "belum matang" (atribusi menyusul)
+  lagCoverage: 90,     // % order yang harus sudah masuk untuk menyarankan lag
   streakDays: 3,       // ROAS<1 sekian hari produksi berturut => STOP
   pendingFactor: 0.95, // bobot komisi berstatus Tertunda
   targetROI: 80,       // % target ROI untuk hitung CPC Ideal
@@ -401,6 +402,24 @@ function analyze(data, options) {
   let cum = 0;
   lagProfile.forEach(x => { cum += x.pct; x.cumulative = cum; });
 
+  /* Lag calibration — the single most decision-changing setting, so derive it
+     from the data instead of leaving it to a guessed default. suggested is the
+     day by which `lagCoverage`% of orders have landed; anything more recent is
+     still filling in and must not drive a STOP. */
+  const coverage = o.lagCoverage || 90;
+  let suggestedLag = 0;
+  for (const x of lagProfile) { if (x.cumulative >= coverage) { suggestedLag = x.day; break; } }
+  if (!suggestedLag && lagProfile.length) suggestedLag = lagProfile[lagProfile.length - 1].day;
+  const lagCal = {
+    suggested: suggestedLag,
+    current: o.lagDays,
+    coverage,
+    matches: suggestedLag === o.lagDays,
+    sameDayPct: lagProfile.length ? lagProfile[0].cumulative : 0,
+    fullPct: lagProfile.length ? lagProfile[lagProfile.length - 1].day : 0,
+    sampleSize: lagTotal,
+  };
+
   /* Settlement curve: how pending resolves as orders age */
   const ageBuckets = {};
   fAff.forEach(r => {
@@ -642,10 +661,51 @@ function analyze(data, options) {
     };
   });
 
+  /* ── Actions: turn the verdicts into money, not just labels ─────────────
+     The dashboard used to say "turunkan bid" six times without ever adding it
+     up. These are the numbers that make the advice worth acting on. */
+  const overbid = tags.filter(t => t.spend > 0 && t.clicks > 0 && t.cpcGap < 0);
+  const bidSaving = overbid.reduce((s, t) => s + Math.abs(t.cpcGap) * t.clicks, 0);
+  const stopTags = tags.filter(t => t.status === 'stop');
+  const stopSpend = stopTags.reduce((s, t) => s + t.spend, 0);
+  const stopLoss = Math.abs(stopTags.reduce((s, t) => s + Math.min(t.netEff, 0), 0));
+  const leakWaste = tags.reduce((s, t) => s + (t.leak && t.leak.severity === 'bad' ? t.leak.wasted : 0), 0);
+
+  /* Organic tags earn with zero ad spend — the strongest ad candidates in the
+     account, previously shown only as a purple badge with no suggestion. */
+  const organicCandidates = tags
+    .filter(t => t.status === 'organik' && t.comm > 0 && t.tag !== '(tanpa tag)')
+    .sort((a, b) => b.comm - a.comm).slice(0, 8)
+    .map(t => ({
+      tag: t.tag, comm: t.comm, orders: t.orders, gmv: t.gmv, avgComm: t.avgComm,
+      // What a click could cost and still clear the ROI target, using this
+      // tag's own commission-per-order as the yield estimate.
+      maxCpc: t.orders > 0 ? (t.comm / t.orders) / targetMult : 0,
+      topPlatform: t.topPlatform ? t.topPlatform.name : '',
+    }));
+
+  /* Concentration: one product carrying most of the budget is a risk even when
+     its ROAS looks acceptable. */
+  const paidSorted = paid.slice().sort((a, b) => b.spend - a.spend);
+  const concentration = paidSorted.length ? {
+    topTag: paidSorted[0].tag,
+    topShare: paidSpend > 0 ? paidSorted[0].spend / paidSpend * 100 : 0,
+    topRoas: paidSorted[0].roasEff,
+    top2Share: paidSpend > 0 ? paidSorted.slice(0, 2).reduce((s, t) => s + t.spend, 0) / paidSpend * 100 : 0,
+    count: paidSorted.length,
+  } : null;
+
+  const actions = {
+    bidSaving, overbidCount: overbid.length,
+    stopSpend, stopLoss, stopCount: stopTags.length,
+    leakWaste, reclaimable: bidSaving + stopSpend,
+    organicCandidates, concentration,
+  };
+
   return {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
-    kpi, tags, adUnits, daily, matchLog, lagProfile, settlement,
+    kpi, tags, adUnits, daily, matchLog, lagProfile, lagCal, settlement, actions,
     breakdown: {
       platform: topOf(platform).map(x => ({ name: x.name, comm: x.value })),
       category: topOf(category, 10).map(x => ({ name: x.name, comm: x.value })),
@@ -665,7 +725,44 @@ function analyze(data, options) {
   };
 }
 
-/* ── Snapshot compaction + trend across saved snapshots ──────────────────── */
+/* ── Verdict stability ──────────────────────────────────────────────────────
+   The lag setting is the single most decision-changing input: on the reference
+   data, moving it from 0 to 7 flips the STOP count from 5 to 6 and the PANTAU
+   count from 1 to 0. A verdict that survives every plausible lag is solid; one
+   that flips is worth flagging before money moves. Runs analyze() a few times,
+   so call it once per render, not per row. */
+function stability(data, options, lags) {
+  const probes = lags && lags.length ? lags : [0, 3, 5, 7];
+  const runs = probes.map(l => ({
+    lag: l,
+    result: analyze(data, Object.assign({}, options, { lagDays: l })),
+  }));
+  const byTag = {};
+  runs.forEach(r => {
+    r.result.tags.forEach(t => {
+      if (t.spend <= 0) return;
+      if (!byTag[t.tag]) byTag[t.tag] = { tag: t.tag, seen: {}, order: [] };
+      byTag[t.tag].seen[t.status] = (byTag[t.tag].seen[t.status] || 0) + 1;
+      byTag[t.tag].order.push({ lag: r.lag, status: t.status });
+    });
+  });
+  const tags = Object.keys(byTag).map(k => {
+    const b = byTag[k];
+    const distinct = Object.keys(b.seen);
+    const dominant = distinct.sort((x, y) => b.seen[y] - b.seen[x])[0];
+    return {
+      tag: k, stable: distinct.length === 1, dominant,
+      statuses: distinct, byLag: b.order,
+      confidence: b.seen[dominant] / probes.length,
+    };
+  });
+  const counts = runs.map(r => ({ lag: r.lag, counts: r.result.kpi.counts }));
+  return {
+    probes, tags, counts,
+    unstable: tags.filter(t => !t.stable).length,
+    total: tags.length,
+  };
+}
 function toSnapshot(result, meta) {
   return {
     id: (meta && meta.id) || Date.now(),
@@ -765,7 +862,7 @@ function buildTrend(snapshots, account) {
 }
 
 return {
-  DEFAULTS, analyze, detectFileType, matchAdToTag, toSnapshot, buildTrend,
+  DEFAULTS, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
   cleanTag, COL, pick, topOf,
 };

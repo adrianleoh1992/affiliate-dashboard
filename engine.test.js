@@ -123,4 +123,45 @@ const dupe = JSON.parse(JSON.stringify(s2));
 dupe.id = 4; dupe.saved = '2026-08-12 20:00:00';
 assert.equal(E.buildTrend([s1, s2, dupe], 'akun-a').series.length, 2, 'same period must dedupe');
 
+/* ── Lag calibration: derived from data, not from the default ───────────── */
+assert.ok(r.lagCal, 'lagCal must exist');
+assert.equal(r.lagCal.current, 3);
+assert.ok(r.lagCal.suggested >= 0, 'suggested lag must be a day index');
+assert.equal(typeof r.lagCal.matches, 'boolean');
+assert.ok(r.lagCal.sampleSize > 0, 'calibration needs a sample');
+
+/* ── Actions: verdicts converted into money ─────────────────────────────── */
+assert.ok(r.actions, 'actions must exist');
+assert.equal(typeof r.actions.bidSaving, 'number');
+assert.ok(r.actions.reclaimable >= 0);
+assert.ok(Array.isArray(r.actions.organicCandidates));
+// The fixture's only tag is paid, so there is no organic candidate.
+assert.equal(r.actions.organicCandidates.length, 0);
+assert.ok(r.actions.concentration, 'concentration must be computed when paid tags exist');
+assert.equal(r.actions.concentration.topTag, 'A');
+assert.equal(Math.round(r.actions.concentration.topShare), 100);
+
+/* An organic tag should surface as an ad candidate with a max bid */
+const withOrganic = JSON.parse(JSON.stringify(data));
+withOrganic.affiliate.push({
+  'ID Pemesanan':'9', 'Status Pesanan':'Selesai', 'Waktu Pemesanan':'2026-08-01 11:00:00',
+  'Waktu Klik':'2026-08-01 09:00:00', 'Total Komisi per Pesanan(Rp)':'900',
+  'Tag_link1':'ORG', 'Jumlah':'1', 'Nilai Pembelian(Rp)':'9000', 'Platform':'Instagram',
+});
+const rOrg = E.analyze(withOrganic, { ppn:0, minSpend:0, minDays:1, targetROI:80 });
+const cand = rOrg.actions.organicCandidates.find(c => c.tag === 'ORG');
+assert.ok(cand, 'organic tag must become a candidate');
+assert.equal(Math.round(cand.maxCpc), 500); // 900 per order / 1.8
+
+/* ── Stability: which verdicts survive every plausible lag ──────────────── */
+const st = E.stability(data, { ppn:0, minSpend:0, minDays:1 }, [0, 3, 7]);
+assert.equal(st.probes.length, 3);
+assert.equal(st.total, 1, 'one paid tag in the fixture');
+const sTag = st.tags[0];
+assert.equal(sTag.tag, 'A');
+assert.ok(sTag.confidence > 0 && sTag.confidence <= 1);
+assert.ok(typeof sTag.stable === 'boolean');
+assert.equal(sTag.byLag.length, 3, 'one entry per probe');
+assert.equal(st.counts.length, 3);
+
 console.log('engine tests: PASS');
