@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Store Test</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.5 system-ui,sans-serif;padding:20px;max-width:900px;margin:0 auto;background:#fafaf9;color:#1f1f1f}
+h1{font-size:20px;margin-bottom:12px}
+section{background:#fff;border:1px solid #e5e5e5;border-radius:8px;padding:16px;margin-bottom:12px}
+h2{font-size:15px;font-weight:700;margin-bottom:8px}
+.btn{display:inline-block;padding:8px 14px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;font:inherit;transition:.15s}
+.btn:hover{background:#f5f5f5;border-color:#aaa}
+.btn.primary{background:#e8623a;color:#fff;border-color:#e8623a}
+.btn.primary:hover{background:#d04822}
+input[type=file]{margin-right:8px}
+pre{font:12px/1.4 'Monaco','Courier New',monospace;background:#f5f5f5;padding:10px;border-radius:4px;overflow-x:auto;margin-top:8px}
+.row{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+label{font-weight:600;min-width:100px}
+input[type=text]{padding:6px 10px;border:1px solid #ddd;border-radius:4px;font:inherit;flex:1}
+.log{font-size:12px;color:#666;margin-top:6px}
+.log.err{color:#c00}
+.log.ok{color:#080}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.stat{background:#f9f9f9;padding:8px;border-radius:4px;text-align:center}
+.stat .v{font-size:18px;font-weight:800}
+.stat .l{font-size:11px;color:#666;margin-top:2px}
+</style>
+</head>
+<body>
+<h1>Daily Store Test — Dedup & Persist</h1>
+<p style="margin-bottom:16px;color:#666">Uji deduplikasi baris dan penyimpanan harian lokal (IndexedDB). Data tidak pernah dikirim ke server.</p>
+
+<section>
+  <h2>1. Akun</h2>
+  <div class="row">
+    <label>Shopee</label>
+    <input type="text" id="shopee" value="BBA Utama" placeholder="Nama akun Shopee">
+    <button class="btn" id="btnShopee">Buat/Pilih</button>
+  </div>
+  <div class="row">
+    <label>Ads</label>
+    <input type="text" id="ads" value="Meta — Adrian" placeholder="Nama akun iklan">
+    <button class="btn" id="btnAds">Buat/Pilih</button>
+  </div>
+  <div class="log" id="acctLog"></div>
+</section>
+
+<section>
+  <h2>2. Unggah CSV</h2>
+  <div class="row">
+    <label>Affiliate</label>
+    <input type="file" id="fileAff" accept=".csv">
+    <button class="btn primary" id="btnAff">Proses & Simpan</button>
+  </div>
+  <div class="row">
+    <label>Ads</label>
+    <input type="file" id="fileAds" accept=".csv">
+    <button class="btn primary" id="btnAds2">Proses & Simpan</button>
+  </div>
+  <div class="row">
+    <label>Clicks</label>
+    <input type="file" id="fileClk" accept=".csv">
+    <button class="btn primary" id="btnClk">Proses & Simpan</button>
+  </div>
+  <div class="log" id="uploadLog"></div>
+</section>
+
+<section>
+  <h2>3. Cakupan Data</h2>
+  <button class="btn" id="btnCov">Muat Cakupan</button>
+  <div id="cov"></div>
+</section>
+
+<section>
+  <h2>4. Riwayat Upload</h2>
+  <button class="btn" id="btnHist">Muat Riwayat</button>
+  <pre id="hist" style="display:none"></pre>
+</section>
+
+<section>
+  <h2>5. Ekspor Akun</h2>
+  <button class="btn" id="btnExp">Ekspor JSON</button>
+  <div class="log" id="expLog"></div>
+</section>
+
+<section>
+  <h2>6. Hapus Akun</h2>
+  <button class="btn" id="btnDel" style="color:#c00;border-color:#c00">Hapus Akun Aktif</button>
+  <div class="log" id="delLog"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="daily-agg.js"></script>
+<script src="daily-store.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let STORE, SHOPEE_ACCT, AD_ACCT;
+
+(async()=>{
+  STORE=await DailyStore.open();
+  $('acctLog').textContent='Store dibuka';
+})();
+
+$('btnShopee').onclick=async()=>{
+  const n=$('shopee').value.trim();
+  if(!n)return alert('Nama kosong');
+  SHOPEE_ACCT=await STORE.ensureAccount('shopee',n);
+  $('acctLog').textContent=`Shopee: ${SHOPEE_ACCT.name} (id ${SHOPEE_ACCT.id})`;
+  $('acctLog').className='log ok';
+};
+$('btnAds').onclick=async()=>{
+  const n=$('ads').value.trim();
+  if(!n||!SHOPEE_ACCT)return alert('Shopee belum dipilih atau nama kosong');
+  AD_ACCT=await STORE.ensureAccount('ads',n,{shopee_id:SHOPEE_ACCT.id});
+  $('acctLog').textContent+=` | Ads: ${AD_ACCT.name} (id ${AD_ACCT.id})`;
+};
+
+async function process(fileInput,kind,label){
+  if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
+  const f=fileInput.files&&fileInput.files[0];
+  if(!f)return alert('File belum dipilih');
+  $('uploadLog').textContent=`Memproses ${label}...`;
+  Papa.parse(f,{header:true,skipEmptyLines:true,complete:async r=>{
+    try{
+      const rows=r.data||[];
+      const fh=DailyAgg.hashRows(rows);
+      const seen=await STORE.seenFile(SHOPEE_ACCT.id,fh);
+      if(seen){
+        $('uploadLog').textContent=`File ${label} ini sudah diunggah pada ${new Date(seen.uploaded_at).toLocaleString('id-ID')}`;
+        $('uploadLog').className='log err';
+        return;
+      }
+      const known=await STORE.knownRowHashes(SHOPEE_ACCT.id,kind);
+      const dup=DailyAgg.dedupe(rows,known);
+      let agg,fname;
+      if(kind==='affiliate'){agg=DailyAgg.aggregateAffiliate(dup.kept);fname='affiliate'}
+      else if(kind==='ads'){agg=DailyAgg.aggregateAds(dup.kept);fname='ads'}
+      else if(kind==='clicks'){agg=DailyAgg.aggregateClicks(dup.kept);fname='clicks'}
+      const keys=await STORE.existingKeys(SHOPEE_ACCT.id,fname);
+      const plan=DailyAgg.planIngest(agg,keys,fname==='ads'?['date','ad_unit']:['date','tag']);
+      const dates=agg.map(r=>r.date).filter(DailyAgg.isDate).sort();
+      const per=dates.length?{start:dates[0],end:dates[dates.length-1]}:null;
+      const res=await STORE.saveDaily(SHOPEE_ACCT.id,fname,agg,{
+        rowHashes:dup.hashes,fileHash:fh,fileName:f.name,sourceRows:rows.length,
+        duplicates:dup.duplicates,period:per
+      });
+      $('uploadLog').innerHTML=`<b>${label} tersimpan</b><br>
+        ${res.added} baris baru · ${res.updated} diperbarui · ${dup.duplicates} duplikat dilewati<br>
+        ${plan.days} hari: ${per?per.start+' — '+per.end:'—'}`;
+      $('uploadLog').className='log ok';
+    }catch(e){
+      $('uploadLog').textContent='Gagal: '+e.message;
+      $('uploadLog').className='log err';
+    }
+  }});
+}
+$('btnAff').onclick=()=>process($('fileAff'),'affiliate','Affiliate');
+$('btnAds2').onclick=()=>process($('fileAds'),'ads','Ads');
+$('btnClk').onclick=()=>process($('fileClk'),'clicks','Klik');
+
+$('btnCov').onclick=async()=>{
+  if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
+  const c=await STORE.coverage(SHOPEE_ACCT.id);
+  const est=await STORE.estimate();
+  const html=['affiliate','ads','clicks'].map(k=>{
+    const v=c[k];
+    return `<div class="stat"><div class="v">${v.days||0}</div><div class="l">${k} · ${v.rows} baris</div><div class="l">${v.start||'—'} — ${v.end||'—'}</div></div>`;
+  }).join('');
+  $('cov').innerHTML=`<div class="stats">${html}</div>`;
+  if(est)$('cov').innerHTML+=`<div class="log">Storage: ${(est.usage/1024).toFixed(1)}KB / ${(est.quota/1024/1024).toFixed(0)}MB (${est.pct.toFixed(1)}%)</div>`;
+};
+
+$('btnHist').onclick=async()=>{
+  if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
+  const h=await STORE.uploadHistory(SHOPEE_ACCT.id,20);
+  $('hist').textContent=JSON.stringify(h,null,2);
+  $('hist').style.display='block';
+};
+
+$('btnExp').onclick=async()=>{
+  if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
+  const exp=await STORE.exportAccount(SHOPEE_ACCT.id);
+  const blob=new Blob([JSON.stringify(exp,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=`${SHOPEE_ACCT.name.replace(/\s+/g,'-')}-${new Date().toISOString().slice(0,10)}.json`;a.click();
+  URL.revokeObjectURL(url);
+  $('expLog').textContent=`Diekspor: ${a.download}`;
+  $('expLog').className='log ok';
+};
+
+$('btnDel').onclick=async()=>{
+  if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
+  if(!confirm(`Hapus akun ${SHOPEE_ACCT.name} dan semua datanya?`))return;
+  await STORE.deleteAccount(SHOPEE_ACCT.id);
+  $('delLog').textContent=`Akun ${SHOPEE_ACCT.name} dihapus`;
+  $('delLog').className='log ok';
+  SHOPEE_ACCT=null;AD_ACCT=null;
+  $('acctLog').textContent='Akun dihapus, pilih lagi';
+};
+</script>
+</body>
+</html>
