@@ -14,6 +14,8 @@
 .plan-row{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:center;
   padding:8px 0;border-top:1px solid var(--border)}
 .plan-row:first-child{border-top:0}
+/* The collapsed no-op state has no kind column and needs no divider padding. */
+.plan-row.single{grid-template-columns:1fr;padding:0}
 .plan-kind{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;
   color:var(--text-dim)}
 .plan-nums{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -27,6 +29,9 @@
 .plan-pill.blocked{color:var(--bad);border-color:var(--bad)}
 .plan-period{font-size:11px;color:var(--text-dim);margin-left:auto}
 .ingest-actions{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
+/* No-op plan: one line plus one button, so drop the extra breathing room. */
+.ingest-head.hidden + #planRows + .ingest-actions,
+#planRows:has(.plan-row.single) + .ingest-actions{margin-top:10px}
 
 .log-ok{margin-top:12px;padding:11px 13px;border-radius:10px;font-size:12.5px;
   background:var(--ok-soft);border:1px solid var(--ok);color:var(--ok);line-height:1.5}

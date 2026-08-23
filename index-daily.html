@@ -24,7 +24,16 @@
         <p>Penyimpanan per akun · dedup otomatis</p>
       </div>
     </div>
-    <button class="btn ghost" id="btnExport">Ekspor Akun</button>
+    <div class="acct">
+      <select id="account" title="Akun aktif"></select>
+      <button class="btn sm" id="btnNewAcct" title="Tambah akun">+</button>
+    </div>
+    <button class="btn ghost" id="btnMap">Kelola Tag</button>
+    <button class="btn ghost" id="btnHist">Riwayat</button>
+    <button class="btn ghost" id="btnExportAcct">Ekspor Akun</button>
+    <button class="btn ghost" id="btnTheme">Mode Gelap</button>
+    <button class="btn" id="btnExport">Export CSV</button>
+    <button class="btn primary" id="btnSave">Simpan Snapshot</button>
   </div>
 </header>
 
@@ -43,7 +52,11 @@
   </div>
 
   <div class="card" id="uploadCard">
-    <div class="card-head"><h2>Unggah CSV</h2><span class="sub" id="upStatus"></span></div>
+    <div class="card-head">
+      <h2>Muat Data</h2>
+      <span class="sub" id="uploadStatus"></span>
+      <button class="btn ghost" id="btnReset">Kosongkan</button>
+    </div>
     <div class="drop" id="drop">
       <div class="ic">📂</div>
       <h3>Pilih file CSV</h3>
@@ -60,55 +73,182 @@
           <span class="sub">Baris baru ditambah, yang sudah ada diperbarui, duplikat dilewati.</span></div>
         <div id="planRows"></div>
         <div class="ingest-actions">
-          <button class="btn primary" id="btnSaveAll">Simpan ke Riwayat</button>
           <button class="btn ghost" id="btnSkipSave">Jangan simpan</button>
+          <button class="btn primary" id="btnSaveAll">Simpan ke Riwayat</button>
         </div>
       </div>
     </div>
     <div id="savedNote" class="hidden log-ok"></div>
   </div>
 
+  <div class="empty-state" id="emptyState">
+    <div class="ic">📊</div>
+    <h3>Belum ada data untuk akun ini</h3>
+    <p>Muat laporan komisi affiliate untuk mulai menganalisis, atau buka Riwayat untuk melihat snapshot tersimpan.</p>
+  </div>
+
   <div id="main" class="hidden">
 
-    <p class="synth" id="synth"></p>
+    <details class="card" id="settingsCard">
+      <summary class="settings-summary">Pengaturan Analisis <span id="settingsPeek"></span></summary>
+      <div class="ctrls" style="margin-top:15px">
+        <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
+        <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
+        <div class="field"><label>PPN Iklan %</label><input type="number" id="ppn" value="11" min="0" step="1"></div>
+        <div class="field"><label>Target ROI %</label><input type="number" id="targetROI" value="80" min="0" step="5">
+          <div class="tip">dasar CPC ideal</div></div>
+        <div class="field"><label>ROAS Scale</label><input type="number" id="thScale" value="2" step="0.1"></div>
+        <div class="field"><label>ROAS Pantau</label><input type="number" id="thPantau" value="1" step="0.1"></div>
+        <div class="field"><label>Min Spend</label><input type="number" id="minSpend" value="50000" step="10000"></div>
+        <div class="field"><label>Min Hari</label><input type="number" id="minDays" value="3" min="1"></div>
+        <div class="field"><label>Lag Atribusi</label><input type="number" id="lagDays" value="3" min="0">
+          <div class="tip">hari terakhir diabaikan</div></div>
+        <div class="field"><label>Streak Stop</label><input type="number" id="streakDays" value="3" min="1">
+          <div class="tip">hari ROAS &lt; 1</div></div>
+        <div class="field"><label>Bobot Tertunda</label><input type="number" id="pendingFactor" value="0.95" step="0.01" max="1" min="0"></div>
+      </div>
+    </details>
+
+    <div id="banners"></div>
     <div class="kpis" id="kpis"></div>
+    <p class="lagnote" id="lagNote"></p>
 
     <div class="tabs">
       <button class="tab active" data-tab="keputusan">Keputusan</button>
-      <button class="tab" data-tab="riwayat">Riwayat Harian</button>
+      <button class="tab" data-tab="adunit">Per Ad Unit</button>
+      <button class="tab" data-tab="kebocoran">Kebocoran Klik</button>
+      <button class="tab" data-tab="harian">Harian</button>
+      <button class="tab" data-tab="perkembangan">Perkembangan</button>
+      <button class="tab" data-tab="tersimpan">Data Tersimpan</button>
       <button class="tab" data-tab="unggahan">Unggahan</button>
+      <button class="tab" data-tab="peluang">Peluang</button>
+      <button class="tab" data-tab="rincian">Rincian</button>
+      <button class="tab" data-tab="matching">Matching</button>
     </div>
 
     <div class="panel active" data-panel="keputusan">
+      <p class="synth" id="synth"></p>
+      <div class="action-grid" id="actionGrid"></div>
+      <div class="calibration" id="lagCal"></div>
+      <div class="dgrid" id="dgrid"></div>
       <div class="card">
-        <div class="card-head"><h2>Vonis per Tag</h2>
-          <span class="sub">Dari file yang baru diunggah</span></div>
+        <div class="card-head"><h2>Semua Tag</h2>
+          <span class="sub" id="filterNote"></span>
+          <button class="btn ghost hidden" id="btnClearFilter">Tampilkan Semua</button>
+          <span class="sub">Klik judul kolom untuk mengurutkan</span></div>
         <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Komisi vs Biaya per Hari</h2>
-          <span class="sub" id="dailyNote"></span></div>
-        <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
       </div>
     </div>
 
-    <div class="panel" data-panel="riwayat">
+    <div class="panel" data-panel="adunit">
       <div class="card">
-        <div class="card-head"><h2>Data Tersimpan</h2>
+        <div class="card-head"><h2>Performa Per Ad Unit</h2>
+          <span class="sub" id="adunitNote"></span></div>
+        <p class="hint">Satu baris per iklan di Meta, lengkap dengan CPM, CTR, reach, dan CPC ideal.
+          Komisi dibagi proporsional dari tag induknya sesuai porsi biaya, karena Shopee hanya melaporkan komisi per tag.</p>
+        <div class="tscroll"><table id="tblUnit"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="kebocoran">
+      <div class="card">
+        <div class="card-head"><h2>Kebocoran Klik</h2><span class="sub" id="leakRange"></span></div>
+        <p class="hint">Selisih antara klik yang Anda bayar di Meta dan klik yang tercatat di Shopee.
+          Di atas 100% itu wajar — satu orang bisa klik berkali-kali dan trafik organik ikut terhitung.
+          Yang perlu dicurigai adalah yang jauh di bawah 100%.</p>
+        <div class="tscroll"><table id="tblLeak"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Sumber Klik</h2></div>
+          <div class="chartbox"><canvas id="chSrc"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Wilayah Klik</h2></div>
+          <div class="chartbox"><canvas id="chRegion"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="harian">
+      <div class="strip" id="dailyStrip"></div>
+      <div class="card">
+        <div class="card-head"><h2>Komisi vs Biaya Iklan</h2><span class="sub" id="matureNote"></span></div>
+        <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>ROAS Harian</h2></div>
+          <div class="chartbox"><canvas id="chRoas"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Klik &amp; Konversi Harian</h2></div>
+          <div class="chartbox"><canvas id="chClicks"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Rincian Harian</h2></div>
+        <div class="tscroll"><table id="tblDaily"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="perkembangan">
+      <div id="trendEmpty" class="empty-state hidden">
+        <div class="ic">📈</div>
+        <h3>Butuh minimal dua snapshot</h3>
+        <p>Simpan snapshot secara berkala untuk melihat perkembangan akun ini dari waktu ke waktu.</p>
+      </div>
+      <div id="trendBody">
+        <p class="lagnote" id="trendBase"></p>
+        <div class="strip" id="trendStrip"></div>
+        <div class="card">
+          <div class="card-head"><h2>Laba &amp; Biaya Antar Periode</h2>
+            <span class="sub" id="trendRange"></span></div>
+          <div class="chartbox tall"><canvas id="chTrend"></canvas></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><h2>ROAS Berbayar vs Gabungan</h2></div>
+            <div class="chartbox"><canvas id="chTrendRoas"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Komposisi Keputusan</h2></div>
+            <div class="chartbox"><canvas id="chTrendMix"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Pergerakan Tag</h2>
+            <span class="sub">Dibanding snapshot pertama</span></div>
+          <p class="hint">Tag yang naik atau turun paling jauh sejak snapshot terlama pada akun ini.</p>
+          <div class="tscroll"><table id="tblMovers"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="tersimpan">
+      <div class="card">
+        <div class="card-head"><h2>Riwayat Harian Tersimpan</h2>
           <span class="sub" id="storedNote"></span></div>
+        <p class="hint">Data ini menumpuk lintas periode dari setiap unggahan yang Anda simpan — tidak perlu mengunggah ulang CSV lama.</p>
         <div class="ctrls" style="grid-template-columns:auto auto auto;margin-bottom:14px">
           <div class="field"><label>Dari</label><input type="date" id="dsStart"></div>
           <div class="field"><label>Sampai</label><input type="date" id="dsEnd"></div>
-          <div class="field" style="justify-content:flex-end"><button class="btn" id="btnRange" style="margin-top:18px">Terapkan</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" id="btnRange">Terapkan</button></div>
         </div>
         <div class="strip" id="storedStrip"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2></div>
         <div class="chartbox tall"><canvas id="chStored"></canvas></div>
-        <div class="grid2">
-          <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
-            <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
-          <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
-            <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>
-        </div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
+          <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
+        <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
+          <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Rincian Harian Tersimpan</h2></div>
         <div class="tscroll"><table id="tblStored"><thead></thead><tbody></tbody></table></div>
       </div>
     </div>
@@ -121,6 +261,100 @@
       </div>
     </div>
 
+    <div class="panel" data-panel="peluang">
+      <div class="card">
+        <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
+          <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
+        <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
+        <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
+        <div id="concentration"></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="rincian">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Komisi per Platform</h2></div>
+          <div class="chartbox"><canvas id="chPlat"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Kategori Teratas</h2></div>
+          <div class="chartbox"><canvas id="chCat"></canvas></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Komisi per Jam</h2></div>
+          <p class="hint">Jam pemesanan, bukan jam klik. Berguna untuk mengatur jadwal tayang iklan.</p>
+          <div class="chartbox"><canvas id="chHour"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Jeda Klik ke Pesanan</h2></div>
+          <p class="hint">Dasar pengaturan lag atribusi.</p>
+          <div class="chartbox"><canvas id="chLag"></canvas></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Produk Teratas</h2></div>
+          <div class="tscroll"><table id="tblProd"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Toko Teratas</h2></div>
+          <div class="tscroll"><table id="tblShop"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Kurva Penyelesaian Komisi</h2></div>
+        <p class="hint">Berapa persen pesanan masih berstatus Tertunda menurut umurnya.
+          Ini yang mendasari bobot komisi tertunda.</p>
+        <div class="chartbox"><canvas id="chSettle"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="matching">
+      <div class="card">
+        <div class="card-head"><h2>Iklan ke Tag</h2>
+          <button class="btn" id="btnMap2">Kelola Mapping</button></div>
+        <p class="hint">Metode bertanda <b>Lemah</b> atau <b>Tidak cocok</b> perlu diperiksa —
+          biaya iklannya bisa menempel ke tag yang keliru.</p>
+        <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="modal" id="mapModal">
+  <div class="modal-box">
+    <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate.
+      Mapping di sini selalu menang atas pencocokan otomatis, dan disimpan terpisah per akun.</p>
+    <div id="mapRows"></div>
+    <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>
+    <div style="margin-top:15px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn ghost" data-close>Batal</button>
+      <button class="btn primary" id="btnSaveMap">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="histModal">
+  <div class="modal-box">
+    <div class="card-head"><h2>Riwayat Snapshot</h2>
+      <span class="sub" id="histAcct"></span>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Tersimpan di browser ini, terpisah per akun. Muat kembali tanpa mengunggah ulang CSV.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn" id="btnExportSnaps">Ekspor Riwayat</button>
+      <button class="btn" id="btnImportSnaps">Impor Riwayat</button>
+      <input type="file" id="importFile" accept=".json" class="hidden">
+    </div>
+    <div id="histRows"></div>
   </div>
 </div>
 
@@ -129,7 +363,7 @@
 <script src="engine.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
-<script src="app-daily.js"></script>
-<script src="app-daily-2.js"></script>
+<script src="app.js"></script>
+<script src="daily-layer.js"></script>
 </body>
 </html>
