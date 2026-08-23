@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23e0653a'/><text x='16' y='22' font-size='15' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>BD</text></svg>">
+<title>Affiliate Harian · Berlima Digital</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles-daily.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="hdr">
+    <div class="brand">
+      <div class="logo">BD</div>
+      <div>
+        <h1>Affiliate Harian</h1>
+        <p>Penyimpanan per akun · dedup otomatis</p>
+      </div>
+    </div>
+    <button class="btn ghost" id="btnExport">Ekspor Akun</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card" id="acctCard">
+    <div class="card-head"><h2>Akun</h2>
+      <span class="sub">CSV tidak memuat identitas akun — pilih dengan teliti. Data tersimpan terpisah per akun.</span></div>
+    <div class="acctrow">
+      <div class="field"><label>Akun Shopee</label><select id="selShopee"></select></div>
+      <button class="btn" id="btnShopeeAdd" title="Akun Shopee baru">+</button>
+      <div class="field"><label>Akun Iklan</label><select id="selAds"></select></div>
+      <button class="btn" id="btnAdsAdd" title="Akun iklan baru">+</button>
+    </div>
+    <div class="chips" id="covStrip"></div>
+  </div>
+
+  <div class="card" id="uploadCard">
+    <div class="card-head"><h2>Unggah CSV</h2><span class="sub" id="upStatus"></span></div>
+    <div class="drop" id="drop">
+      <div class="ic">📂</div>
+      <h3>Pilih file CSV</h3>
+      <p>Affiliate Commission Report · Meta Ads Report · Website Click Report</p>
+      <button class="btn primary drop-btn" id="btnPick" type="button">Pilih File</button>
+      <p class="drop-hint">atau tarik file ke area ini</p>
+    </div>
+    <input type="file" id="files" multiple accept=".csv" class="hidden">
+    <div class="chips" id="chips"></div>
+
+    <div id="ingestPlan" class="hidden">
+      <div class="ingest-box">
+        <div class="ingest-head"><b>Rencana simpan ke akun <span id="planAcct"></span></b>
+          <span class="sub">Baris baru ditambah, yang sudah ada diperbarui, duplikat dilewati.</span></div>
+        <div id="planRows"></div>
+        <div class="ingest-actions">
+          <button class="btn primary" id="btnSaveAll">Simpan ke Riwayat</button>
+          <button class="btn ghost" id="btnSkipSave">Jangan simpan</button>
+        </div>
+      </div>
+    </div>
+    <div id="savedNote" class="hidden log-ok"></div>
+  </div>
+
+  <div id="main" class="hidden">
+
+    <p class="synth" id="synth"></p>
+    <div class="kpis" id="kpis"></div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="keputusan">Keputusan</button>
+      <button class="tab" data-tab="riwayat">Riwayat Harian</button>
+      <button class="tab" data-tab="unggahan">Unggahan</button>
+    </div>
+
+    <div class="panel active" data-panel="keputusan">
+      <div class="card">
+        <div class="card-head"><h2>Vonis per Tag</h2>
+          <span class="sub">Dari file yang baru diunggah</span></div>
+        <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Komisi vs Biaya per Hari</h2>
+          <span class="sub" id="dailyNote"></span></div>
+        <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="riwayat">
+      <div class="card">
+        <div class="card-head"><h2>Data Tersimpan</h2>
+          <span class="sub" id="storedNote"></span></div>
+        <div class="ctrls" style="grid-template-columns:auto auto auto;margin-bottom:14px">
+          <div class="field"><label>Dari</label><input type="date" id="dsStart"></div>
+          <div class="field"><label>Sampai</label><input type="date" id="dsEnd"></div>
+          <div class="field" style="justify-content:flex-end"><button class="btn" id="btnRange" style="margin-top:18px">Terapkan</button></div>
+        </div>
+        <div class="strip" id="storedStrip"></div>
+        <div class="chartbox tall"><canvas id="chStored"></canvas></div>
+        <div class="grid2">
+          <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
+            <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
+          <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
+            <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>
+        </div>
+        <div class="tscroll"><table id="tblStored"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="unggahan">
+      <div class="card">
+        <div class="card-head"><h2>Riwayat Unggahan</h2>
+          <span class="sub">Bukti anti-duplikasi: tiap file dicatat berapa yang baru, diperbarui, dan dilewati.</span></div>
+        <div class="tscroll"><table id="tblUploads"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="engine.js"></script>
+<script src="daily-agg.js"></script>
+<script src="daily-store.js"></script>
+<script src="app-daily.js"></script>
+<script src="app-daily-2.js"></script>
+</body>
+</html>
