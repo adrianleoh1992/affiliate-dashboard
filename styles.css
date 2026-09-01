@@ -513,3 +513,24 @@ tbody tr:hover{background:var(--surface-2)}
 .statcard .sf.mute{font-weight:700;color:var(--warn);margin-top:0}
 @media(max-width:640px){.statgrid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:7px}
   .statcard{padding:8px 9px 9px;min-height:118px}.statcard .sq{padding:5px 6px}}
+
+/* ── Kelengkapan data ───────────────────────────────────────────────────────
+   Names the exact dates to download rather than saying "data tidak lengkap".
+   The click report caps at 7 days, so gaps are cut into 7-day pieces — each
+   chip is one download. */
+.gap-ok{font-size:12.5px;color:var(--ok);background:var(--ok-soft);border:1px solid var(--ok);
+  border-radius:10px;padding:11px 13px;line-height:1.5;font-weight:600}
+.gap-warn{font-size:12.5px;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn);
+  border-radius:10px;padding:11px 13px;line-height:1.55;margin-bottom:12px}
+.gap-warn b{font-weight:800}
+.gap-row{border-top:1px solid var(--border);padding:12px 0 4px}
+.gap-row:first-of-type{border-top:0;padding-top:0}
+.gap-head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+.gap-head b{font-size:13px;font-weight:800}
+.gap-head span{font-size:11.5px;color:var(--text-dim);font-weight:600}
+.gap-runs{display:flex;flex-wrap:wrap;gap:6px}
+.gap-chip{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;
+  font-variant-numeric:tabular-nums;padding:5px 10px;border-radius:8px;
+  background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn)}
+.gap-chip em{font-style:normal;font-size:10px;font-weight:600;opacity:.75}
+@media(max-width:640px){.gap-chip{width:100%;justify-content:space-between}}

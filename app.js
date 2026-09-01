@@ -79,7 +79,7 @@ function rmFile(i){
   if(DATA.affiliate.length){recalc();toast('File dihapus: '+f.name)}
   else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast('File dihapus')}
 }
-function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';renderChips();$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
+function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';renderChips();$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');$('gapCard').classList.add('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
 // Clearing is destructive and used to fire on a single click.
 $('btnReset').onclick=()=>{if(!FILES.length)return reset();if(confirm(`Kosongkan ${FILES.length} file yang dimuat? Snapshot tersimpan tidak terhapus.`)){reset();toast('Data dikosongkan')}};
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
@@ -116,7 +116,7 @@ function renderPeriod(){
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>$('setModal').classList.add('show');
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -168,6 +168,74 @@ function renderOpportunity(){
        dengan ROAS ${rx(C.topRoas)}. Dua tag teratas menguasai ${C.top2Share.toFixed(0)}% dari ${C.count} tag berbayar.
        Kalau produk itu bermasalah, sebagian besar anggaran ikut terdampak.</div>`
     : `<p class="hint">Sebaran anggaran wajar: tag terbesar ${C.topShare.toFixed(0)}% dari ${C.count} tag berbayar.</p>`;
+}
+
+/* ── Kelengkapan data ───────────────────────────────────────────────────────
+   A day with no rows and a day with genuinely zero activity look identical
+   once aggregated, so coverage is read from the raw files: a date is covered
+   when at least one row carries it. The gap that actually corrupts numbers is
+   ads-without-clicks — every CPC Shopee, % masuk and leak figure on those days
+   is computed against clicks that were never uploaded. */
+const SRC={
+  affiliate:{label:'Laporan Komisi',col:'Waktu Pemesanan',get:()=>DATA.affiliate},
+  ads:{label:'Meta Ads',col:'Reporting starts',get:()=>DATA.ads},
+  clicks:{label:'Laporan Klik',col:'Waktu Klik',get:()=>DATA.clicks,chunk:7},
+};
+function datesOf(k){
+  const c=SRC[k].col,out=new Set();
+  SRC[k].get().forEach(r=>{const d=E.dayOnly(r[c]);if(E.isDate(d))out.add(d)});
+  return out;
+}
+function chunkRuns(missing,max){
+  const runs=[];let cur=null;
+  missing.forEach(d=>{
+    if(cur&&shiftDay(cur.end,1)===d&&(!max||cur.n<max)){cur.end=d;cur.n++;return}
+    cur={start:d,end:d,n:1};runs.push(cur);
+  });
+  return runs;
+}
+function renderGaps(){
+  const card=$('gapCard');
+  const have={};let min='',max='';
+  Object.keys(SRC).forEach(k=>{
+    have[k]=datesOf(k);
+    have[k].forEach(d=>{if(!min||d<min)min=d;if(!max||d>max)max=d});
+  });
+  if(!min){card.classList.add('hidden');return}
+  const all=[];
+  for(let d=min;d<=max;d=shiftDay(d,1))all.push(d);
+  const rows=[],adsDays=have.ads;
+  let clickGapWithSpend=0;
+  Object.keys(SRC).forEach(k=>{
+    if(!have[k].size)return; // a report not loaded at all is already a banner
+    const miss=all.filter(d=>!have[k].has(d));
+    if(!miss.length)return;
+    if(k==='clicks')clickGapWithSpend=miss.filter(d=>adsDays.has(d)).length;
+    rows.push({k,label:SRC[k].label,miss,runs:chunkRuns(miss,SRC[k].chunk)});
+  });
+  // Name the reports actually loaded. Claiming all three are complete while
+  // two of them were never uploaded is the worst thing this card could say.
+  const loaded=Object.keys(SRC).filter(k=>have[k].size);
+  const missingReports=Object.keys(SRC).filter(k=>!have[k].size).map(k=>SRC[k].label);
+  if(!rows.length){
+    card.classList.remove('hidden');
+    $('gapNote').textContent=`${min} — ${max} · ${all.length} hari`;
+    $('gapBody').innerHTML=`<div class="gap-ok">${loaded.map(k=>SRC[k].label).join(' dan ')} menutupi seluruh ${all.length} hari, tidak ada tanggal yang bolong.</div>`
+      +(missingReports.length?`<div class="gap-warn" style="margin:12px 0 0">${missingReports.join(' dan ')} belum dimuat sama sekali.</div>`:'');
+    return;
+  }
+  card.classList.remove('hidden');
+  $('gapNote').textContent=`${min} — ${max} · ${all.length} hari`;
+  $('gapBody').innerHTML=(missingReports.length?`<div class="gap-warn"><b>${missingReports.join(' dan ')} belum dimuat sama sekali.</b></div>`:'')
+    +(clickGapWithSpend
+    ? `<div class="gap-warn"><b>${clickGapWithSpend} hari ada biaya iklan tapi tidak ada data klik.</b>
+       Pada hari-hari itu CPC Shopee, % klik masuk, dan klik hilang dihitung terhadap klik yang belum diunggah —
+       angkanya belum bisa dipercaya sampai filenya masuk.</div>` : '')
+    +rows.map(r=>`<div class="gap-row">
+      <div class="gap-head"><b>${r.label}</b>
+        <span>${nf(r.miss.length)} hari belum ada${SRC[r.k].chunk?` · ${r.runs.length} file lagi (maks ${SRC[r.k].chunk} hari per unduhan)`:''}</span></div>
+      <div class="gap-runs">${r.runs.map(x=>`<span class="gap-chip">${x.start}${x.n>1?' → '+x.end:''}<em>${x.n} hari</em></span>`).join('')}</div>
+    </div>`).join('');
 }
 function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
 // Four cards, matching the mind map. Every number that used to sit in its own
