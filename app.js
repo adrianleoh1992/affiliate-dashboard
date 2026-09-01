@@ -58,7 +58,7 @@ $('btnMore').onclick=()=>$('files').click();
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
 function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -171,11 +171,80 @@ function renderKpi(){
       ['ROAS Iklan',rx(k.paidRoas)],
       ['ROAS Gabungan',rx(k.roasEff)]])
   ].join('');
-  $('kpis').querySelectorAll('.kpi.expandable').forEach(el=>{
+  bindDrill('kpis');
+}
+function bindDrill(id){
+  $(id).querySelectorAll('.kpi.expandable').forEach(el=>{
     const flip=()=>{const o=el.classList.toggle('open');el.setAttribute('aria-expanded',o?'true':'false')};
     el.onclick=flip;
     el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();flip()}};
   });
+}
+// Meta reports clicks per platform; Shopee reports them per Perujuk. Keeping
+// both on the main screen is the point — where the two disagree is where the
+// money goes missing.
+function metaBySource(){
+  const r=RESULT.range,out={};
+  DATA.ads.forEach(a=>{
+    const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<r.start||d>r.end)return;
+    const p=(a.Platform||'').trim()||'Lainnya';
+    out[p]=(out[p]||0)+(parseInt(a['Link clicks']||0,10)||0);
+  });
+  return Object.entries(out).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+}
+// The click report covers its own span, usually shorter than the analysis
+// range. Dividing full-range spend by window-only clicks overstates the cost
+// per click — here it read Rp247 against a true Rp105.
+function spendInClickWindow(){
+  const r=RESULT.range; if(!r.clickStart)return null;
+  let s=0;
+  DATA.ads.forEach(a=>{
+    const d=E.dayOnly(a['Reporting starts']);
+    if(!E.isDate(d)||d<r.clickStart||d>r.clickEnd)return;
+    s+=parseFloat(a['Amount spent (IDR)']||a['Amount spent']||0)||0;
+  });
+  return s*(1+(RESULT.options.ppn||0)/100);
+}
+function renderClickKpi(){
+  const k=RESULT.kpi,r=RESULT.range,el=$('clickKpis');
+  const leaks=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
+  if(!leaks.length&&!DATA.clicks.length){el.innerHTML='';return}
+  // Window-matched totals: the click report covers its own date span, so the
+  // ratio has to compare like with like or it is meaningless.
+  const adMeta=leaks.reduce((s,t)=>s+t.leak.metaClicks,0);
+  const adShopee=leaks.reduce((s,t)=>s+t.leak.shopeeClicks,0);
+  const lostTags=leaks.filter(t=>t.leak.shopeeClicks<t.leak.metaClicks)
+    .sort((a,b)=>(a.leak.shopeeClicks-a.leak.metaClicks)-(b.leak.shopeeClicks-b.leak.metaClicks));
+  const lost=lostTags.reduce((s,t)=>s+(t.leak.metaClicks-t.leak.shopeeClicks),0);
+  const gainTags=leaks.filter(t=>t.leak.shopeeClicks>t.leak.metaClicks);
+  const gained=gainTags.reduce((s,t)=>s+(t.leak.shopeeClicks-t.leak.metaClicks),0);
+  const pctIn=adMeta?adShopee/adMeta*100:0;
+  const ms=metaBySource(),msTot=ms.reduce((s,x)=>s+x[1],0);
+  const ss=(RESULT.breakdown.clickSource||[]),ssTot=ss.reduce((s,x)=>s+x.count,0);
+  const win=r.clickStart?`${r.clickStart} s/d ${r.clickEnd}`:'klik belum dimuat';
+  const winSpend=spendInClickWindow();
+
+  el.innerHTML=[
+    kpiCard('','Klik Meta',nf(k.clicks),`${r.start} s/d ${r.end}`,[
+      ['CPM',rp(k.cpm)],['CPC',full(k.cpc)],
+      ['CTR',(k.ctr||0).toFixed(2)+'%'],['Impresi',nf(k.impr)],
+      ...ms.slice(0,4).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`])]),
+    kpiCard('','Klik Shopee',nf(k.shopeeClicks),win,[
+      ['Biaya per klik masuk',adShopee&&winSpend!=null?full(winSpend/adShopee):'—'],
+      ['Biaya per pesanan',k.orders?full(k.costPerOrder):'—'],
+      ...ss.slice(0,4).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`])]),
+    kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
+      lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
+      lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
+              ['Klik ekstra dari share',`+${nf(gained)}`,1]]
+            :[['Klik ekstra dari share',`+${nf(gained)}`,1]]),
+    kpiCard(pctIn<100?'bad':'','% Klik Masuk Shopee',pctIn.toFixed(1)+'%',
+      pctIn>100?'di atas 100% karena dibagikan orang':'sebagian klik tidak sampai',[
+      [`${gainTags.length} tag dibagikan`,`+${nf(gained)} klik`],
+      [`${lostTags.length} tag bocor`,`−${nf(lost)} klik`],
+      ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]])
+  ].join('');
+  bindDrill('clickKpis');
 }
 function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
 function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()})}

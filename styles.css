@@ -116,6 +116,12 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .krow span:first-child{color:var(--text-dim);font-weight:500}
 .krow span:last-child{font-weight:700}
 .krow.est span{opacity:.72;font-style:italic}
+/* Second row: the click funnel. Same mechanics as the four above it, one step
+   quieter so the money cards still lead. */
+.kpis-sub{margin-top:-4px}
+.kpis-sub:empty{display:none}
+.kpis-sub .kpi{background:var(--surface-2)}
+.kpis-sub .kpi .val{font-size:21px}
 .badge-dot{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
   margin-left:6px;padding:0 4px;border-radius:999px;background:var(--bad);color:#fff;
   font-size:9.5px;font-weight:800;line-height:1}
