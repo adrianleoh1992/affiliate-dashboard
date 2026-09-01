@@ -75,6 +75,7 @@
       <button class="tab active" data-tab="iklan">Iklan</button>
       <button class="tab" data-tab="klik">Klik</button>
       <button class="tab" data-tab="harian">Harian</button>
+      <button class="tab" data-tab="produk">Produk</button>
       <button class="tab" data-tab="rincian">Rincian</button>
     </div>
 
@@ -130,6 +131,17 @@
     <div class="panel" data-panel="harian">
       <div class="strip" id="dailyStrip"></div>
       <div class="card">
+        <div class="card-head"><h2>Sebulan Sekali Lihat</h2>
+          <span class="sub" id="calNote"></span>
+          <div class="calswitch" id="calSwitch">
+            <button class="ptab active" data-cal="net">Laba</button>
+            <button class="ptab" data-cal="roas">ROAS</button>
+            <button class="ptab" data-cal="comm">Komisi</button>
+            <button class="ptab" data-cal="spend">Biaya</button>
+          </div></div>
+        <div id="calendar"></div>
+      </div>
+      <div class="card">
         <div class="card-head"><h2>Komisi vs Biaya Iklan</h2><span class="sub" id="matureNote"></span></div>
         <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
       </div>
@@ -180,16 +192,32 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="rincian">
+    <div class="panel" data-panel="produk">
+      <div class="ptabs" id="prodTabs">
+        <button class="ptab active" data-prod="comm">Komisi Terbesar</button>
+        <button class="ptab" data-prod="qty">Produk Terlaris</button>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2 id="prodTitle">Komisi Terbesar</h2>
+          <span class="sub" id="prodNote"></span></div>
+        <div class="tscroll"><table id="tblProdMain"><thead></thead><tbody></tbody></table></div>
+      </div>
       <div class="grid2">
         <div class="card">
-          <div class="card-head"><h2>Komisi per Platform</h2></div>
-          <div class="chartbox"><canvas id="chPlat"></canvas></div>
+          <div class="card-head"><h2>Toko Teratas</h2></div>
+          <div class="tscroll"><table id="tblShop"><thead></thead><tbody></tbody></table></div>
         </div>
         <div class="card">
           <div class="card-head"><h2>Kategori Teratas</h2></div>
           <div class="chartbox"><canvas id="chCat"></canvas></div>
         </div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="rincian">
+      <div class="card">
+        <div class="card-head"><h2>Komisi per Platform</h2></div>
+        <div class="chartbox"><canvas id="chPlat"></canvas></div>
       </div>
       <div class="grid2">
         <div class="card">
@@ -201,16 +229,6 @@
           <div class="card-head"><h2>Jeda Klik ke Pesanan</h2></div>
           <p class="hint">Dasar pengaturan lag atribusi.</p>
           <div class="chartbox"><canvas id="chLag"></canvas></div>
-        </div>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <div class="card-head"><h2>Produk Teratas</h2></div>
-          <div class="tscroll"><table id="tblProd"><thead></thead><tbody></tbody></table></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Toko Teratas</h2></div>
-          <div class="tscroll"><table id="tblShop"><thead></thead><tbody></tbody></table></div>
         </div>
       </div>
       <div class="card">

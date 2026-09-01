@@ -58,7 +58,7 @@ $('btnMore').onclick=()=>$('files').click();
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
 function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -243,10 +243,14 @@ function renderClickKpi(){
       ...ms.slice(0,3).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`]),
       ['CR memakai semua pesanan','termasuk dari tag organik',1]]),
     kpiCard('','Klik Shopee',nf(sC),`${win} · ${nf(k.shopeeClicks)} total`,[
-      ['Impresi','tidak dilaporkan',1],['CPM',per1k(sp,sC)],['CPC',per(sp,sC)],
+      // Shopee reports no impressions, so there is no CPM to report either.
+      // Spend ÷ Shopee clicks × 1000 is a cost per thousand arrivals, not a
+      // cost per thousand views — printing it under the label CPM invites the
+      // wrong comparison with the Rp5.704 next to it.
+      ['Impresi','—',1],['CPM','—',1],['CPC',per(sp,sC)],
       ['CTR',pc(sC,im)],['CR',pc(od,sC)],
       ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
-      ['CPM & CTR memakai impresi Meta','Shopee tak punya impresi',1]]),
+      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
       lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
       lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
@@ -357,16 +361,81 @@ function renderTrend(){
     <td><span class="badge ${m.toStatus||'evaluasi'}">${esc(m.toStatus||'—')}</span>${m.changed?' <span class="pill">berubah</span>':''}</td></tr>`).join('')
     :`<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Belum ada tag yang muncul di dua snapshot.</td></tr>`;
 }
+let PRODVIEW='comm';
 function renderDetails(){
   const b=RESULT.breakdown;
-  $('tblProd').querySelector('thead').innerHTML='<tr>'+['Produk','Komisi','GMV','Qty'].map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
-  $('tblProd').querySelector('tbody').innerHTML=b.productByComm.slice(0,12).map(p=>`<tr>
-    <td style="white-space:normal;max-width:320px">${esc(p.name)}</td>
-    <td class="num">${rp(p.comm)}</td><td class="num">${rp(p.gmv)}</td><td class="num">${nf(p.qty)}</td></tr>`).join('');
   $('tblShop').querySelector('thead').innerHTML='<tr><th>Toko</th><th class="num">Komisi</th></tr>';
   $('tblShop').querySelector('tbody').innerHTML=b.shop.slice(0,12).map(s=>`<tr>
     <td style="white-space:normal;max-width:280px">${esc(s.name)}</td><td class="num">${rp(s.comm)}</td></tr>`).join('');
+  renderProducts();
 }
+function renderProducts(){
+  const b=RESULT.breakdown,byComm=PRODVIEW==='comm';
+  const rows=(byComm?b.productByComm:b.productByQty).slice(0,20);
+  $('prodTitle').textContent=byComm?'Komisi Terbesar':'Produk Terlaris';
+  $('prodNote').textContent=byComm?'diurutkan dari komisi tertinggi':'diurutkan dari jumlah unit terjual';
+  const max=rows.reduce((m,p)=>Math.max(m,byComm?p.comm:p.qty),0)||1;
+  $('tblProdMain').querySelector('thead').innerHTML='<tr>'+
+    ['Produk',byComm?'Komisi':'Qty','','GMV','Order',byComm?'Qty':'Komisi']
+      .map((h,i)=>`<th class="${i&&i!==2?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblProdMain').querySelector('tbody').innerHTML=rows.length?rows.map(p=>{
+    const lead=byComm?p.comm:p.qty;
+    // A bar next to the number turns twenty rows into one shape you can scan.
+    return `<tr><td style="white-space:normal;max-width:340px">${esc(p.name)}</td>
+      <td class="num"><b>${byComm?rp(p.comm):nf(p.qty)}</b></td>
+      <td class="barcell"><span class="minibar" style="width:${(lead/max*100).toFixed(1)}%"></span></td>
+      <td class="num">${rp(p.gmv)}</td><td class="num">${nf(p.orders)}</td>
+      <td class="num">${byComm?nf(p.qty):rp(p.comm)}</td></tr>`;
+  }).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:22px">Belum ada data produk.</td></tr>`;
+}
+document.querySelectorAll('[data-prod]').forEach(b=>b.onclick=()=>{
+  PRODVIEW=b.dataset.prod;
+  document.querySelectorAll('[data-prod]').forEach(x=>x.classList.toggle('active',x===b));
+  renderProducts();
+});
+// Helicopter view: one square per day, so a whole month reads as a shape.
+// The daily table below answers "how much"; this answers "which days".
+let CALVIEW='net';
+const CALDEF={
+  net:{label:'Laba',fmt:d=>rp(d.net),val:d=>d.net,signed:true},
+  roas:{label:'ROAS',fmt:d=>d.spend?rx(d.roas):'—',val:d=>d.spend?d.roas-1:null,signed:true},
+  comm:{label:'Komisi',fmt:d=>rp(d.comm),val:d=>d.comm,signed:false},
+  spend:{label:'Biaya',fmt:d=>rp(d.spend),val:d=>d.spend,signed:false},
+};
+function renderCalendar(){
+  const el=$('calendar'),days=RESULT.daily;
+  if(!days.length){el.innerHTML='';$('calNote').textContent='';return}
+  const C=CALDEF[CALVIEW],vals=days.map(C.val).filter(v=>v!=null&&isFinite(v));
+  const mag=Math.max(...vals.map(Math.abs),1);
+  const byMonth={};
+  days.forEach(d=>{(byMonth[d.date.slice(0,7)]=byMonth[d.date.slice(0,7)]||{})[d.date]=d});
+  const NM=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  const DOW=['Sen','Sel','Rab','Kam','Jum','Sab','Min'];
+  el.innerHTML=Object.keys(byMonth).sort().map(mk=>{
+    const [y,m]=mk.split('-').map(Number);
+    const first=new Date(Date.UTC(y,m-1,1)),last=new Date(Date.UTC(y,m,0)).getUTCDate();
+    const pad=(first.getUTCDay()+6)%7; // grid starts Monday
+    let cells=Array(pad).fill('<span class="cday pad"></span>');
+    for(let i=1;i<=last;i++){
+      const key=`${mk}-${String(i).padStart(2,'0')}`,d=byMonth[mk][key];
+      if(!d){cells.push(`<span class="cday none"><b>${i}</b></span>`);continue}
+      const v=C.val(d);
+      let cls='zero',op=0;
+      if(v!=null&&isFinite(v)){op=Math.min(Math.abs(v)/mag,1);cls=C.signed?(v>=0?'pos':'neg'):'pos'}
+      cells.push(`<span class="cday ${cls}${d.mature?'':' raw'}" style="--i:${op.toFixed(3)}"
+        title="${key} · ${C.label} ${C.fmt(d)} · komisi ${rp(d.comm)} · biaya ${rp(d.spend)} · ${nf(d.orders)} order${d.mature?'':' · data belum matang'}">
+        <b>${i}</b><i>${C.fmt(d)}</i></span>`);
+    }
+    return `<div class="calmonth"><h4>${NM[m-1]} ${y}</h4>
+      <div class="cgrid">${DOW.map(x=>`<span class="cdow">${x}</span>`).join('')}${cells.join('')}</div></div>`;
+  }).join('');
+  $('calNote').textContent=`${days.length} hari · kotak bergaris belum matang`;
+}
+document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
+  CALVIEW=b.dataset.cal;
+  document.querySelectorAll('[data-cal]').forEach(x=>x.classList.toggle('active',x===b));
+  renderCalendar();
+});
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>a.confidence-b.confidence).map(m=>{
