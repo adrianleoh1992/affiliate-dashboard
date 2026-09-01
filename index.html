@@ -27,8 +27,9 @@
       <select id="account" title="Akun aktif"></select>
       <button class="btn sm" id="btnNewAcct" title="Tambah akun">+</button>
     </div>
-    <button class="btn ghost" id="btnMap">Kelola Tag</button>
+    <button class="btn ghost" id="btnMap">Kelola Tag<span class="badge-dot hidden" id="mapAlert"></span></button>
     <button class="btn ghost" id="btnHist">Riwayat</button>
+    <button class="btn ghost" id="btnSet">Setelan</button>
     <button class="btn ghost" id="btnTheme">Mode Gelap</button>
     <button class="btn" id="btnExport">Export CSV</button>
     <button class="btn primary" id="btnSave">Simpan Snapshot</button>
@@ -41,6 +42,7 @@
     <div class="card-head">
       <h2>Muat Data</h2>
       <span class="sub" id="uploadStatus"></span>
+      <button class="btn ghost hidden" id="btnMore">Tambah / Ganti File</button>
       <button class="btn ghost" id="btnReset">Kosongkan</button>
     </div>
     <div class="drop" id="drop">
@@ -62,44 +64,20 @@
 
   <div id="main" class="hidden">
 
-    <details class="card" id="settingsCard">
-      <summary class="settings-summary">Pengaturan Analisis <span id="settingsPeek"></span></summary>
-      <div class="ctrls" style="margin-top:15px">
-        <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
-        <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
-        <div class="field"><label>PPN Iklan %</label><input type="number" id="ppn" value="11" min="0" step="1"></div>
-        <div class="field"><label>Target ROI %</label><input type="number" id="targetROI" value="80" min="0" step="5">
-          <div class="tip">dasar CPC ideal</div></div>
-        <div class="field"><label>ROAS Scale</label><input type="number" id="thScale" value="2" step="0.1"></div>
-        <div class="field"><label>ROAS Pantau</label><input type="number" id="thPantau" value="1" step="0.1"></div>
-        <div class="field"><label>Min Spend</label><input type="number" id="minSpend" value="50000" step="10000"></div>
-        <div class="field"><label>Min Hari</label><input type="number" id="minDays" value="3" min="1"></div>
-        <div class="field"><label>Lag Atribusi</label><input type="number" id="lagDays" value="3" min="0">
-          <div class="tip">hari terakhir diabaikan</div></div>
-        <div class="field"><label>Streak Stop</label><input type="number" id="streakDays" value="3" min="1">
-          <div class="tip">hari ROAS &lt; 1</div></div>
-        <div class="field"><label>Bobot Tertunda</label><input type="number" id="pendingFactor" value="0.95" step="0.01" max="1" min="0"></div>
-      </div>
-    </details>
-
     <div id="banners"></div>
+    <p class="synth" id="synth"></p>
     <div class="kpis" id="kpis"></div>
     <p class="lagnote" id="lagNote"></p>
+    <div class="action-grid" id="actionGrid"></div>
 
     <div class="tabs">
-      <button class="tab active" data-tab="keputusan">Keputusan</button>
-      <button class="tab" data-tab="adunit">Per Ad Unit</button>
-      <button class="tab" data-tab="kebocoran">Kebocoran Klik</button>
+      <button class="tab active" data-tab="iklan">Iklan</button>
+      <button class="tab" data-tab="klik">Klik</button>
       <button class="tab" data-tab="harian">Harian</button>
-      <button class="tab" data-tab="perkembangan">Perkembangan</button>
-      <button class="tab" data-tab="peluang">Peluang</button>
       <button class="tab" data-tab="rincian">Rincian</button>
-      <button class="tab" data-tab="matching">Matching</button>
     </div>
 
-    <div class="panel active" data-panel="keputusan">
-      <p class="synth" id="synth"></p>
-      <div class="action-grid" id="actionGrid"></div>
+    <div class="panel active" data-panel="iklan">
       <div class="calibration" id="lagCal"></div>
       <div class="dgrid" id="dgrid"></div>
       <div class="card">
@@ -109,9 +87,6 @@
           <span class="sub">Klik judul kolom untuk mengurutkan</span></div>
         <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
       </div>
-    </div>
-
-    <div class="panel" data-panel="adunit">
       <div class="card">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
           <span class="sub" id="adunitNote"></span></div>
@@ -119,14 +94,24 @@
           Komisi dibagi proporsional dari tag induknya sesuai porsi biaya, karena Shopee hanya melaporkan komisi per tag.</p>
         <div class="tscroll"><table id="tblUnit"><thead></thead><tbody></tbody></table></div>
       </div>
+      <div class="card">
+        <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
+          <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
+        <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
+        <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
+        <div id="concentration"></div>
+      </div>
     </div>
 
-    <div class="panel" data-panel="kebocoran">
+    <div class="panel" data-panel="klik">
       <div class="card">
-        <div class="card-head"><h2>Kebocoran Klik</h2><span class="sub" id="leakRange"></span></div>
-        <p class="hint">Selisih antara klik yang Anda bayar di Meta dan klik yang tercatat di Shopee.
-          Di atas 100% itu wajar — satu orang bisa klik berkali-kali dan trafik organik ikut terhitung.
-          Yang perlu dicurigai adalah yang jauh di bawah 100%.</p>
+        <div class="card-head"><h2>Klik Meta vs Klik Shopee</h2><span class="sub" id="leakRange"></span></div>
+        <p class="hint">Kolom <b>± Share</b> bertanda dua arah. <b>Positif</b> berarti klik yang masuk Shopee lebih banyak
+          daripada yang Anda bayar — kontennya dibagikan orang, dan itu bagus. <b>Negatif</b> berarti klik yang sudah
+          dibayar tidak sampai ke Shopee — di situ baru ada kebocoran link.</p>
         <div class="tscroll"><table id="tblLeak"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="grid2">
@@ -161,9 +146,7 @@
         <div class="card-head"><h2>Rincian Harian</h2></div>
         <div class="tscroll"><table id="tblDaily"><thead></thead><tbody></tbody></table></div>
       </div>
-    </div>
-
-    <div class="panel" data-panel="perkembangan">
+      <h3 class="sec-split">Perkembangan antar snapshot</h3>
       <div id="trendEmpty" class="empty-state hidden">
         <div class="ic">📈</div>
         <h3>Butuh minimal dua snapshot</h3>
@@ -193,19 +176,6 @@
           <p class="hint">Tag yang naik atau turun paling jauh sejak snapshot terlama pada akun ini.</p>
           <div class="tscroll"><table id="tblMovers"><thead></thead><tbody></tbody></table></div>
         </div>
-      </div>
-    </div>
-
-    <div class="panel" data-panel="peluang">
-      <div class="card">
-        <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
-          <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
-        <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
-        <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
-        <div id="concentration"></div>
       </div>
     </div>
 
@@ -250,16 +220,6 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="matching">
-      <div class="card">
-        <div class="card-head"><h2>Iklan ke Tag</h2>
-          <button class="btn" id="btnMap2">Kelola Mapping</button></div>
-        <p class="hint">Metode bertanda <b>Lemah</b> atau <b>Tidak cocok</b> perlu diperiksa —
-          biaya iklannya bisa menempel ke tag yang keliru.</p>
-        <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
-      </div>
-    </div>
-
   </div>
 </div>
 
@@ -267,13 +227,56 @@
   <div class="modal-box">
     <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
       <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate.
-      Mapping di sini selalu menang atas pencocokan otomatis, dan disimpan terpisah per akun.</p>
+    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate —
+      <b>Telesin video 2</b> di Meta adalah <b>TelesinGripvideo2</b> di Shopee. Mapping di sini selalu menang
+      atas pencocokan otomatis, dan disimpan terpisah per akun. Satu link bisa membawa sampai lima tag;
+      yang pertama dipakai sebagai tag induk.</p>
+    <h3 class="sec-split">Hasil pencocokan saat ini</h3>
+    <p class="hint">Metode bertanda <b>Lemah</b> atau <b>Tidak cocok</b> perlu diperiksa —
+      biaya iklannya bisa menempel ke tag yang keliru.</p>
+    <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+    <h3 class="sec-split">Perbaiki manual</h3>
     <div id="mapRows"></div>
     <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>
     <div style="margin-top:15px;display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost" data-close>Batal</button>
       <button class="btn primary" id="btnSaveMap">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="setModal">
+  <div class="modal-box">
+    <div class="card-head"><h2>Setelan Analisis</h2>
+      <span class="sub" id="settingsPeek"></span>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Disimpan per akun. Sebagian besar orang cukup memakai preset.</p>
+    <div class="presets">
+      <button class="btn sm" data-preset="konservatif">Konservatif</button>
+      <button class="btn sm" data-preset="seimbang">Seimbang</button>
+      <button class="btn sm" data-preset="agresif">Agresif</button>
+    </div>
+    <div class="ctrls" style="margin-top:15px">
+      <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
+      <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
+      <div class="field"><label>PPN Iklan</label>
+        <select id="ppn">
+          <option value="0" selected>0% — tanpa PPN</option>
+          <option value="11">11%</option>
+          <option value="12">12%</option>
+        </select>
+        <div class="tip">sesuai tagihan Meta</div></div>
+      <div class="field"><label>Target ROI %</label><input type="number" id="targetROI" value="80" min="0" step="5">
+        <div class="tip">dasar CPC ideal</div></div>
+      <div class="field"><label>ROAS Scale</label><input type="number" id="thScale" value="2" step="0.1"></div>
+      <div class="field"><label>ROAS Pantau</label><input type="number" id="thPantau" value="1" step="0.1"></div>
+      <div class="field"><label>Min Spend</label><input type="number" id="minSpend" value="50000" step="10000"></div>
+      <div class="field"><label>Min Hari</label><input type="number" id="minDays" value="3" min="1"></div>
+      <div class="field"><label>Lag Atribusi</label><input type="number" id="lagDays" value="3" min="0">
+        <div class="tip">hari terakhir diabaikan</div></div>
+      <div class="field"><label>Streak Stop</label><input type="number" id="streakDays" value="3" min="1">
+        <div class="tip">hari ROAS &lt; 1</div></div>
+      <div class="field"><label>Bobot Tertunda</label><input type="number" id="pendingFactor" value="0.95" step="0.01" max="1" min="0"></div>
     </div>
   </div>
 </div>

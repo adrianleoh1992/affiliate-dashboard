@@ -18,7 +18,7 @@ function renderAccounts(){let a=accounts(),s=$('account');s.innerHTML=a.map(x=>`
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);$('btnTheme').textContent=t==='dark'?'Mode Terang':'Mode Gelap';localStorage.setItem(LS.theme,t);if(RESULT)render()}
 applyTheme(localStorage.getItem(LS.theme)||'light');renderAccounts();
 $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
-$('account').onchange=()=>{setActive($('account').value);reset();renderAccounts();renderHistory()};
+$('account').onchange=()=>{setActive($('account').value);reset();renderAccounts();loadOpts();renderHistory()};
 $('btnNewAcct').onclick=()=>{let n=prompt('Nama akun baru');if(!n)return;n=n.trim();if(!n)return;let a=accounts();if(!a.includes(n))a.push(n);localStorage.setItem(LS.accounts,JSON.stringify(a));setActive(n);reset();renderAccounts();toast('Akun dibuat: '+n)};
 const drop=$('drop');drop.onclick=()=>$('files').click();['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>files(e.dataTransfer.files));$('files').onchange=e=>files(e.target.files);
 function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';
@@ -34,7 +34,12 @@ function finish(){renderChips();if(!DATA.affiliate.length)return toast('Laporan 
 function renderChips(){$('chips').innerHTML=FILES.map((f,i)=>`<span class="chip ${f.type}"><span class="file-row"><span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows)} baris</span><button class="rmfile" data-rm="${i}" title="Hapus file ini" aria-label="Hapus ${esc(f.name)}">×</button></span></span>`).join('');let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ');
   // Removing one file rebuilds from the survivors, so a mis-drop no longer
   // forces clearing everything and re-uploading all three reports.
-  $('chips').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});}
+  $('chips').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});
+  // Once the reports are in, the upload box has done its job. Shrinking it
+  // gives the top of the screen back to the numbers.
+  const loaded=FILES.length>0;
+  $('uploadCard').classList.toggle('compact',loaded);
+  $('btnMore').classList.toggle('hidden',!loaded);}
 function rmFile(i){
   const f=FILES[i]; if(!f)return;
   FILES.splice(i,1);
@@ -49,6 +54,7 @@ function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTE
 // Clearing is destructive and used to fire on a single click.
 $('btnReset').onclick=()=>{if(!FILES.length)return reset();if(confirm(`Kosongkan ${FILES.length} file yang dimuat? Snapshot tersimpan tidak terhapus.`)){reset();toast('Data dikosongkan')}};
 $('btnPick').onclick=e=>{e.stopPropagation();$('files').click()};
+$('btnMore').onclick=()=>$('files').click();
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
 function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
@@ -105,7 +111,71 @@ function renderOpportunity(){
     : `<p class="hint">Sebaran anggaran wajar: tag terbesar ${C.topShare.toFixed(0)}% dari ${C.count} tag berbayar.</p>`;
 }
 function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
-function renderKpi(){let k=RESULT.kpi,p=RESULT.tags.filter(t=>t.spend>0),pc=p.reduce((s,t)=>s+t.commEff,0),ps=p.reduce((s,t)=>s+t.spend,0),org=k.organicComm,arr=[['Laba Bersih',rp(k.netEff),k.netEff>=0?'setelah biaya iklan':'rugi',k.netEff>=0?'good':'bad',1],['ROAS Iklan Berbayar',rx(k.paidRoas),'tanpa komisi organik',k.paidRoas>=1?'good':'bad',1],['ROAS Gabungan',rx(k.roasEff),'termasuk organik','',0],['Komisi Organik',rp(org),'tanpa biaya iklan','',0],['Biaya Iklan',rp(k.spend),'termasuk PPN','',0],['Komisi Efektif',rp(k.commEff),'tertunda 95%','',0],['Pesanan',nf(k.orders),nf(k.qty)+' produk','',0],['Klik Terbuang',rp(k.wasted),'tidak sampai Shopee','bad',0]];$('kpis').innerHTML=arr.map(x=>`<div class="kpi ${x[3]}${x[4]?' lead':''}"><div class="lbl">${x[0]}</div><div class="val">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join('')}
+// Four cards, matching the mind map. Every number that used to sit in its own
+// KPI tile is still here — it moved one level down, into the card it belongs to.
+// Eight tiles of equal weight meant nothing stood out; these four have a
+// hierarchy, and the detail opens on click.
+// Not every Meta export carries a Placement column — it depends on the
+// breakdown chosen at export time. Returning null (rather than a single
+// "Lainnya · 100%" row) lets the caller say so instead of faking a split.
+function placementSplit(){
+  if(!DATA.ads.length)return null;
+  if(!Object.prototype.hasOwnProperty.call(DATA.ads[0],'Placement'))return null;
+  const r=RESULT.range,out={};
+  DATA.ads.forEach(a=>{
+    const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<r.start||d>r.end)return;
+    // "Feed" exists on both Facebook and Instagram, so the platform has to be
+    // part of the label or the two silently merge into one meaningless row.
+    const pl=(a.Placement||'').trim()||'Tanpa placement',pf=(a.Platform||'').trim();
+    const key=pf&&!pl.toLowerCase().startsWith(pf.toLowerCase())?`${pf} ${pl}`:pl;
+    out[key]=(out[key]||0)+(parseFloat(a['Amount spent (IDR)']||a['Amount spent']||0)||0);
+  });
+  const rows=Object.entries(out).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+  const tot=rows.reduce((s,x)=>s+x[1],0);
+  if(!tot)return null;
+  const top=rows.slice(0,4).map(([p,v])=>[p,`${rp(v)} · ${(v/tot*100).toFixed(0)}%`]);
+  const rest=rows.slice(4).reduce((s,x)=>s+x[1],0);
+  if(rest>0)top.push([`${rows.length-4} placement lain`,`${rp(rest)} · ${(rest/tot*100).toFixed(0)}%`]);
+  return top;
+}
+function kpiCard(cls,label,value,note,rows){
+  const body=rows.filter(Boolean).map(r=>`<div class="krow${r[2]?' est':''}"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('');
+  return `<div class="kpi ${cls}${body?' expandable':''}"${body?' tabindex="0" role="button" aria-expanded="false"':''}>
+    <div class="lbl">${label}${body?'<span class="chev">▾</span>':''}</div>
+    <div class="val">${value}</div><div class="sub">${note}</div>
+    ${body?`<div class="kdrill">${body}</div>`:''}</div>`;
+}
+function renderKpi(){
+  const k=RESULT.kpi,paid=RESULT.tags.filter(t=>t.spend>0);
+  const paidComm=paid.reduce((s,t)=>s+t.commEff,0),org=k.organicComm;
+  const paidNet=paidComm-k.spend;
+  const share=k.commEff?org/k.commEff*100:0;
+  const pl=placementSplit();
+  const pct=v=>k.commEff?` · ${(v/k.commEff*100).toFixed(0)}%`:'';
+  $('kpis').innerHTML=[
+    kpiCard('','Komisi Total',rp(k.commEff),`${nf(k.orders)} pesanan · ${nf(k.qty)} produk`,[
+      ['Komisi Organik',rp(org)+pct(org)],
+      ['Komisi Iklan',rp(paidComm)+pct(paidComm)]]),
+    kpiCard('','Spend Iklan',rp(k.spend),`PPN ${RESULT.options.ppn}%`,
+      pl||(DATA.ads.length?[
+        ['Klik Meta',nf(k.clicks)],
+        ['CPM',rp(k.cpm)],
+        ['CPC',k.clicks?full(k.cpc):'—'],
+        ['Rincian placement','ekspor tanpa breakdown',1]
+      ]:[['Laporan Meta belum dimuat','—']])),
+    kpiCard(k.netEff>=0?'good':'bad','Laba Bersih',rp(k.netEff),k.netEff>=0?'setelah biaya iklan':'rugi',[
+      ['Laba Organik',rp(org)],
+      ['Laba Iklan',rp(paidNet)]]),
+    kpiCard(share>=50?'bad':'','Kontribusi Organik',share.toFixed(1)+'%','porsi komisi tanpa biaya iklan',[
+      ['ROAS Iklan',rx(k.paidRoas)],
+      ['ROAS Gabungan',rx(k.roasEff)]])
+  ].join('');
+  $('kpis').querySelectorAll('.kpi.expandable').forEach(el=>{
+    const flip=()=>{const o=el.classList.toggle('open');el.setAttribute('aria-expanded',o?'true':'false')};
+    el.onclick=flip;
+    el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();flip()}};
+  });
+}
 function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
 function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()})}
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['cpc','CPC',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
@@ -138,14 +208,21 @@ function renderLeak(){
   const r=RESULT.range;
   $('leakRange').textContent=r.clickStart?`Klik report ${r.clickStart} s/d ${r.clickEnd}`:'Click report belum dimuat';
   const rows=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
-  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta','Klik Shopee','% Masuk','Gagal','Biaya Terbuang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta','Klik Shopee','± Share','% Masuk','Biaya Terbuang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblLeak').querySelector('tbody').innerHTML=rows.length?rows.sort((a,b)=>a.leak.pct-b.leak.pct).map(t=>{
-    const L=t.leak,note=L.severity==='bad'?'Sebagian besar klik tidak sampai — periksa link':L.severity==='warn'?'Ada kebocoran, layak dicek':L.pct>=115?'Termasuk klik ulang dan trafik organik':'Wajar';
+    const L=t.leak;
+    // Signed, because the two directions mean opposite things. Extra clicks are
+    // people resharing the content; missing clicks are a broken link.
+    const d=L.shopeeClicks-L.metaClicks;
+    const note=d<0
+      ? (L.severity==='bad'?'Sebagian besar klik tidak sampai — periksa link':'Ada klik yang tidak sampai, layak dicek')
+      : d>0?'Dibagikan orang di luar iklan — sinyal konten bagus':'Pas dengan klik berbayar';
     return `<tr><td><b>${esc(t.tag)}</b></td><td class="num">${nf(L.metaClicks)}</td><td class="num">${nf(L.shopeeClicks)}</td>
-      <td class="num leak-${L.severity}">${L.pct.toFixed(1)}%</td><td class="num">${nf(L.failed)}</td>
+      <td class="num ${d<0?'neg':d>0?'pos':''}">${d>0?'+':''}${nf(d)}</td>
+      <td class="num leak-${L.severity}">${L.pct.toFixed(1)}%</td>
       <td class="num ${L.wasted>0?'neg':''}">${L.wasted>0?rp(L.wasted):'—'}</td>
       <td style="white-space:normal;font-size:11px;color:var(--text-dim)">${note}</td></tr>`;
-  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat kebocoran.</td></tr>`;
+  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat perbandingan klik.</td></tr>`;
 }
 function renderDaily(){
   const d=RESULT.daily,k=RESULT.kpi;
@@ -214,6 +291,13 @@ function renderMatch(){
       <td>${esc(m.method)}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
+  // The mapping table now lives behind one button, so that button has to say
+  // when something inside needs looking at.
+  const weak=RESULT.matchLog.filter(m=>m.confidence<.5).length;
+  const dot=$('mapAlert');
+  dot.textContent=weak||'';
+  dot.title=weak?`${weak} pencocokan lemah perlu diperiksa`:'';
+  dot.classList.toggle('hidden',!weak);
 }
 /* ── Part 3: charts, tabs, modals, snapshots, export ── */
 function cv(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
@@ -304,7 +388,16 @@ function mapRow(k,v){return `<div class="maprow"><input placeholder="nama iklan"
   <button class="btn ghost" data-del>×</button></div>`}
 function bindDel(){$('mapRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>b.closest('.maprow').remove())}
 function openMap(){const m=map();$('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');$('mapModal').classList.add('show');bindDel()}
-$('btnMap').onclick=openMap; $('btnMap2').onclick=openMap;
+$('btnMap').onclick=openMap;
+$('btnSet').onclick=()=>$('setModal').classList.add('show');
+// Presets exist so the eleven fields below stay optional. Order matches
+// [targetROI, thScale, thPantau, minSpend, minDays, lagDays, streakDays].
+const PRESETS={konservatif:[100,2.5,1.2,100000,5,5,2],seimbang:[80,2,1,50000,3,3,3],agresif:[50,1.5,.8,25000,2,2,4]};
+document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{
+  const p=PRESETS[b.dataset.preset]; if(!p)return;
+  ['targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays'].forEach((id,i)=>$(id).value=p[i]);
+  recalc(); toast('Preset '+b.dataset.preset+' dipakai');
+});
 $('btnAddMap').onclick=()=>{$('mapRows').insertAdjacentHTML('beforeend',mapRow('',''));bindDel()};
 $('btnSaveMap').onclick=()=>{const m={};$('mapRows').querySelectorAll('.maprow').forEach(r=>{
   const k=E.normalize(r.querySelector('[data-k]').value),v=r.querySelector('[data-v]').value.trim();
@@ -387,5 +480,18 @@ $('btnExport').onclick=()=>{
   a.href=url;a.download=`keputusan-${active()}-${RESULT.range.start}_${RESULT.range.end}.csv`;a.click();
   URL.revokeObjectURL(url);toast('CSV diunduh');
 };
-try{const o=JSON.parse(localStorage.getItem(LS.opts));if(o)O.forEach(k=>{if(o[k]!=null&&$(k))$(k).value=o[k]})}catch(e){}
+// Settings are per account: two Shopee accounts can bill different VAT and
+// tolerate different risk. The old global key was read but never written, so
+// nothing carries over from it.
+function loadOpts(){
+  try{const o=JSON.parse(localStorage.getItem(LS.opts+'_'+active()));
+    if(o)O.forEach(k=>{if(o[k]!=null&&$(k))$(k).value=o[k]})}catch(e){}
+}
+function saveOpts(){
+  const o={};O.forEach(k=>{if($(k))o[k]=$(k).value});
+  try{localStorage.setItem(LS.opts+'_'+active(),JSON.stringify(o))}catch(e){}
+}
+O.forEach(id=>$(id).addEventListener('change',saveOpts));
+document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',saveOpts));
+loadOpts();
 renderHistory();

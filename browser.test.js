@@ -20,11 +20,16 @@ const EXE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   await page.waitForSelector('#main:not(.hidden)', { timeout: 90000 });
   await page.waitForTimeout(4000);
 
-  console.log('=== KPI ===');
+  await page.$$eval('.kpi.expandable', els => els.forEach(e => e.click()));
+  await page.waitForTimeout(200);
+  console.log('=== KPI (4 kartu + rincian) ===');
   for (const k of await page.$$eval('.kpi', e => e.map(x => ({
     l: x.querySelector('.lbl').textContent, v: x.querySelector('.val').textContent,
-    s: x.querySelector('.sub').textContent }))))
-    console.log(' ', k.l.padEnd(21), k.v.padEnd(13), k.s);
+    s: x.querySelector('.sub').textContent,
+    d: [...x.querySelectorAll('.krow')].map(r => [...r.children].map(c=>c.textContent.trim()).join(' = ')) })))) {
+    console.log(' ', k.l.replace('▾','').trim().padEnd(21), k.v.padEnd(13), k.s);
+    k.d.forEach(r => console.log('      ·', r));
+  }
 
   console.log('\n=== KEPUTUSAN (6 teratas) ===');
   const rows = await page.$$eval('#tblMain tbody tr', t => t.map(r =>
@@ -33,18 +38,18 @@ const EXE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
     'ROAS', r[4].padEnd(7), 'CPM', r[6].padEnd(9), 'CPC', r[7].padEnd(6), 'ideal', r[8]));
   console.log('  total baris:', rows.length);
 
-  await page.click('[data-tab="adunit"]'); await page.waitForTimeout(700);
+  await page.click('[data-tab="iklan"]'); await page.waitForTimeout(700);
   const units = await page.$$eval('#tblUnit tbody tr', t => t.map(r =>
     [...r.querySelectorAll('td')].map(c => c.innerText.replace(/\n/g, ' ').trim())));
   console.log('\n=== PER AD UNIT ===');
   units.forEach(u => console.log('  ', u[0].slice(0, 34).padEnd(36), u[1].padEnd(7),
     u[2].padEnd(11), 'CPM', u[3].padEnd(8), 'CTR', u[8].padEnd(6), 'ROI', u[13]));
 
-  await page.click('[data-tab="kebocoran"]'); await page.waitForTimeout(700);
+  await page.click('[data-tab="klik"]'); await page.waitForTimeout(700);
   const leak = await page.$$eval('#tblLeak tbody tr', t => t.map(r =>
     [...r.querySelectorAll('td')].map(c => c.innerText.trim())));
-  console.log('\n=== KEBOCORAN ===');
-  leak.forEach(r => console.log('  ', (r[0]||'').padEnd(26), 'masuk', (r[3]||'').padEnd(8), 'hangus', r[5]||''));
+  console.log('\n=== KLIK META vs SHOPEE ===');
+  leak.forEach(r => console.log('  ', (r[0]||'').padEnd(26), '±share', (r[3]||'').padEnd(9), 'masuk', (r[4]||'').padEnd(8), 'hangus', r[5]||''));
 
   await page.click('[data-tab="harian"]'); await page.waitForTimeout(900);
   const strip = await page.$$eval('#dailyStrip .s', e => e.map(x =>
@@ -55,16 +60,19 @@ const EXE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   // Snapshot + trend: save two DIFFERENT periods to prove per-account history.
   // Start from a clean slate so a previous run's snapshots can't mask a bug,
   // and open the collapsed settings panel before touching the date inputs.
-  await page.click('[data-tab="keputusan"]'); await page.waitForTimeout(300);
+  await page.click('[data-tab="iklan"]'); await page.waitForTimeout(300);
   await page.evaluate(() => localStorage.removeItem('adash_snaps_v3_default'));
   await page.click('#btnSave'); await page.waitForTimeout(600);
-  await page.evaluate(() => { document.getElementById('settingsCard').open = true; });
+  await page.evaluate(() => { document.getElementById('setModal').classList.add('show'); });
   await page.waitForTimeout(300);
   await page.fill('#dateEnd', '2026-08-10'); await page.waitForTimeout(2400);
+  await page.evaluate(() => { document.getElementById('setModal').classList.remove('show'); });
   await page.click('#btnSave'); await page.waitForTimeout(700);
+  await page.evaluate(() => { document.getElementById('setModal').classList.add('show'); });
   await page.fill('#dateEnd', '2026-08-21'); await page.waitForTimeout(2400);
+  await page.evaluate(() => { document.getElementById('setModal').classList.remove('show'); });
 
-  await page.click('[data-tab="perkembangan"]'); await page.waitForTimeout(1200);
+  await page.click('[data-tab="harian"]'); await page.waitForTimeout(1200);
   const trendVisible = await page.$eval('#trendBody', e => !e.classList.contains('hidden'));
   const tstrip = await page.$$eval('#trendStrip .s', e => e.map(x =>
     x.querySelector('.l').textContent + '=' + x.querySelector('.v').textContent.trim()));

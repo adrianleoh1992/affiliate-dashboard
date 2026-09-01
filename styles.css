@@ -99,6 +99,33 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .kpi .dlt{font-size:10.5px;font-weight:700;margin-left:5px}
 .dlt.up{color:var(--ok)} .dlt.down{color:var(--bad)}
 
+/* Four main cards: the detail is one click down, not a ninth tile. */
+.kpis{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.kpi .val{font-size:25px}
+.kpi.expandable{cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.kpi.expandable:hover{border-color:var(--border-strong)}
+.kpi.expandable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.kpi .lbl{display:flex;align-items:center;gap:5px}
+.kpi .chev{font-size:9px;color:var(--text-mute);transition:transform .15s}
+.kpi.open .chev{transform:rotate(180deg)}
+.kdrill{display:none;margin-top:10px;padding-top:9px;border-top:1px dashed var(--border-strong)}
+.kpi.open .kdrill{display:block}
+.krow{display:flex;justify-content:space-between;gap:12px;font-size:11.5px;padding:4px 0;
+  font-variant-numeric:tabular-nums}
+.krow+.krow{border-top:1px solid var(--border)}
+.krow span:first-child{color:var(--text-dim);font-weight:500}
+.krow span:last-child{font-weight:700}
+.krow.est span{opacity:.72;font-style:italic}
+.badge-dot{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
+  margin-left:6px;padding:0 4px;border-radius:999px;background:var(--bad);color:#fff;
+  font-size:9.5px;font-weight:800;line-height:1}
+.presets{display:flex;gap:7px;flex-wrap:wrap}
+.sec-split{font-size:12.5px;font-weight:700;margin:20px 0 9px;color:var(--text-mute);
+  text-transform:uppercase;letter-spacing:.5px}
+/* Upload box has done its job once the reports are in. */
+.card.compact .drop{display:none}
+.card.compact{padding-bottom:11px}
+
 /* Banners */
 .banner{border-radius:11px;padding:12px 15px;margin-bottom:14px;font-size:12.5px;font-weight:500;
   display:flex;gap:10px;align-items:flex-start;border:1px solid;line-height:1.5}
