@@ -867,6 +867,67 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelector(`[data-panel="${t.dataset.tab}"]`).classList.add('active');
   requestAnimationFrame(()=>{if(RESULT)renderCharts()});
 });
+
+/* ── Export PDF ─────────────────────────────────────────────────────────────
+   Printed through the browser rather than a PDF library: text stays sharp and
+   selectable, the file stays small, and nothing new is pulled from a CDN.
+   html2canvas + jsPDF would add roughly a megabyte and hand back a raster.
+
+   Charts are the catch. A canvas inside a hidden panel was drawn at zero size,
+   so it prints blank — every panel is made visible and the charts redrawn
+   before the print dialog opens, then everything is put back. */
+const PDFMODE={
+  ringkas:{label:'Ringkas',parts:[]},
+  standar:{label:'Standar',parts:['tags','statsum']},
+  lengkap:{label:'Lengkap',parts:['tags','units','peluang','statsum','statgrid','kalender','klik','harian','produk']},
+};
+$('btnPdf').onclick=()=>{
+  if(!RESULT)return toast('Belum ada hasil analisis');
+  $('pdfModal').classList.add('show');
+};
+document.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>runPrint(b.dataset.pdf));
+
+function runPrint(mode){
+  const M=PDFMODE[mode]; if(!M||!RESULT)return;
+  const r=RESULT.range;
+  $('phAcct').textContent=active();
+  $('phRange').textContent=`Periode ${r.start} — ${r.end}`;
+  $('phMade').textContent='Dibuat '+new Date().toLocaleString('id-ID',{dateStyle:'long',timeStyle:'short'});
+  $('pdfModal').classList.remove('show');
+  $('pdfBusy').style.display='';
+
+  const panels=[...document.querySelectorAll('.panel')];
+  const wasActive=panels.map(p=>p.classList.contains('active'));
+  const cards=[...document.querySelectorAll('#kpis .kpi.expandable,#clickKpis .kpi.expandable')];
+  const wasOpen=cards.map(e=>e.classList.contains('open'));
+
+  document.body.classList.add('printing','pr-'+mode);
+  M.parts.forEach(p=>document.body.classList.add('pp-'+p));
+  panels.forEach(p=>p.classList.add('active'));
+  // Every card's detail belongs in a document someone reads away from the app;
+  // there is nothing to click on paper.
+  cards.forEach(e=>e.classList.add('open'));
+
+  const restore=()=>{
+    document.body.classList.remove('printing','pr-ringkas','pr-standar','pr-lengkap');
+    M.parts.forEach(p=>document.body.classList.remove('pp-'+p));
+    panels.forEach((p,i)=>p.classList.toggle('active',wasActive[i]));
+    cards.forEach((e,i)=>{e.classList.toggle('open',wasOpen[i]);e.setAttribute('aria-expanded',wasOpen[i]?'true':'false')});
+    $('pdfBusy').style.display='none';
+    requestAnimationFrame(()=>renderCharts());
+  };
+
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{renderCharts()}catch(e){}
+    setTimeout(()=>{
+      window.addEventListener('afterprint',restore,{once:true});
+      // Safari and some mobile browsers never fire afterprint.
+      setTimeout(()=>{if(document.body.classList.contains('printing'))restore()},4000);
+      window.print();
+    },mode==='ringkas'?150:700);
+  }));
+}
+
 /* Tag map modal */
 function mapRow(k,v){return `<div class="maprow"><input placeholder="nama iklan" value="${esc(k)}" data-k>
   <span style="color:var(--text-mute)">→</span><input placeholder="tag affiliate" value="${esc(v)}" data-v>

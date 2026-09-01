@@ -32,9 +32,15 @@
     <button class="btn ghost" id="btnSet">Setelan</button>
     <button class="btn ghost" id="btnTheme">Mode Gelap</button>
     <button class="btn" id="btnExport">Export CSV</button>
+    <button class="btn" id="btnPdf">Export PDF</button>
     <button class="btn primary" id="btnSave">Simpan Snapshot</button>
   </div>
 </header>
+
+<div class="printhead" id="printHead" aria-hidden="true">
+  <div class="ph-top"><b>Laporan Affiliate</b><span id="phAcct"></span></div>
+  <div class="ph-sub"><span id="phRange"></span><span id="phMade"></span></div>
+</div>
 
 <div class="wrap">
 
@@ -137,14 +143,14 @@
     <div class="panel active" data-panel="iklan">
       <div class="calibration" id="lagCal"></div>
       <div class="dgrid" id="dgrid"></div>
-      <div class="card">
+      <div class="card" data-print="tags">
         <div class="card-head"><h2>Semua Tag</h2>
           <span class="sub" id="filterNote"></span>
           <button class="btn ghost hidden" id="btnClearFilter">Tampilkan Semua</button>
           <span class="sub" id="tagNote"></span></div>
         <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
       </div>
-      <div class="card">
+      <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
           <span class="sub" id="adunitNote"></span></div>
         <p class="hint">Satu baris per iklan di Meta, lengkap dengan CPM, CTR, reach, dan CPC ideal.
@@ -153,7 +159,7 @@
           tidak ada apa pun di data yang bisa membedakannya.</p>
         <div class="tscroll"><table id="tblUnit"><thead></thead><tbody></tbody></table></div>
       </div>
-      <div class="card">
+      <div class="card" data-print="peluang">
         <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
           <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
         <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
@@ -187,7 +193,7 @@
 
     <div class="panel" data-panel="harian">
       <div class="strip" id="dailyStrip"></div>
-      <div class="card">
+      <div class="card" data-print="kalender">
         <div class="card-head"><h2>Sebulan Sekali Lihat</h2>
           <span class="sub" id="calNote"></span>
           <div class="calswitch" id="calSwitch">
@@ -272,7 +278,7 @@
     </div>
 
     <div class="panel" data-panel="status">
-      <div class="card">
+      <div class="card" data-print="statsum">
         <div class="card-head"><h2>Laporan Status Order</h2>
           <span class="sub" id="statNote"></span></div>
         <p class="hint">Dihitung dalam <b>pesanan</b>, bukan baris produk — satu pesanan berisi delapan produk
@@ -280,7 +286,7 @@
           di dashboard ini, jadi hanya di sini keduanya terlihat.</p>
         <div class="statsum" id="statSum"></div>
       </div>
-      <div class="card">
+      <div class="card" data-print="statgrid">
         <div class="card-head"><h2>Per Tanggal</h2>
           <span class="sub statlegend">
             <span><i class="lg settled"></i>Sudah settle</span>
@@ -371,6 +377,27 @@
       <button class="btn ghost" data-close>Batal</button>
       <button class="btn primary" id="btnSaveMap">Simpan</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="pdfModal">
+  <div class="modal-box narrow">
+    <div class="card-head"><h2>Export PDF</h2>
+      <button class="btn ghost" data-close>Tutup</button></div>
+    <p class="hint">Browser akan membuka dialog cetak — pilih <b>Save as PDF</b> sebagai tujuan.
+      Di HP, setelah tersimpan tombol Bagikan langsung muncul.</p>
+    <div class="pdfopts">
+      <button class="pdfopt" data-pdf="ringkas">
+        <b>Ringkas</b><span>1 halaman</span>
+        <em>Vonis, 8 kartu utama beserta rinciannya, dan yang perlu ditindak. Untuk dikirim harian lewat WhatsApp.</em></button>
+      <button class="pdfopt" data-pdf="standar">
+        <b>Standar</b><span>2–3 halaman</span>
+        <em>Ringkas, ditambah tabel Semua Tag dan ringkasan status order. Untuk laporan mingguan yang perlu bukti angka per tag.</em></button>
+      <button class="pdfopt" data-pdf="lengkap">
+        <b>Lengkap</b><span>semua bagian</span>
+        <em>Seluruh tabel, grafik, kalender, produk, dan status per tanggal. Untuk arsip bulanan dan diteliti belakangan.</em></button>
+    </div>
+    <p class="hint" id="pdfBusy" style="display:none">Menyiapkan grafik…</p>
   </div>
 </div>
 

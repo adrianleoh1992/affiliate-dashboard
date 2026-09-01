@@ -548,3 +548,103 @@ tbody tr:hover{background:var(--surface-2)}
   /* Small buttons sitting in a card header still need a real hit area. */
   .card-head .btn.sm{min-height:38px;padding:8px 12px}
 }
+
+/* ── Export PDF ─────────────────────────────────────────────────────────────
+   Three named choices instead of a checklist: one to send, one to report, one
+   to keep. Printed through the browser so the text stays real text. */
+.modal-box.narrow{max-width:520px}
+.pdfopts{display:flex;flex-direction:column;gap:9px}
+.pdfopt{text-align:left;font-family:inherit;cursor:pointer;background:var(--surface);
+  border:1px solid var(--border-strong);border-radius:11px;padding:13px 15px;
+  display:grid;grid-template-columns:1fr auto;gap:2px 10px;transition:.15s}
+.pdfopt:hover{border-color:var(--accent);background:var(--accent-soft)}
+.pdfopt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pdfopt b{font-size:14px;font-weight:800;color:var(--text)}
+.pdfopt span{font-size:11px;font-weight:700;color:var(--text-mute);white-space:nowrap;align-self:center}
+.pdfopt em{grid-column:1/-1;font-style:normal;font-size:11.5px;color:var(--text-dim);line-height:1.5}
+.printhead{display:none}
+
+@media print{
+  /* Chrome the reader cannot use on paper. */
+  header,.tabs,#uploadCard,#gapCard,#periodBar,#emptyState,.modal,#toast,
+  #banners,.calswitch,.ptabs,#kpiBar,.kpibar,#lagCal,
+  .zone,.covstrip,#ingestPlan,#savedNote,.gap-runs,#btnClearFilter{display:none!important}
+  .printhead{display:block!important;margin:0 0 14px;padding:0 0 10px;
+    border-bottom:2px solid #333}
+  .ph-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .ph-top b{font-size:17px;font-weight:800}
+  .ph-top span{font-size:12px;font-weight:700}
+  .ph-sub{display:flex;justify-content:space-between;gap:12px;font-size:10.5px;color:#555;margin-top:3px}
+
+  html,body{background:#fff!important;color:#111!important;font-size:10px}
+  .wrap{max-width:none;padding:0}
+  .card{box-shadow:none;border:1px solid #ccc;margin-bottom:10px;padding:11px;
+    break-inside:avoid;page-break-inside:avoid}
+  .kpi{box-shadow:none;border:1px solid #bbb;break-inside:avoid}
+  /* Four across on A4. Left to auto-fit, the eighth card lands alone on its
+     own row and the page gains 4cm of nothing. */
+  .kpis{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:6px;margin-bottom:8px}
+  .kpi{padding:9px 10px}
+  .kpi .lbl{font-size:8px}.kpi .sub{font-size:8.5px}
+  /* The verdict grid and the money-to-reclaim strip are the point of a daily
+     report, so they print in every mode. */
+  .action-grid{display:flex!important;break-inside:avoid;margin-bottom:10px}
+  .action-card .a-val{font-size:11px}.action-card .a-label{font-size:9px}
+  .action-card .a-copy{font-size:8px}
+  /* Four across, same as the cards above. Left to auto-fit it breaks 3+1 and
+     the stray fourth column pushes the page over. */
+  .dgrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
+    break-inside:avoid;margin-bottom:10px;gap:6px}
+  .dcard{min-height:0;padding:8px 9px}
+  .dcard h4{font-size:9px}.ditem{font-size:8.5px;padding:1px 0}
+  /* Four names per verdict is enough on paper; the full list is in the app. */
+  .dcard .ditem:nth-of-type(n+5){display:none}
+  .action-grid{flex-wrap:wrap}
+  .action-card{padding:6px 10px;min-width:170px}
+  .kpi .val{font-size:17px}.kpi .chev{display:none!important}
+  .kdrill{display:block!important;margin-top:7px;padding-top:6px}
+  .krow{font-size:9px;padding:2px 0}
+  table{font-size:8.5px}th,td{padding:4px 6px!important}
+  .tscroll{overflow:visible!important}
+  .daydetail{display:none!important}     /* opened rows are screen-only */
+  .chartbox{height:190px!important;break-inside:avoid}
+  .chartbox.tall{height:230px!important}
+  .cday{min-height:56px}.cday i{font-size:10px}.cday u span{font-size:7.5px}
+  .statcard{min-height:0;break-inside:avoid}
+  /* Panel Iklan is always shown so the verdict grid can print; its cards stay
+     hidden until a mode opts them in. */
+  .panel{display:none!important}
+  .panel[data-panel="iklan"]{display:block!important}
+  .panel[data-panel="iklan"]>.card{display:none!important}
+  .hint{font-size:8.5px}
+
+  /* Every mode carries the verdict line and the eight cards. */
+  .synth{display:block!important;break-inside:avoid;font-size:11px;border-left-width:3px}
+  #kpis,#clickKpis{display:grid!important}
+
+  /* Sections are opted in per mode, so nothing prints that was not asked for. */
+  [data-print]{display:none!important}
+  /* These live inside panel Iklan, whose own cards are hidden by a rule of
+     higher specificity — !important does not break a specificity tie, so the
+     opt-in has to match at least as tightly or the table silently vanishes. */
+  body.pp-tags .panel[data-panel="iklan"]>.card[data-print="tags"],
+  body.pp-units .panel[data-panel="iklan"]>.card[data-print="units"],
+  body.pp-peluang .panel[data-panel="iklan"]>.card[data-print="peluang"],
+  body.pp-statsum [data-print="statsum"],
+  body.pp-statgrid [data-print="statgrid"],
+  body.pp-kalender [data-print="kalender"]{display:block!important}
+  body.pp-tags .panel[data-panel="iklan"],
+  body.pp-klik .panel[data-panel="klik"],
+  body.pp-harian .panel[data-panel="harian"],
+  body.pp-produk .panel[data-panel="produk"],
+  body.pp-statsum .panel[data-panel="status"]{display:block!important}
+  /* Showing a panel must not drag in its neighbours. */
+  body.pp-harian .panel[data-panel="harian"]>.card{display:block!important}
+  body.pp-produk .panel[data-panel="produk"]>.card,
+  body.pp-produk .panel[data-panel="produk"]>.grid2{display:block!important}
+  body:not(.pp-statgrid) [data-print="statgrid"]{display:none!important}
+  body:not(.pp-kalender) [data-print="kalender"]{display:none!important}
+  /* Stored-history and trend blocks never belong in a period report. */
+  .panel[data-panel="tersimpan"],#trendBody,#trendEmpty,.sec-split{display:none!important}
+  @page{size:A4 portrait;margin:12mm 10mm}
+}
