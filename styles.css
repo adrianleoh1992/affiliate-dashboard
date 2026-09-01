@@ -116,6 +116,40 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .krow span:first-child{color:var(--text-dim);font-weight:500}
 .krow span:last-child{font-weight:700}
 .krow.est span{opacity:.72;font-style:italic}
+/* Three boxes, one per report, so deleting a whole report is one click and
+   not a hunt through one pile of chips. */
+.zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:10px}
+.zone{border:1px dashed var(--border-strong);border-radius:11px;padding:11px 12px;background:var(--surface-2);
+  display:flex;flex-direction:column;gap:9px}
+.zone.filled{border-style:solid;background:var(--surface)}
+.zone-head{display:flex;align-items:flex-start;gap:9px}
+.zone-head>div{flex:1;min-width:0}
+.zone-head b{display:block;font-size:13px;font-weight:700;line-height:1.25}
+.zone-head small{display:block;font-size:10.5px;color:var(--text-mute);line-height:1.4;margin-top:2px}
+.zone .zn{flex:0 0 auto;width:19px;height:19px;border-radius:5px;background:var(--border);color:var(--text-dim);
+  font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.zone.filled .zn{background:var(--accent);color:#fff}
+.zone-body{display:flex;flex-direction:column;gap:7px;margin-top:auto}
+.zone-empty{font-size:11px;color:var(--text-mute);font-style:italic}
+.zone .zone-pick{align-self:flex-start}
+.zone .chips{gap:5px}
+.zone .chip{width:100%}
+#uploadCard.over{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+#dropHint{font-size:10.5px;color:var(--text-mute);margin-top:9px}
+.card.compact .zone-head small{display:none}
+.card.compact .zone{padding:9px 11px}
+
+/* Period presets: the range control belongs on the screen, not inside a modal. */
+.periodbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:9px 13px;
+  box-shadow:var(--shadow)}
+.pb-label{font-size:10px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px}
+.pb-presets{display:flex;gap:5px;flex-wrap:wrap}
+.pb-presets .ptab{min-height:28px;padding:6px 11px;font-size:11.5px}
+.pb-range{font-size:11.5px;color:var(--text-dim);font-weight:600;margin-left:auto;
+  font-variant-numeric:tabular-nums}
+@media(max-width:640px){.pb-range{margin-left:0;width:100%}#btnCustomDate{width:100%}}
+
 /* Sub-tabs inside a panel: same switch, one level down from the main tabs. */
 .ptabs,.calswitch{display:flex;gap:6px;flex-wrap:wrap}
 .ptabs{margin-bottom:12px}

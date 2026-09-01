@@ -42,18 +42,33 @@
     <div class="card-head">
       <h2>Muat Data</h2>
       <span class="sub" id="uploadStatus"></span>
-      <button class="btn ghost hidden" id="btnMore">Tambah / Ganti File</button>
       <button class="btn ghost" id="btnReset">Kosongkan</button>
     </div>
-    <div class="drop" id="drop">
-      <div class="ic">📂</div>
-      <h3>Pilih file CSV</h3>
-      <p>Affiliate Commission Report · Meta Ads Report · Website Click Report</p>
-      <button class="btn primary drop-btn" id="btnPick" type="button">Pilih File</button>
-      <p class="drop-hint">atau tarik file ke area ini</p>
+    <div class="zones" id="zones">
+      <div class="zone" data-zone="affiliate">
+        <div class="zone-head"><span class="zn">1</span>
+          <div><b>Laporan Komisi</b><small>Shopee Affiliate → Laporan Pesanan</small></div>
+          <button class="btn ghost sm zone-del hidden" data-zdel="affiliate">Hapus</button></div>
+        <div class="zone-body"><div class="chips" data-zchips="affiliate"></div>
+          <button class="btn sm zone-pick" data-zpick="affiliate" type="button">+ Pilih file</button></div>
+      </div>
+      <div class="zone" data-zone="ads">
+        <div class="zone-head"><span class="zn">2</span>
+          <div><b>Meta Ads</b><small>Ads Manager → Export, breakdown per hari</small></div>
+          <button class="btn ghost sm zone-del hidden" data-zdel="ads">Hapus</button></div>
+        <div class="zone-body"><div class="chips" data-zchips="ads"></div>
+          <button class="btn sm zone-pick" data-zpick="ads" type="button">+ Pilih file</button></div>
+      </div>
+      <div class="zone" data-zone="clicks">
+        <div class="zone-head"><span class="zn">3</span>
+          <div><b>Laporan Klik</b><small>Shopee Affiliate → Laporan Klik · maks 7 hari</small></div>
+          <button class="btn ghost sm zone-del hidden" data-zdel="clicks">Hapus</button></div>
+        <div class="zone-body"><div class="chips" data-zchips="clicks"></div>
+          <button class="btn sm zone-pick" data-zpick="clicks" type="button">+ Pilih file</button></div>
+      </div>
     </div>
+    <p class="drop-hint" id="dropHint">Bisa juga menarik file ke mana saja di kartu ini — jenisnya dikenali dari isi file, bukan dari kotak tujuan.</p>
     <input type="file" id="files" multiple accept=".csv" class="hidden">
-    <div class="chips" id="chips"></div>
   </div>
 
   <div class="empty-state" id="emptyState">
@@ -63,6 +78,20 @@
   </div>
 
   <div id="main" class="hidden">
+
+    <div class="periodbar" id="periodBar">
+      <span class="pb-label">Periode</span>
+      <div class="pb-presets" id="pbPresets">
+        <button class="ptab" data-days="1">Kemarin</button>
+        <button class="ptab" data-days="3">3 hari</button>
+        <button class="ptab" data-days="7">7 hari</button>
+        <button class="ptab" data-days="14">14 hari</button>
+        <button class="ptab" data-days="30">30 hari</button>
+        <button class="ptab" data-days="0">Semua</button>
+      </div>
+      <span class="pb-range" id="pbRange"></span>
+      <button class="btn ghost sm" id="btnCustomDate">Atur tanggal</button>
+    </div>
 
     <div id="banners"></div>
     <p class="synth" id="synth"></p>

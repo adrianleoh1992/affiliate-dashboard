@@ -20,26 +20,55 @@ applyTheme(localStorage.getItem(LS.theme)||'light');renderAccounts();
 $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
 $('account').onchange=()=>{setActive($('account').value);reset();renderAccounts();loadOpts();renderHistory()};
 $('btnNewAcct').onclick=()=>{let n=prompt('Nama akun baru');if(!n)return;n=n.trim();if(!n)return;let a=accounts();if(!a.includes(n))a.push(n);localStorage.setItem(LS.accounts,JSON.stringify(a));setActive(n);reset();renderAccounts();toast('Akun dibuat: '+n)};
-const drop=$('drop');drop.onclick=()=>$('files').click();['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>files(e.dataTransfer.files));$('files').onchange=e=>files(e.target.files);
+// The whole card is the drop target; the three boxes are for reading and
+// deleting, not for routing. File type comes from the header row either way,
+// so a file dropped on the wrong box still lands in the right place.
+const drop=$('uploadCard');
+['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',e=>files(e.dataTransfer.files));
+$('files').onchange=e=>{files(e.target.files);e.target.value=''};
+document.querySelectorAll('[data-zpick]').forEach(b=>b.onclick=e=>{e.stopPropagation();$('files').click()});
+document.querySelectorAll('[data-zdel]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmZone(b.dataset.zdel)});
 function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';
   // Keep the parsed rows on the entry so removing one file can rebuild the
   // dataset from the survivors instead of forcing a full re-upload.
   FILES.push({name:file.name,size:file.size,type,rows:rows.length,rowsData:rows});
   if(type==='affiliate')DATA.affiliate=DATA.affiliate.concat(rows);else if(type==='ads')DATA.ads=DATA.ads.concat(rows);else if(type==='clicks')DATA.clicks=DATA.clicks.concat(rows);else toast('Format tidak dikenali: '+file.name);if(!--pending)finish()},error:()=>{toast('Gagal membaca '+file.name);if(!--pending)finish()}})})}
-function finish(){renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active());
+function finish(){renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){DATES.min=ds[0];DATES.max=ds[ds.length-1];$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active());
   // Optional add-on layers (e.g. the daily edition) subscribe here. FILES and
   // RESULT are `let`-scoped and not reachable from another script, so hand
   // them over explicitly rather than leaking more globals.
   if(typeof window.onDashboardData==='function')window.onDashboardData({files:FILES,result:RESULT,data:DATA});}
-function renderChips(){$('chips').innerHTML=FILES.map((f,i)=>`<span class="chip ${f.type}"><span class="file-row"><span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows)} baris</span><button class="rmfile" data-rm="${i}" title="Hapus file ini" aria-label="Hapus ${esc(f.name)}">×</button></span></span>`).join('');let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ');
+const ZONE_EMPTY={affiliate:'Belum ada file',ads:'Belum ada file',clicks:'Belum ada file'};
+// One box per report instead of one pile. Deleting a whole report used to mean
+// hunting its files inside a single list of chips.
+function renderChips(){
+  ['affiliate','ads','clicks'].forEach(z=>{
+    const box=document.querySelector(`[data-zchips="${z}"]`);
+    const mine=FILES.map((f,i)=>({f,i})).filter(x=>x.f.type===z);
+    box.innerHTML=mine.length?mine.map(({f,i})=>`<span class="chip ${f.type}"><span class="file-row">
+      <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows)} baris</span>
+      <button class="rmfile" data-rm="${i}" title="Hapus file ini" aria-label="Hapus ${esc(f.name)}">×</button></span></span>`).join('')
+      :`<span class="zone-empty">${ZONE_EMPTY[z]}</span>`;
+    document.querySelector(`[data-zone="${z}"]`).classList.toggle('filled',mine.length>0);
+    document.querySelector(`[data-zdel="${z}"]`).classList.toggle('hidden',!mine.length);
+  });
+  let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ');
   // Removing one file rebuilds from the survivors, so a mis-drop no longer
   // forces clearing everything and re-uploading all three reports.
-  $('chips').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});
-  // Once the reports are in, the upload box has done its job. Shrinking it
-  // gives the top of the screen back to the numbers.
-  const loaded=FILES.length>0;
-  $('uploadCard').classList.toggle('compact',loaded);
-  $('btnMore').classList.toggle('hidden',!loaded);}
+  $('zones').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});
+  $('uploadCard').classList.toggle('compact',FILES.length>0);}
+function rmZone(z){
+  const n=FILES.filter(f=>f.type===z).length; if(!n)return;
+  if(!confirm(`Hapus ${n} file ${z}? Snapshot tersimpan tidak terhapus.`))return;
+  const keep=FILES.filter(f=>f.type!==z);
+  DATA={affiliate:[],ads:[],clicks:[]};FILES=[];
+  keep.forEach(k=>{FILES.push(k);if(k.rowsData&&DATA[k.type])DATA[k.type]=DATA[k.type].concat(k.rowsData)});
+  renderChips();
+  if(DATA.affiliate.length){recalc();toast(n+' file dihapus')}
+  else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast(n+' file dihapus')}
+}
 function rmFile(i){
   const f=FILES[i]; if(!f)return;
   FILES.splice(i,1);
@@ -50,15 +79,44 @@ function rmFile(i){
   if(DATA.affiliate.length){recalc();toast('File dihapus: '+f.name)}
   else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast('File dihapus')}
 }
-function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';$('chips').innerHTML='';$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
+function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';renderChips();$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
 // Clearing is destructive and used to fire on a single click.
 $('btnReset').onclick=()=>{if(!FILES.length)return reset();if(confirm(`Kosongkan ${FILES.length} file yang dimuat? Snapshot tersimpan tidak terhapus.`)){reset();toast('Data dikosongkan')}};
-$('btnPick').onclick=e=>{e.stopPropagation();$('files').click()};
-$('btnMore').onclick=()=>$('files').click();
 const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
 function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
+// Presets count back from the last day that has data, not from the real
+// calendar today. Uploading on Monday should still show Sunday as "kemarin".
+const DATES={min:'',max:''};
+function shiftDay(d,n){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)}
+function presetRange(n){
+  if(!DATES.max)return null;
+  if(!n)return[DATES.min,DATES.max];
+  let s=shiftDay(DATES.max,-(n-1));
+  return[s<DATES.min?DATES.min:s,DATES.max];
+}
+function applyPreset(n){
+  const r=presetRange(n); if(!r)return;
+  $('dateStart').value=r[0];$('dateEnd').value=r[1];
+  recalc();saveOpts();
+}
+function renderPeriod(){
+  const s=$('dateStart').value,e=$('dateEnd').value;
+  document.querySelectorAll('[data-days]').forEach(b=>{
+    const r=presetRange(+b.dataset.days);
+    // A preset that would resolve to the same window as "Semua" is not a
+    // separate choice — hide it rather than offer two buttons doing one thing.
+    const dup=+b.dataset.days>0&&r&&r[0]===DATES.min&&DATES.min!==DATES.max&&
+      shiftDay(DATES.max,-(+b.dataset.days-1))<DATES.min;
+    b.classList.toggle('hidden',!!dup);
+    b.classList.toggle('active',!!r&&r[0]===s&&r[1]===e);
+  });
+  const days=s&&e?Math.round((new Date(e+'T00:00:00Z')-new Date(s+'T00:00:00Z'))/864e5)+1:0;
+  $('pbRange').textContent=s&&e?`${s} s/d ${e} · ${days} hari`:'';
+}
+document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
+$('btnCustomDate').onclick=()=>$('setModal').classList.add('show');
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -212,7 +270,11 @@ function clickWindowStats(){
 function renderClickKpi(){
   const k=RESULT.kpi,r=RESULT.range,el=$('clickKpis');
   const leaks=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
-  if(!leaks.length&&!DATA.clicks.length){el.innerHTML='';return}
+  // Klik Meta stands on the ads report alone. Only the three cards that
+  // compare against Shopee need the click report, so deleting it should not
+  // take the Meta side down with it.
+  const hasClicks=leaks.length>0;
+  if(!DATA.ads.length&&!hasClicks){el.innerHTML='';return}
   // Window-matched totals: the click report covers its own date span, so the
   // ratio has to compare like with like or it is meaningless.
   const adMeta=leaks.reduce((s,t)=>s+t.leak.metaClicks,0);
@@ -236,12 +298,14 @@ function renderClickKpi(){
   const per1k=(n,d)=>d?full(n/d*1000):'—';
   const pc=(n,d)=>d?(n/d*100).toFixed(2)+'%':'—';
 
-  el.innerHTML=[
-    kpiCard('','Klik Meta',nf(mC),win,[
+  const out=[];
+  if(DATA.ads.length)out.push(
+    kpiCard('','Klik Meta',nf(mC),hasClicks?win:`${r.start} s/d ${r.end}`,[
       ['Impresi',nf(im)],['CPM',per1k(sp,im)],['CPC',per(sp,mC)],
       ['CTR',pc(mC,im)],['CR',pc(od,mC)],
       ...ms.slice(0,3).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`]),
-      ['CR memakai semua pesanan','termasuk dari tag organik',1]]),
+      ['CR memakai semua pesanan','termasuk dari tag organik',1]]));
+  if(hasClicks)out.push(
     kpiCard('','Klik Shopee',nf(sC),`${win} · ${nf(k.shopeeClicks)} total`,[
       // Shopee reports no impressions, so there is no CPM to report either.
       // Spend ÷ Shopee clicks × 1000 is a cost per thousand arrivals, not a
@@ -260,8 +324,8 @@ function renderClickKpi(){
       pctIn>100?'di atas 100% karena dibagikan orang':'sebagian klik tidak sampai',[
       [`${gainTags.length} tag dibagikan`,`+${nf(gained)} klik`],
       [`${lostTags.length} tag bocor`,`−${nf(lost)} klik`],
-      ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]])
-  ].join('');
+      ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]]));
+  el.innerHTML=out.join('');
   bindDrill('clickKpis');
 }
 function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
