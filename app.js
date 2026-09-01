@@ -70,10 +70,11 @@ function renderActions(){
     `${A.stopCount} tag, rugi ${rp(A.stopLoss)} periode ini`]);
   if(A.leakWaste>0)cards.push(['risk','Hilang karena Link',rp(A.leakWaste),
     'klik dibayar tapi tak sampai Shopee']);
-  if(A.reclaimable>0)cards.push(['info','Total Bisa Dialihkan',rp(A.reclaimable),
-    'gabungan hemat bid dan biaya tag STOP']);
+  // "Total Bisa Dialihkan" was just the sum of the two above it — a fourth tile
+  // carrying no new information. It reads as a trailing summary instead.
+  const tail=A.reclaimable>0?`<div class="action-card info"><div class="a-label">Total bisa dialihkan</div><div class="a-val">${rp(A.reclaimable)}</div></div>`:'';
   $('actionGrid').innerHTML=cards.map(c=>`<div class="action-card ${c[0]}">
-    <div class="a-label">${c[1]}</div><div class="a-val">${c[2]}</div><div class="a-copy">${c[3]}</div></div>`).join('');
+    <div class="a-label">${c[1]}</div><div class="a-val">${c[2]}</div><div class="a-copy">${c[3]}</div></div>`).join('')+tail;
 }
 function renderCalibration(){
   const L=RESULT.lagCal,el=$('lagCal');

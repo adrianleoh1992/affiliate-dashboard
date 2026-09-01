@@ -215,12 +215,20 @@ tbody tr:hover{background:var(--surface-2)}
 .strip .s .v{font-size:15px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
 
 /* Misc */
-.action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px}
-.action-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 14px;box-shadow:var(--shadow)}
-.action-card .a-label{font-size:10px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.45px}
-.action-card .a-val{font-size:20px;font-weight:800;letter-spacing:-.5px;margin:4px 0 2px}
-.action-card .a-copy{font-size:11px;color:var(--text-dim);line-height:1.45}
+/* Subordinate to the four main cards on purpose. Rendering these as four more
+   equal tiles just rebuilt the eight-tile wall one row lower. */
+.action-grid{display:flex;flex-wrap:wrap;gap:0;margin-bottom:14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:11px;
+  padding:2px 4px;box-shadow:var(--shadow)}
+.action-grid:empty{display:none}
+.action-card{display:flex;align-items:baseline;gap:8px;padding:9px 14px;flex:1 1 auto;min-width:200px}
+.action-card+.action-card{border-left:1px solid var(--border)}
+.action-card .a-label{font-size:11px;font-weight:600;color:var(--text-dim);white-space:nowrap}
+.action-card .a-val{font-size:14px;font-weight:800;letter-spacing:-.2px;font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.action-card .a-copy{font-size:10.5px;color:var(--text-mute);line-height:1.4;flex:1 1 auto;min-width:0}
 .action-card.money .a-val{color:var(--ok)}.action-card.risk .a-val{color:var(--bad)}.action-card.info .a-val{color:var(--info)}
+@media(max-width:760px){.action-card+.action-card{border-left:none;border-top:1px solid var(--border)}}
 .calibration{font-size:12px;line-height:1.55;background:var(--info-soft);border:1px solid var(--info);border-radius:10px;padding:10px 13px;margin-bottom:14px;color:var(--info)}
 .calibration.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
 .calibration b{font-weight:800}
@@ -233,7 +241,18 @@ tbody tr:hover{background:var(--surface-2)}
   .hdr{gap:6px}.brand{width:100%}.brand h1{font-size:14px}.acct{flex:1}.acct select{max-width:150px;min-height:44px}
   .hdr .btn{min-height:44px;padding:8px 12px}#btnNewAcct{min-width:44px}
   .hdr .btn.ghost{font-size:0;min-width:44px;padding:8px;border:1px solid var(--border-strong)}
-  .hdr .btn.ghost#btnMap:after{content:'⚙';font-size:18px}.hdr .btn.ghost#btnHist:after{content:'◷';font-size:18px}.hdr .btn.ghost#btnTheme:after{content:'◐';font-size:18px}
+  .hdr .btn.ghost#btnMap:after{content:'🏷';font-size:17px}.hdr .btn.ghost#btnHist:after{content:'◷';font-size:18px}
+  .hdr .btn.ghost#btnSet:after{content:'⚙';font-size:18px}.hdr .btn.ghost#btnTheme:after{content:'◐';font-size:18px}
+  /* font-size:0 on the parent would swallow the count too. */
+  .hdr .btn.ghost .badge-dot{font-size:9.5px}
+  /* Once the reports are in, the file list is a receipt, not a workspace. */
+  /* Four full-width chips pushed the first real number 550px down the page.
+     One scrollable row keeps the per-file delete without owning the screen. */
+  .card.compact .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
+    -webkit-overflow-scrolling:touch}
+  .card.compact .chip{width:auto;flex:0 0 auto;font-size:11px;padding:3px 2px 3px 8px}
+  .card.compact .chip .fname{max-width:104px}
+  .card.compact .file-row .rmfile{min-width:30px;min-height:30px;font-size:15px}
   /* Keep the two named actions together instead of letting them wrap apart. */
   #btnExport,#btnSave{flex:1 1 45%;justify-content:center}
   .ctrls{grid-template-columns:1fr}.field input,.field select{min-height:44px;font-size:14px}.field label{font-size:11px;text-transform:none;letter-spacing:0}
