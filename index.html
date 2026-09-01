@@ -123,6 +123,7 @@
       <button class="tab" data-tab="klik">Klik</button>
       <button class="tab" data-tab="harian">Harian</button>
       <button class="tab" data-tab="produk">Produk</button>
+      <button class="tab" data-tab="status">Status Order</button>
       <button class="tab" data-tab="tersimpan">Tersimpan</button>
       <button class="tab" data-tab="rincian">Rincian</button>
     </div>
@@ -261,6 +262,25 @@
           <div class="card-head"><h2>Kategori Teratas</h2></div>
           <div class="chartbox"><canvas id="chCat"></canvas></div>
         </div>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="status">
+      <div class="card">
+        <div class="card-head"><h2>Laporan Status Order</h2>
+          <span class="sub" id="statNote"></span></div>
+        <p class="hint">Dihitung dalam <b>pesanan</b>, bukan baris produk — satu pesanan berisi delapan produk
+          tetap satu pesanan tertunda. Pesanan dibatalkan dan belum dibayar dikeluarkan dari semua hitungan lain
+          di dashboard ini, jadi hanya di sini keduanya terlihat.</p>
+        <div class="statsum" id="statSum"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Per Tanggal</h2>
+          <span class="sub statlegend">
+            <span><i class="lg settled"></i>Sudah settle</span>
+            <span><i class="lg open"></i>Ada tertunda / belum dibayar</span>
+            <span><i class="lg none"></i>Tidak ada order</span></span></div>
+        <div class="statgrid" id="statGrid"></div>
       </div>
     </div>
 

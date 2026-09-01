@@ -116,7 +116,7 @@ function renderPeriod(){
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>$('setModal').classList.add('show');
 function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
-function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -519,6 +519,55 @@ function toggleDay(date,tr){
     }</tr></thead><tbody>${body}</tbody></table></div>
   </div></td>`;
   tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');
+}
+
+/* Status Order — the only view that shows cancelled and unpaid orders, since
+   every other number in the dashboard drops them. Answers one question: how
+   much is still hanging, and from which days. */
+function renderStatus(){
+  const days=RESULT.statusDaily||[],r=RESULT.range;
+  const T={done:0,pending:0,unpaid:0,cancelled:0,orders:0,comm:0};
+  const C={done:0,pending:0,unpaid:0,cancelled:0};
+  days.forEach(d=>{
+    T.done+=d.done;T.pending+=d.pending;T.unpaid+=d.unpaid;T.cancelled+=d.cancelled;
+    T.orders+=d.orders;T.comm+=d.comm;
+    ['done','pending','unpaid','cancelled'].forEach(k=>C[k]+=d.commBy[k]||0);
+  });
+  const settled=days.filter(d=>d.settled).length,open=days.filter(d=>d.open>0).length;
+  $('statNote').textContent=`${r.start} — ${r.end} · ${days.length} hari ada order · ${settled} sudah settle · ${open} masih ada tertunda`;
+  const box=(k,label,n,comm,cls)=>`<div class="stat-cell ${cls}">
+    <div class="sl">${label}</div><div class="sv">${nf(n)}</div>
+    <div class="sc">${rp(comm)}</div></div>`;
+  $('statSum').innerHTML=
+    box('done','Selesai',T.done,C.done,'ok')+
+    box('pending','Tertunda',T.pending,C.pending,'warn')+
+    box('unpaid','Belum Dibayar',T.unpaid,C.unpaid,'warn')+
+    box('cancelled','Dibatalkan',T.cancelled,C.cancelled,'bad')+
+    `<div class="stat-cell total"><div class="sl">Komisi belum final</div>
+      <div class="sv">${rp(C.pending+C.unpaid)}</div>
+      <div class="sc">dari ${nf(T.pending+T.unpaid)} pesanan · ${T.orders?((T.pending+T.unpaid)/T.orders*100).toFixed(1):0}% dari semua</div></div>`;
+
+  const byDate={};days.forEach(d=>byDate[d.date]=d);
+  const all=[];
+  for(let d=new Date(r.start+'T00:00:00Z');d<=new Date(r.end+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+1))
+    all.push(d.toISOString().slice(0,10));
+  $('statGrid').innerHTML=all.map(k=>{
+    const d=byDate[k];
+    const day=k.slice(8),mon=k.slice(5,7);
+    if(!d)return `<div class="statcard none"><div class="sh"><b>${day}</b><span>kosong</span></div></div>`;
+    const cls=d.settled?'settled':(d.open?'open':'none');
+    return `<div class="statcard ${cls}" title="${k}">
+      <div class="sh"><b>${day}</b><span>${d.settled?'Settle':d.open?'Berjalan':'—'}</span></div>
+      <div class="sq">
+        <span><em>Selesai</em><i class="ok">${nf(d.done)}</i></span>
+        <span><em>Tertunda</em><i class="${d.pending?'warn':''}">${nf(d.pending)}</i></span>
+        <span><em>Blm bayar</em><i class="${d.unpaid?'warn':''}">${nf(d.unpaid)}</i></span>
+        <span><em>Batal</em><i class="${d.cancelled?'bad':''}">${nf(d.cancelled)}</i></span>
+      </div>
+      <div class="sf"><em>Komisi</em>${rp(d.comm)}</div>
+      <div class="sf mute"><em>Belum final</em>${rp((d.commBy.pending||0)+(d.commBy.unpaid||0))}</div>
+    </div>`;
+  }).join('');
 }
 function renderTrend(){
   const tr=E.buildTrend(snaps(),active());

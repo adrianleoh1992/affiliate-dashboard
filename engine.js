@@ -226,11 +226,28 @@ function analyze(data, options) {
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
   const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
   const statusCount = {};
+  /* Status per day, counted in ORDERS not product rows — one order carrying
+     eight products is one pending order, not eight. Cancelled and unpaid rows
+     are dropped from every other calculation, so this is the only place that
+     sees them; how much is still hanging is exactly the question it answers. */
+  const SKEY = { 'Selesai': 'done', 'Tertunda': 'pending', 'Belum Dibayar': 'unpaid', 'Dibatalkan': 'cancelled' };
+  const statusDay = {};
   aff.forEach(r => {
     const d = dayOnly(pick(r, COL.aff.orderAt));
     if (!inRange(d)) return;
     const st = String(pick(r, COL.aff.status) || '');
     statusCount[st] = (statusCount[st] || 0) + 1;
+    const key = SKEY[st] || 'lainnya';
+    if (!statusDay[d]) statusDay[d] = {
+      date: d, comm: 0, qty: 0,
+      done: new Set(), pending: new Set(), unpaid: new Set(), cancelled: new Set(), lainnya: new Set(),
+      commBy: { done: 0, pending: 0, unpaid: 0, cancelled: 0, lainnya: 0 },
+    };
+    const sd = statusDay[d], id = String(pick(r, COL.aff.orderId) || '');
+    if (id) sd[key].add(id);
+    const c = num(pick(r, COL.aff.comm));
+    sd.commBy[key] += c;
+    if (key !== 'cancelled') { sd.comm += c; sd.qty += num(pick(r, COL.aff.qty)); }
     if (EXCLUDED[st]) {
       if (st === 'Dibatalkan') { excluded.cancelled++; excluded.cancelledValue += num(pick(r, COL.aff.comm)); }
       else excluded.unpaid++;
@@ -766,6 +783,18 @@ function analyze(data, options) {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
     kpi, tags, adUnits, daily, matchLog, lagProfile, lagCal, settlement, actions,
+    statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
+      const v = statusDay[d];
+      const done = v.done.size, pending = v.pending.size, unpaid = v.unpaid.size,
+            cancelled = v.cancelled.size, other = v.lainnya.size;
+      return {
+        date: d, done, pending, unpaid, cancelled, other,
+        orders: done + pending + unpaid + cancelled + other,
+        open: pending + unpaid,
+        comm: v.comm, qty: v.qty, commBy: v.commBy,
+        settled: done > 0 && pending === 0 && unpaid === 0,
+      };
+    }),
     breakdown: {
       platform: topOf(platform).map(x => ({ name: x.name, comm: x.value })),
       category: topOf(category, 10).map(x => ({ name: x.name, comm: x.value })),
