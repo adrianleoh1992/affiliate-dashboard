@@ -225,9 +225,15 @@ function renderKpi(){
     kpiCard(k.netEff>=0?'good':'bad','Laba Bersih',rp(k.netEff),k.netEff>=0?'setelah biaya iklan':'rugi',[
       ['Laba Organik',rp(org)],
       ['Laba Iklan',rp(paidNet)]]),
-    kpiCard(share>=50?'bad':'','Kontribusi Organik',share.toFixed(1)+'%','porsi komisi tanpa biaya iklan',[
+    // ROAS Organik divides organic commission by the SAME total spend, so the
+    // two parts add up to the total exactly. Dividing by organic spend would
+    // be dividing by zero; this way the card is a decomposition, not a ratio
+    // with a missing denominator.
+    kpiCard('','ROAS Total',rx(k.roasEff),
+      k.paidRoas<1?`iklan sendiri ${rx(k.paidRoas)} — di bawah impas`:'iklan dan organik digabung',[
       ['ROAS Iklan',rx(k.paidRoas)],
-      ['ROAS Gabungan',rx(k.roasEff)]])
+      ['ROAS Organik',k.spend?rx(org/k.spend):'—'],
+      ['Kontribusi Organik',share.toFixed(1)+'%']])
   ].join('');
   bindDrill('kpis');
 }
