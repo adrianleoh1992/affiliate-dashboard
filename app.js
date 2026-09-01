@@ -183,10 +183,13 @@ function bindDrill(id){
 // Meta reports clicks per platform; Shopee reports them per Perujuk. Keeping
 // both on the main screen is the point — where the two disagree is where the
 // money goes missing.
+// Scoped to the click window when there is one, so the platform split adds up
+// to the headline instead of quietly reporting a longer period.
 function metaBySource(){
   const r=RESULT.range,out={};
+  const from=r.clickStart||r.start,to=r.clickEnd||r.end;
   DATA.ads.forEach(a=>{
-    const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<r.start||d>r.end)return;
+    const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<from||d>to)return;
     const p=(a.Platform||'').trim()||'Lainnya';
     out[p]=(out[p]||0)+(parseInt(a['Link clicks']||0,10)||0);
   });
@@ -194,16 +197,17 @@ function metaBySource(){
 }
 // The click report covers its own span, usually shorter than the analysis
 // range. Dividing full-range spend by window-only clicks overstates the cost
-// per click — here it read Rp247 against a true Rp105.
-function spendInClickWindow(){
+// per click — it read Rp247 against a true Rp105. Daily rows already carry
+// PPN, so summing them keeps one definition of spend.
+function clickWindowStats(){
   const r=RESULT.range; if(!r.clickStart)return null;
-  let s=0;
-  DATA.ads.forEach(a=>{
-    const d=E.dayOnly(a['Reporting starts']);
-    if(!E.isDate(d)||d<r.clickStart||d>r.clickEnd)return;
-    s+=parseFloat(a['Amount spent (IDR)']||a['Amount spent']||0)||0;
+  const w={spend:0,impr:0,clicks:0,orders:0,shopee:0,days:0};
+  RESULT.daily.forEach(d=>{
+    if(d.date<r.clickStart||d.date>r.clickEnd)return;
+    w.spend+=d.spend;w.impr+=d.impr;w.clicks+=d.clicks;w.orders+=d.orders;
+    w.shopee+=d.shopeeClicks;w.days++;
   });
-  return s*(1+(RESULT.options.ppn||0)/100);
+  return w.days?w:null;
 }
 function renderClickKpi(){
   const k=RESULT.kpi,r=RESULT.range,el=$('clickKpis');
@@ -222,17 +226,27 @@ function renderClickKpi(){
   const ms=metaBySource(),msTot=ms.reduce((s,x)=>s+x[1],0);
   const ss=(RESULT.breakdown.clickSource||[]),ssTot=ss.reduce((s,x)=>s+x.count,0);
   const win=r.clickStart?`${r.clickStart} s/d ${r.clickEnd}`:'klik belum dimuat';
-  const winSpend=spendInClickWindow();
+  const W=clickWindowStats();
+  // Both columns divide the SAME spend, impressions and orders — only the click
+  // count changes. That is the whole point of reading them side by side: the
+  // gap between each pair is exactly what the leak or the resharing did.
+  const sp=W?W.spend:k.spend,im=W?W.impr:k.impr,od=W?W.orders:k.orders;
+  const mC=W?adMeta:k.clicks,sC=adShopee;
+  const per=(n,d)=>d?full(n/d):'—';
+  const per1k=(n,d)=>d?full(n/d*1000):'—';
+  const pc=(n,d)=>d?(n/d*100).toFixed(2)+'%':'—';
 
   el.innerHTML=[
-    kpiCard('','Klik Meta',nf(k.clicks),`${r.start} s/d ${r.end}`,[
-      ['CPM',rp(k.cpm)],['CPC',full(k.cpc)],
-      ['CTR',(k.ctr||0).toFixed(2)+'%'],['Impresi',nf(k.impr)],
-      ...ms.slice(0,4).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`])]),
-    kpiCard('','Klik Shopee',nf(k.shopeeClicks),win,[
-      ['Biaya per klik masuk',adShopee&&winSpend!=null?full(winSpend/adShopee):'—'],
-      ['Biaya per pesanan',k.orders?full(k.costPerOrder):'—'],
-      ...ss.slice(0,4).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`])]),
+    kpiCard('','Klik Meta',nf(mC),win,[
+      ['Impresi',nf(im)],['CPM',per1k(sp,im)],['CPC',per(sp,mC)],
+      ['CTR',pc(mC,im)],['CR',pc(od,mC)],
+      ...ms.slice(0,3).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`]),
+      ['CR memakai semua pesanan','termasuk dari tag organik',1]]),
+    kpiCard('','Klik Shopee',nf(sC),`${win} · ${nf(k.shopeeClicks)} total`,[
+      ['Impresi','tidak dilaporkan',1],['CPM',per1k(sp,sC)],['CPC',per(sp,sC)],
+      ['CTR',pc(sC,im)],['CR',pc(od,sC)],
+      ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
+      ['CPM & CTR memakai impresi Meta','Shopee tak punya impresi',1]]),
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
       lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
       lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
