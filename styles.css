@@ -534,3 +534,17 @@ tbody tr:hover{background:var(--surface-2)}
   background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn)}
 .gap-chip em{font-style:normal;font-size:10px;font-weight:600;opacity:.75}
 @media(max-width:640px){.gap-chip{width:100%;justify-content:space-between}}
+
+/* An empty table with no explanation reads as broken rather than as "nothing
+   here yet", so every table that can be empty says which file is missing. */
+.tbl-empty{text-align:center;color:var(--text-mute);padding:22px 14px!important;
+  font-size:12px;font-style:italic}
+/* This row of date pickers was pinned to three inline columns, which could not
+   collapse and pushed the page wider than the phone. */
+.ctrls-inline{grid-template-columns:repeat(auto-fit,minmax(132px,auto));
+  justify-content:start;margin-bottom:14px}
+@media(max-width:640px){
+  .ctrls-inline{grid-template-columns:1fr}
+  /* Small buttons sitting in a card header still need a real hit area. */
+  .card-head .btn.sm{min-height:38px;padding:8px 12px}
+}
