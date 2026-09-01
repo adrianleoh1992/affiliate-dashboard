@@ -69,6 +69,21 @@
     </div>
     <p class="drop-hint" id="dropHint">Bisa juga menarik file ke mana saja di kartu ini — jenisnya dikenali dari isi file, bukan dari kotak tujuan.</p>
     <input type="file" id="files" multiple accept=".csv" class="hidden">
+
+    <div class="chips covstrip" id="covStrip"></div>
+
+    <div id="ingestPlan" class="hidden">
+      <div class="ingest-box">
+        <div class="ingest-head"><b>Rencana simpan ke akun <span id="planAcct"></span></b>
+          <span class="sub">Baris baru ditambah, yang sudah ada diperbarui, duplikat dilewati.</span></div>
+        <div id="planRows"></div>
+        <div class="ingest-actions">
+          <button class="btn ghost" id="btnSkipSave">Jangan simpan</button>
+          <button class="btn primary" id="btnSaveAll">Simpan ke Riwayat</button>
+        </div>
+      </div>
+    </div>
+    <div id="savedNote" class="hidden log-ok"></div>
   </div>
 
   <div class="empty-state" id="emptyState">
@@ -105,6 +120,7 @@
       <button class="tab" data-tab="klik">Klik</button>
       <button class="tab" data-tab="harian">Harian</button>
       <button class="tab" data-tab="produk">Produk</button>
+      <button class="tab" data-tab="tersimpan">Tersimpan</button>
       <button class="tab" data-tab="rincian">Rincian</button>
     </div>
 
@@ -243,6 +259,40 @@
       </div>
     </div>
 
+    <div class="panel" data-panel="tersimpan">
+      <div class="card">
+        <div class="card-head"><h2>Riwayat Harian Tersimpan</h2>
+          <span class="sub" id="storedNote"></span>
+          <button class="btn ghost sm" id="btnExportAcct">Ekspor Akun</button></div>
+        <p class="hint">Data ini menumpuk lintas periode dari setiap unggahan yang Anda simpan — tidak perlu mengunggah ulang CSV lama.</p>
+        <div class="ctrls" style="grid-template-columns:auto auto auto;margin-bottom:14px">
+          <div class="field"><label>Dari</label><input type="date" id="dsStart"></div>
+          <div class="field"><label>Sampai</label><input type="date" id="dsEnd"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" id="btnRange">Terapkan</button></div>
+        </div>
+        <div class="strip" id="storedStrip"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2></div>
+        <div class="chartbox tall"><canvas id="chStored"></canvas></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
+          <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
+        <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
+          <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Rincian Harian Tersimpan</h2></div>
+        <div class="tscroll"><table id="tblStored"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Riwayat Unggahan</h2>
+          <span class="sub">Bukti anti-duplikasi: tiap file dicatat berapa yang baru, diperbarui, dan dilewati.</span></div>
+        <div class="tscroll"><table id="tblUploads"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
     <div class="panel" data-panel="rincian">
       <div class="card">
         <div class="card-head"><h2>Komisi per Platform</h2></div>
@@ -305,6 +355,8 @@
       <button class="btn sm" data-preset="agresif">Agresif</button>
     </div>
     <div class="ctrls" style="margin-top:15px">
+      <div class="field wide"><label>Akun Iklan</label><input type="text" id="adsAcctName" placeholder="mis. Meta — Adrian" autocomplete="off">
+        <div class="tip" id="adsAcctNote">Label untuk data spend akun ini</div></div>
       <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
       <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
       <div class="field"><label>PPN Iklan</label>
@@ -347,6 +399,9 @@
 <div class="toast" id="toast"></div>
 
 <script src="engine.js"></script>
+<script src="daily-agg.js"></script>
+<script src="daily-store.js"></script>
 <script src="app.js"></script>
+<script src="daily-layer.js"></script>
 </body>
 </html>

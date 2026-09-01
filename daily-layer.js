@@ -27,21 +27,26 @@
   let FILES_SNAP = [], OPTS_SNAP = {};
 
   /* ── Accounts ───────────────────────────────────────────────────────────── */
-  async function refreshAccounts(keepId) {
-    const shopee = await STORE.listAccounts('shopee');
-    const ads = await STORE.listAccounts('ads');
-    const selS = $('selShopee'), selA = $('selAds');
-    selS.innerHTML = shopee.length
-      ? shopee.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
-      : '<option value="">— belum ada akun —</option>';
-    if (keepId) selS.value = String(keepId);
-    ACCT = shopee.find(a => String(a.id) === selS.value) || shopee[0] || null;
+  /* The main dashboard already owns one account selector in the header, and a
+     second one here would be two doors to the same thing. So this follows that
+     selector instead of owning its own: the chosen name becomes the IndexedDB
+     account. The ads account stays a per-account label — the user runs one ads
+     account per Shopee account today, but the schema keeps it separate so a
+     second one later needs no migration. */
+  function adsKey(name) { return 'adash_adsacct_' + name; }
+  function shopeeName() { return (window.active && window.active()) || 'default'; }
 
-    const mine = ACCT ? ads.filter(a => a.shopee_id === ACCT.id) : [];
-    selA.innerHTML = mine.length
-      ? mine.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
-      : '<option value="">— belum ada akun iklan —</option>';
-    AD_ACCT = mine.find(a => String(a.id) === selA.value) || mine[0] || null;
+  async function refreshAccounts() {
+    const name = shopeeName();
+    ACCT = await STORE.ensureAccount('shopee', name);
+    let adsName = '';
+    try { adsName = localStorage.getItem(adsKey(name)) || ''; } catch (e) {}
+    AD_ACCT = adsName
+      ? await STORE.ensureAccount('ads', adsName, { shopee_id: ACCT.id })
+      : null;
+    const f = $('adsAcctName'); if (f) f.value = adsName;
+    const b = $('adsAcctNote');
+    if (b) b.textContent = adsName ? `Spend dicap "${adsName}"` : 'Belum diberi nama — opsional';
     await refreshCoverage();
   }
 
@@ -320,31 +325,23 @@
 
   $('btnRange').onclick = () => renderStored();
 
-  $('selShopee').onchange = async () => { await refreshAccounts($('selShopee').value); await buildPlan(); await renderStored(); await renderUploads(); };
-  $('selAds').onchange = async () => {
-    const ads = await STORE.listAccounts('ads');
-    AD_ACCT = ads.find(a => String(a.id) === $('selAds').value) || null;
-  };
-  $('btnShopeeAdd').onclick = async () => {
-    const n = prompt('Nama akun Shopee (mis. "BBA Utama")');
-    if (!n || !n.trim()) return;
-    try {
-      const a = await STORE.ensureAccount('shopee', n.trim());
-      await refreshAccounts(a.id); await buildPlan(); await renderStored(); await renderUploads();
-      toast('Akun dibuat: ' + a.name);
-    } catch (e) { toast('Gagal: ' + e.message); }
-  };
-  $('btnAdsAdd').onclick = async () => {
-    if (!ACCT) return toast('Pilih akun Shopee dulu');
-    const n = prompt('Nama akun iklan (mis. "Meta — Adrian")');
-    if (!n || !n.trim()) return;
-    try {
-      const a = await STORE.ensureAccount('ads', n.trim(), { shopee_id: ACCT.id });
-      await refreshAccounts(ACCT.id);
-      $('selAds').value = String(a.id); AD_ACCT = a;
-      toast('Akun iklan dibuat: ' + a.name);
-    } catch (e) { toast('Gagal: ' + e.message); }
-  };
+  // app.js assigns .onchange directly; addEventListener stacks after it, so its
+  // reset() runs first and this re-syncs against the account it switched to.
+  $('account').addEventListener('change', async () => {
+    await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads();
+  });
+  $('btnNewAcct').addEventListener('click', () => {
+    setTimeout(async () => {
+      await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads();
+    }, 0);
+  });
+  const adsField = $('adsAcctName');
+  if (adsField) adsField.addEventListener('change', async () => {
+    const v = adsField.value.trim();
+    try { v ? localStorage.setItem(adsKey(shopeeName()), v) : localStorage.removeItem(adsKey(shopeeName())); } catch (e) {}
+    await refreshAccounts();
+    toast(v ? 'Akun iklan: ' + v : 'Nama akun iklan dikosongkan');
+  });
   $('btnExportAcct').onclick = async () => {
     if (!ACCT) return toast('Pilih akun dulu');
     const data = await STORE.exportAccount(ACCT.id);

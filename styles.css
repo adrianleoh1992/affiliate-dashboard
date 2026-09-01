@@ -370,3 +370,56 @@ tbody tr:hover{background:var(--surface-2)}
 .snaprow .d{font-weight:700;font-size:12.5px}
 .snaprow .t{font-size:11px;color:var(--text-dim)}
 @media(max-width:640px){.wrap{padding:0 13px 44px}.hdr{padding:10px 13px}.kpi .val{font-size:18px}}
+
+/* ── Penyimpanan harian ─────────────────────────────────────────────────────
+   Rencana ingest, strip cakupan, dan catatan simpan. Dipindahkan ke sini dari
+   styles-daily.css saat lapisan harian disambungkan ke dashboard utama. */
+
+.covstrip{margin-top:12px}
+.field.wide{grid-column:1/-1}
+
+/* Ingest plan — shown BEFORE writing, so the user approves what changes */
+.ingest-box{margin-top:14px;border:1px solid var(--info);background:var(--info-soft);
+  border-radius:11px;padding:14px}
+.ingest-head{margin-bottom:10px}
+.ingest-head b{font-size:13.5px;color:var(--info)}
+.ingest-head .sub{display:block;margin-top:3px;font-size:11px;color:var(--text-dim)}
+.plan-row{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:center;
+  padding:8px 0;border-top:1px solid var(--border)}
+.plan-row:first-child{border-top:0}
+/* The collapsed no-op state has no kind column and needs no divider padding. */
+.plan-row.single{grid-template-columns:1fr;padding:0}
+.plan-kind{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text-dim)}
+.plan-nums{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.plan-pill{font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;
+  border:1px solid var(--border-strong);background:var(--surface);white-space:nowrap}
+.plan-pill.new{color:var(--ok);border-color:var(--ok)}
+.plan-pill.upd{color:var(--warn);border-color:var(--warn)}
+.plan-pill.dup{color:var(--text-mute)}
+/* Already-ingested is the dedup working as intended, not a failure. */
+.plan-pill.seen{color:var(--text-dim);background:var(--surface-2);font-weight:600}
+.plan-pill.blocked{color:var(--bad);border-color:var(--bad)}
+.plan-period{font-size:11px;color:var(--text-dim);margin-left:auto}
+.ingest-actions{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
+/* No-op plan: one line plus one button, so drop the extra breathing room. */
+.ingest-head.hidden + #planRows + .ingest-actions,
+#planRows:has(.plan-row.single) + .ingest-actions{margin-top:10px}
+
+.log-ok{margin-top:12px;padding:11px 13px;border-radius:10px;font-size:12.5px;
+  background:var(--ok-soft);border:1px solid var(--ok);color:var(--ok);line-height:1.5}
+.log-ok b{font-weight:800}
+
+/* Coverage strip on the account card */
+#covStrip .chip{background:var(--surface-2);border:1px solid var(--border);
+  color:var(--text-dim);font-weight:600}
+#covStrip .chip b{color:var(--text);font-weight:800}
+#covStrip .chip.empty{opacity:.6;font-style:italic}
+
+@media(max-width:640px){
+  .ingest-actions{flex-direction:column-reverse}
+  .ingest-actions .btn{width:100%;justify-content:center;min-height:44px}
+  .plan-row{grid-template-columns:1fr;gap:4px}
+  .plan-period{margin-left:0}
+  #covStrip .chip{width:100%}
+}
