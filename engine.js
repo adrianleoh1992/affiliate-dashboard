@@ -375,12 +375,21 @@ function analyze(data, options) {
   const clickSrc = {}, clickRegion = {}, clickDaily = {};
   fClk.forEach(r => {
     const t = cleanTag(pick(r, COL.clk.tag));
-    if (t) bucket(t).shopeeClicks++;
+    const d = dayOnly(pick(r, COL.clk.time));
+    if (t) {
+      const b = bucket(t);
+      b.shopeeClicks++;
+      // Per tag AND per day, so a single date can be opened up to show which
+      // tag lost its clicks that day rather than only the month-wide total.
+      if (isDate(d)) {
+        if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
+        b.daily[d].shopeeClicks = (b.daily[d].shopeeClicks || 0) + 1;
+      }
+    }
     const s = String(pick(r, COL.clk.src) || 'Lainnya');
     clickSrc[s] = (clickSrc[s] || 0) + 1;
     const rg = String(pick(r, COL.clk.region) || '');
     if (rg) clickRegion[rg] = (clickRegion[rg] || 0) + 1;
-    const d = dayOnly(pick(r, COL.clk.time));
     if (isDate(d)) clickDaily[d] = (clickDaily[d] || 0) + 1;
   });
 
@@ -524,6 +533,19 @@ function analyze(data, options) {
         orders: dd.orders.size, clicks: dd.clicks,
       };
     });
+    /* dailyRows above is deliberately filtered to mature days that had spend,
+       because that is what the STOP verdict may look at. Opening one date in
+       the daily table needs the opposite: every day this tag did anything. */
+    const byDate = {};
+    Object.keys(b.daily).filter(isDate).forEach(d => {
+      const dd = b.daily[d];
+      const sh = dd.shopeeClicks || 0;
+      if (!dd.spend && !dd.comm && !dd.clicks && !dd.orders.size && !sh) return;
+      byDate[d] = {
+        date: d, comm: dd.comm, spend: dd.spend * ppnMult, gmv: dd.gmv,
+        orders: dd.orders.size, clicks: dd.clicks, shopeeClicks: sh,
+      };
+    });
 
     const v = verdictFor(spend, commEff, daysProd, dailyRows, leak);
 
@@ -544,7 +566,7 @@ function analyze(data, options) {
       daysProd, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
-      dailyRows, activeUnits, delivery: delivery ? delivery.name : '',
+      dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
       adNames: Object.keys(b.adNames),

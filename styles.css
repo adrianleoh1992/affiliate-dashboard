@@ -164,19 +164,22 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .barcell{width:110px;padding-left:0!important;padding-right:14px!important}
 .minibar{display:block;height:7px;border-radius:3px;background:var(--accent);min-width:2px;opacity:.75}
 
-/* Calendar: one square per day, a month at a glance. */
-#calendar{display:flex;flex-wrap:wrap;gap:22px}
+/* Calendar: one square per day, a month at a glance. It gets the full card
+   width — a month squeezed into 400px of a 1600px card reads as a thumbnail,
+   and the whole point is being able to see it from across the desk. */
+#calendar{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:26px}
 .calmonth h4{font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;
-  letter-spacing:.6px;margin-bottom:8px}
-.cgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;min-width:340px}
-.cdow{font-size:9.5px;font-weight:700;color:var(--text-mute);text-align:center;padding-bottom:2px;
+  letter-spacing:.6px;margin-bottom:9px}
+.cgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.cdow{font-size:10px;font-weight:700;color:var(--text-mute);text-align:center;padding-bottom:3px;
   text-transform:uppercase;letter-spacing:.4px}
-.cday{position:relative;aspect-ratio:1;border-radius:7px;border:1px solid var(--border);
-  display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1px;
+.cday{position:relative;aspect-ratio:7/5;min-height:58px;border-radius:9px;border:1px solid var(--border);
+  display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;
   background:var(--surface);overflow:hidden;cursor:default}
-.cday b{font-size:10px;font-weight:700;line-height:1;color:var(--text-dim)}
-.cday i{font-size:9px;font-style:normal;font-weight:600;line-height:1;text-align:center;
-  color:var(--text-dim);padding:0 2px;overflow:hidden;text-overflow:ellipsis;max-width:100%;white-space:nowrap}
+.cday b{font-size:12px;font-weight:700;line-height:1;color:var(--text-dim)}
+.cday i{font-size:12px;font-style:normal;font-weight:700;line-height:1.1;text-align:center;
+  color:var(--text-dim);padding:0 4px;overflow:hidden;text-overflow:ellipsis;max-width:100%;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
 .cday.pad{border:0;background:transparent}
 .cday.none{background:var(--surface-2);opacity:.5}
 .cday.pos{background:color-mix(in srgb,var(--ok) calc(var(--i)*72%),var(--surface));
@@ -186,7 +189,28 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .cday.pos b,.cday.pos i,.cday.neg b,.cday.neg i{color:var(--text)}
 /* Immature days are shown, not hidden — but never mistaken for settled ones. */
 .cday.raw{background-image:repeating-linear-gradient(45deg,transparent 0 4px,rgba(125,125,125,.22) 4px 8px)}
-@media(max-width:640px){#calendar{gap:16px}.cgrid{min-width:0;width:100%;gap:3px}.cday i{font-size:8px}}
+@media(max-width:640px){#calendar{gap:16px}.cgrid{gap:3px}.cday{min-height:44px;border-radius:6px;gap:1px}
+  .cday b{font-size:9.5px}.cday i{font-size:8.5px;padding:0 1px}}
+
+/* One date opened up: which tag did what that day. */
+.dayrow{cursor:pointer}
+.dayrow:hover{background:var(--surface-2)}
+.dayrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.expcell{width:30px;padding-right:0!important}
+.exp{display:grid;place-items:center;width:19px;height:19px;border-radius:5px;
+  background:var(--surface-2);border:1px solid var(--border-strong);
+  color:var(--text-dim);font-size:9px;transition:transform .15s,background .15s}
+.dayrow:hover .exp{border-color:var(--accent);color:var(--accent)}
+.dayrow.open .exp{transform:rotate(90deg);background:var(--accent);border-color:var(--accent);color:#fff}
+.daydetail>td{padding:0!important;background:var(--surface-2)}
+.daybox{padding:12px 14px 14px;border-left:3px solid var(--accent)}
+.dayhead{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text-dim);margin-bottom:9px;display:flex;gap:9px;align-items:baseline}
+.dayhead span{font-weight:600;color:var(--text-mute);text-transform:none;letter-spacing:0}
+.daytbl{font-size:12px}
+.daytbl th{background:transparent;font-size:9.5px}
+.daytbl td{padding:7px 10px}
+.daytbl tbody tr:hover{background:var(--surface)}
 
 /* Second row: the click funnel. Same mechanics as the four above it, one step
    quieter so the money cards still lead. */

@@ -385,14 +385,61 @@ function renderLeak(){
 function renderDaily(){
   const d=RESULT.daily,k=RESULT.kpi;
   $('dailyStrip').innerHTML=[['Impresi',nf(k.impr)],['Reach',nf(k.reach)],['Klik',nf(k.clicks)],['CTR',k.ctr.toFixed(2)+'%'],['CPM',rp(k.cpm)],['CPC',rp(k.cpc)],['Landing View',nf(k.lpv)],['CR',k.convRate.toFixed(2)+'%'],['GMV',rp(k.gmv)],['Biaya/Order',rp(k.costPerOrder)]].map(x=>`<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
-  $('tblDaily').querySelector('thead').innerHTML='<tr>'+['Tanggal','Biaya','Komisi','Laba','ROAS','Klik Meta','Klik Shopee','Order','CR %','CPC'].map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
-  $('tblDaily').querySelector('tbody').innerHTML=d.slice().reverse().map(x=>`<tr${x.mature?'':' style="opacity:.6"'}>
+  $('tblDaily').querySelector('thead').innerHTML='<tr>'+DAYCOLS.map((h,i)=>`<th class="${i>1?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblDaily').querySelector('tbody').innerHTML=d.slice().reverse().map(x=>dayRow(x)).join('');
+  $('tblDaily').querySelectorAll('[data-day]').forEach(tr=>{
+    tr.onclick=()=>toggleDay(tr.dataset.day,tr);
+    tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleDay(tr.dataset.day,tr)}};
+  });
+}
+const DAYCOLS=['','Tanggal','Biaya','Komisi','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee',
+  'Order','Biaya/Order','Nilai/Order','Komisi/Order'];
+// Averages per order sit next to the per-click costs. Cost per order says what
+// a sale costs to buy; value and commission per order say what it is worth.
+// A cost per click with no spend behind it is not zero, it is absent — organic
+// tags print "—" rather than a Rp0 that reads like a bargain.
+function orderCells(v,orders){
+  return `<td class="num">${nf(v.clicks)}</td>
+    <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
+    <td class="num">${v.shopeeClicks?nf(v.shopeeClicks):'—'}</td>
+    <td class="num">${v.shopeeClicks&&v.spend?nf(v.spend/v.shopeeClicks):'—'}</td>
+    <td class="num">${nf(orders)}</td>
+    <td class="num">${orders&&v.spend?rp(v.spend/orders):'—'}</td>
+    <td class="num">${orders?rp(v.gmv/orders):'—'}</td>
+    <td class="num">${orders?rp(v.comm/orders):'—'}</td>`;
+}
+function dayRow(x){
+  return `<tr class="dayrow" data-day="${x.date}" tabindex="0" role="button" aria-expanded="false"${x.mature?'':' style="opacity:.6"'}>
+    <td class="expcell"><span class="exp">▸</span></td>
     <td><b>${x.date}</b>${x.mature?'':' <span class="pill">belum matang</span>'}</td>
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.comm)}</td>
     <td class="num ${x.net>=0?'pos':'neg'}">${rp(x.net)}</td>
-    <td class="num">${x.spend?x.roas.toFixed(2):'—'}</td><td class="num">${nf(x.clicks)}</td>
-    <td class="num">${x.shopeeClicks?nf(x.shopeeClicks):'—'}</td><td class="num">${nf(x.orders)}</td>
-    <td class="num">${x.clicks?x.convRate.toFixed(2):'—'}</td><td class="num">${x.clicks?nf(x.cpc):'—'}</td></tr>`).join('');
+    <td class="num">${x.spend?x.roas.toFixed(2):'—'}</td>
+    ${orderCells(x,x.orders)}</tr>`;
+}
+function toggleDay(date,tr){
+  if(tr.nextElementSibling&&tr.nextElementSibling.classList.contains('daydetail')){
+    tr.nextElementSibling.remove();tr.classList.remove('open');tr.setAttribute('aria-expanded','false');return;
+  }
+  const rows=RESULT.tags.map(t=>({tag:t.tag,status:t.status,label:t.label,d:t.byDate&&t.byDate[date]}))
+    .filter(x=>x.d).sort((a,b)=>b.d.spend-a.d.spend||b.d.comm-a.d.comm);
+  const body=rows.length?rows.map(x=>{
+    const v=x.d,net=v.comm-v.spend;
+    return `<tr><td><b>${esc(x.tag)}</b> <span class="badge ${x.status}">${x.label}</span></td>
+      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
+      <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
+      <td class="num">${v.spend?(v.comm/v.spend).toFixed(2):'—'}</td>
+      ${orderCells(v,v.orders)}</tr>`;
+  }).join(''):`<tr><td colspan="${DAYCOLS.length-1}" style="color:var(--text-mute);padding:14px">Tidak ada tag yang aktif pada tanggal ini.</td></tr>`;
+  const det=document.createElement('tr');
+  det.className='daydetail';
+  det.innerHTML=`<td colspan="${DAYCOLS.length}"><div class="daybox">
+    <div class="dayhead">Rincian per tag · ${date} <span>${rows.length} tag</span></div>
+    <div class="tscroll"><table class="daytbl"><thead><tr>${
+      ['Tag',...DAYCOLS.slice(2)].map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')
+    }</tr></thead><tbody>${body}</tbody></table></div>
+  </div></td>`;
+  tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');
 }
 function renderTrend(){
   const tr=E.buildTrend(snaps(),active());
