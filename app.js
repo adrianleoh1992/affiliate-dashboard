@@ -200,7 +200,7 @@ function placementSplit(){
 function kpiCard(cls,label,value,note,rows){
   const body=rows.filter(Boolean).map(r=>`<div class="krow${r[2]?' est':''}"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('');
   return `<div class="kpi ${cls}${body?' expandable':''}"${body?' tabindex="0" role="button" aria-expanded="false"':''}>
-    <div class="lbl">${label}${body?'<span class="chev">▾</span>':''}</div>
+    <div class="lbl">${label}${body?'<span class="chev">Rincian</span>':''}</div>
     <div class="val">${value}</div><div class="sub">${note}</div>
     ${body?`<div class="kdrill">${body}</div>`:''}</div>`;
 }
@@ -336,16 +336,63 @@ function renderClickKpi(){
 }
 function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
 function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()})}
+
+/* Rows in Semua Tag and Per Ad Unit open into their own day-by-day history.
+   The totals answer "is this working"; the days answer "since when". */
+const BDCOLS=['Tanggal','Biaya','Komisi','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','Order','Biaya/Order','Nilai/Order'];
+function breakdownRows(byDate){
+  const r=RESULT.range;
+  return Object.keys(byDate||{}).filter(d=>d>=r.start&&d<=r.end).sort().reverse()
+    .map(d=>byDate[d]);
+}
+function breakdownHTML(title,byDate,note){
+  const rows=breakdownRows(byDate);
+  const body=rows.length?rows.map(v=>{
+    const net=v.comm-v.spend,sh=v.shopeeClicks||0;
+    return `<tr><td><b>${v.date}</b></td>
+      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
+      <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
+      <td class="num">${v.spend?(v.comm/v.spend).toFixed(2):'—'}</td>
+      <td class="num">${nf(v.clicks)}</td>
+      <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
+      <td class="num">${sh?nf(sh):'—'}</td>
+      <td class="num">${nf(v.orders)}</td>
+      <td class="num">${v.orders&&v.spend?rp(v.spend/v.orders):'—'}</td>
+      <td class="num">${v.orders?rp(v.gmv/v.orders):'—'}</td></tr>`;
+  }).join(''):`<tr><td colspan="${BDCOLS.length}" style="color:var(--text-mute);padding:14px">Tidak ada hari dengan aktivitas pada periode ini.</td></tr>`;
+  return `<div class="daybox">
+    <div class="dayhead">${esc(title)} <span>${rows.length} hari${note?' · '+note:''}</span></div>
+    <div class="tscroll"><table class="daytbl"><thead><tr>${
+      BDCOLS.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+  </div>`;
+}
+function bindBreakdown(tableId,lookup,cols){
+  $(tableId).querySelectorAll('tbody tr[data-bd]').forEach(tr=>{
+    const open=()=>{
+      if(tr.nextElementSibling&&tr.nextElementSibling.classList.contains('daydetail')){
+        tr.nextElementSibling.remove();tr.classList.remove('open');tr.setAttribute('aria-expanded','false');return;
+      }
+      const it=lookup(tr.dataset.bd); if(!it)return;
+      const det=document.createElement('tr');
+      det.className='daydetail';
+      det.innerHTML=`<td colspan="${cols}">${breakdownHTML('Per hari · '+tr.dataset.bd,it.byDate,it.note)}</td>`;
+      tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');
+    };
+    tr.onclick=open;
+    tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
+  });
+}
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=RESULT.tags.filter(t=>!FILTER||t.status===FILTER).slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(y-x)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
-  return `<tr><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');$('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';
   const rg=RESULT.range;
   $('tagNote').textContent=(rg.clickStart?`Kolom Shopee dari laporan klik ${rg.clickStart} — ${rg.clickEnd} · `:'')
-    +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()})}
+    +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};bindBreakdown('tblMain',tag=>{const t=RESULT.tags.find(x=>x.tag===tag);return t?{byDate:t.byDate}:null},MC.length);
+  $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
 const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 function renderUnit(){
@@ -354,7 +401,7 @@ function renderUnit(){
   $('adunitNote').textContent=u.length+' ad unit · '+r.start+' — '+r.end
     +(r.clickStart?` · kolom Shopee dari laporan klik ${r.clickStart} — ${r.clickEnd}`:'');
   $('tblUnit').querySelector('thead').innerHTML='<tr>'+UC.map(c=>`<th class="${c[2]?'num':''}${c[0]==='cpcIdeal'?' col-ideal':''}">${c[1]}</th>`).join('')+'</tr>';
-  $('tblUnit').querySelector('tbody').innerHTML=u.map(x=>`<tr>
+  $('tblUnit').querySelector('tbody').innerHTML=u.map(x=>`<tr class="dayrow" data-bd="${esc(x.adName)}" tabindex="0" role="button" aria-expanded="false">
     <td><div class="tagcell"><span class="nm">${esc(x.adName)} <span class="badge ${x.status}">${x.label}</span></span>
     <span class="rs">Tag: <span class="pill">${esc(x.tag)}</span>${x.estimated?' · komisi proporsional':''}</span></div></td>
     <td><span class="dot ${x.active?'on':'off'}"></span>${x.active?'Nyala':'Mati'}</td>
@@ -369,6 +416,8 @@ function renderUnit(){
     <td class="num ${x.netEff>=0?'pos':'neg'}">${rp(x.netEff)}</td>
     <td class="num ${x.roi>=0?'pos':'neg'}">${x.spend?x.roi.toFixed(0)+'%':'—'}</td>
     <td class="num">${x.orders?rp(x.costPerOrder):'—'}</td></tr>`).join('');
+  bindBreakdown('tblUnit',name=>{const a=RESULT.adUnits.find(x=>x.adName===name);
+    return a?{byDate:a.byDate,note:a.estimated?'komisi & klik Shopee proporsional dari tag':''}:null},UC.length);
 }
 function renderLeak(){
   const r=RESULT.range;
@@ -522,10 +571,10 @@ document.querySelectorAll('[data-prod]').forEach(b=>b.onclick=()=>{
 // The daily table below answers "how much"; this answers "which days".
 let CALVIEW='net';
 const CALDEF={
-  net:{label:'Laba',fmt:d=>rp(d.net),val:d=>d.net,signed:true},
-  roas:{label:'ROAS',fmt:d=>d.spend?rx(d.roas):'—',val:d=>d.spend?d.roas-1:null,signed:true},
-  comm:{label:'Komisi',fmt:d=>rp(d.comm),val:d=>d.comm,signed:false},
-  spend:{label:'Biaya',fmt:d=>rp(d.spend),val:d=>d.spend,signed:false},
+  net:{label:'Laba',val:d=>d.net,signed:true},
+  roas:{label:'ROAS',val:d=>d.spend?d.roas-1:null,signed:true},
+  comm:{label:'Komisi',val:d=>d.comm,signed:false},
+  spend:{label:'Biaya',val:d=>d.spend,signed:false},
 };
 function renderCalendar(){
   const el=$('calendar'),days=RESULT.daily;
@@ -547,14 +596,25 @@ function renderCalendar(){
       const v=C.val(d);
       let cls='zero',op=0;
       if(v!=null&&isFinite(v)){op=Math.min(Math.abs(v)/mag,1);cls=C.signed?(v>=0?'pos':'neg'):'pos'}
+      // All four numbers live in the square. The switcher above now only picks
+      // which one drives the colour and sits on the top line — nobody should
+      // have to click through four views to read one day.
+      const lines=[
+        ['Laba',rp(d.net),d.net>=0?'up':'down'],
+        ['Komisi',rp(d.comm),''],
+        ['Biaya',rp(d.spend),''],
+        ['ROAS',d.spend?d.roas.toFixed(2)+'x':'—',''],
+      ];
+      const lead=lines.splice({net:0,comm:1,spend:2,roas:3}[CALVIEW],1)[0];
       cells.push(`<span class="cday ${cls}${d.mature?'':' raw'}" style="--i:${op.toFixed(3)}"
-        title="${key} · ${C.label} ${C.fmt(d)} · komisi ${rp(d.comm)} · biaya ${rp(d.spend)} · ${nf(d.orders)} order${d.mature?'':' · data belum matang'}">
-        <b>${i}</b><i>${C.fmt(d)}</i></span>`);
+        title="${key} · ${nf(d.orders)} order · ${nf(d.clicks)} klik Meta${d.shopeeClicks?' · '+nf(d.shopeeClicks)+' klik Shopee':''}${d.mature?'':' · data belum matang'}">
+        <b>${i}</b><i class="${lead[2]}"><em>${lead[0]}</em>${lead[1]}</i>
+        <u>${lines.map(l=>`<span><em>${l[0]}</em>${l[1]}</span>`).join('')}</u></span>`);
     }
     return `<div class="calmonth"><h4>${NM[m-1]} ${y}</h4>
       <div class="cgrid">${DOW.map(x=>`<span class="cdow">${x}</span>`).join('')}${cells.join('')}</div></div>`;
   }).join('');
-  $('calNote').textContent=`${days.length} hari · kotak bergaris belum matang`;
+  $('calNote').textContent=`${days.length} hari · warna mengikuti ${C.label} · kotak bergaris belum matang`;
 }
 document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
   CALVIEW=b.dataset.cal;

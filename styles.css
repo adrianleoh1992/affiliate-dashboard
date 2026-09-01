@@ -106,8 +106,11 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .kpi.expandable:hover{border-color:var(--border-strong)}
 .kpi.expandable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .kpi .lbl{display:flex;align-items:center;gap:5px}
-.kpi .chev{font-size:9px;color:var(--text-mute);transition:transform .15s}
-.kpi.open .chev{transform:rotate(180deg)}
+.kpi .chev{margin-left:auto;font-size:9.5px;font-weight:700;color:var(--accent);
+  background:var(--accent-soft);border-radius:20px;padding:2px 8px;letter-spacing:.3px;
+  text-transform:none;transition:.15s;white-space:nowrap}
+.kpi.expandable:hover .chev{background:var(--accent);color:#fff}
+.kpi.open .chev{background:var(--surface-2);color:var(--text-mute)}
 .kdrill{display:none;margin-top:10px;padding-top:9px;border-top:1px dashed var(--border-strong)}
 .kpi.open .kdrill{display:block}
 .krow{display:flex;justify-content:space-between;gap:12px;font-size:11.5px;padding:4px 0;
@@ -173,24 +176,38 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .cgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
 .cdow{font-size:10px;font-weight:700;color:var(--text-mute);text-align:center;padding-bottom:3px;
   text-transform:uppercase;letter-spacing:.4px}
-.cday{position:relative;aspect-ratio:7/5;min-height:58px;border-radius:9px;border:1px solid var(--border);
-  display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;
+.cday{position:relative;min-height:104px;border-radius:9px;border:1px solid var(--border);
+  display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:7px 9px 8px;
   background:var(--surface);overflow:hidden;cursor:default}
-.cday b{font-size:12px;font-weight:700;line-height:1;color:var(--text-dim)}
-.cday i{font-size:12px;font-style:normal;font-weight:700;line-height:1.1;text-align:center;
-  color:var(--text-dim);padding:0 4px;overflow:hidden;text-overflow:ellipsis;max-width:100%;white-space:nowrap;
-  font-variant-numeric:tabular-nums}
+.cday b{font-size:11px;font-weight:800;line-height:1;color:var(--text-mute)}
+.cday i{display:flex;justify-content:space-between;align-items:baseline;gap:6px;
+  font-size:15px;font-style:normal;font-weight:800;line-height:1.15;
+  color:var(--text);overflow:hidden;max-width:100%;white-space:nowrap;
+  font-variant-numeric:tabular-nums;letter-spacing:-.3px;margin-bottom:3px}
+.cday i em{font-style:normal;font-size:10px;font-weight:700;color:var(--text-mute);letter-spacing:0}
+.cday i.down{color:var(--bad)}
+/* Every number in the square, so the switcher above only picks what leads and
+   what the colour follows — not what you are allowed to see. */
+.cday u{display:flex;flex-direction:column;gap:1px;text-decoration:none;margin-top:auto}
+.cday u span{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;font-weight:700;
+  color:var(--text-dim);font-variant-numeric:tabular-nums;line-height:1.35}
+.cday u em{font-style:normal;font-weight:600;color:var(--text-mute)}
 .cday.pad{border:0;background:transparent}
 .cday.none{background:var(--surface-2);opacity:.5}
 .cday.pos{background:color-mix(in srgb,var(--ok) calc(var(--i)*72%),var(--surface));
   border-color:color-mix(in srgb,var(--ok) calc(var(--i)*55%),var(--border))}
 .cday.neg{background:color-mix(in srgb,var(--bad) calc(var(--i)*72%),var(--surface));
   border-color:color-mix(in srgb,var(--bad) calc(var(--i)*55%),var(--border))}
-.cday.pos b,.cday.pos i,.cday.neg b,.cday.neg i{color:var(--text)}
+.cday.pos b,.cday.neg b{color:var(--text-dim)}
+.cday.pos i,.cday.neg i{color:var(--text)}
+.cday.pos u span,.cday.neg u span{color:var(--text)}
+.cday.pos i em,.cday.neg i em,.cday.pos u em,.cday.neg u em{color:var(--text-dim)}
 /* Immature days are shown, not hidden — but never mistaken for settled ones. */
 .cday.raw{background-image:repeating-linear-gradient(45deg,transparent 0 4px,rgba(125,125,125,.22) 4px 8px)}
-@media(max-width:640px){#calendar{gap:16px}.cgrid{gap:3px}.cday{min-height:44px;border-radius:6px;gap:1px}
-  .cday b{font-size:9.5px}.cday i{font-size:8.5px;padding:0 1px}}
+@media(max-width:640px){#calendar{gap:16px}.cgrid{gap:3px}
+  .cday{min-height:64px;border-radius:6px;padding:4px 5px 5px}
+  .cday b{font-size:9px}.cday i{font-size:10.5px;margin-bottom:1px}
+  .cday u span{font-size:8.5px}.cday u em{display:none}}
 
 /* One date opened up: which tag did what that day. */
 .dayrow{cursor:pointer}

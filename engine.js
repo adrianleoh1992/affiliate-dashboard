@@ -362,10 +362,14 @@ function analyze(data, options) {
     if (!units[rawName]) units[rawName] = {
       adName: rawName, tag: t, method: m.method, confidence: m.confidence,
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, days: new Set(),
-      delivery: {}, quality: {},
+      delivery: {}, quality: {}, daily: {},
     };
     const u = units[rawName];
     u.spend += spPPN; u.clicks += cl; u.impr += im; u.reach += rc; u.lpv += lp;
+    if (isDate(d)) {
+      if (!u.daily[d]) u.daily[d] = { spend: 0, clicks: 0, impr: 0 };
+      u.daily[d].spend += spPPN; u.daily[d].clicks += cl; u.daily[d].impr += im;
+    }
     if (sp > 0 && isDate(d)) u.days.add(d);
     if (dv) u.delivery[dv] = (u.delivery[dv] || 0) + 1;
     if (ql && ql !== '-') u.quality[ql] = (u.quality[ql] || 0) + 1;
@@ -609,13 +613,26 @@ function analyze(data, options) {
        on one tag cannot be told apart by anything in the data. */
     const shopeeClicks = parent ? Math.round((parent.shopeeClicks || 0) * share) : 0;
     const cpcShopee = parent ? parent.cpcShopee : 0;
+    const byDate = {};
+    Object.keys(u.daily).forEach(d => {
+      const ud = u.daily[d], pd = parent && parent.byDate ? parent.byDate[d] : null;
+      const dayShare = pd && pd.spend > 0 ? ud.spend / pd.spend : 0;
+      byDate[d] = {
+        date: d, spend: ud.spend, clicks: ud.clicks, impr: ud.impr,
+        comm: pd ? pd.comm * dayShare : 0,
+        gmv: pd ? pd.gmv * dayShare : 0,
+        orders: pd ? Math.round(pd.orders * dayShare) : 0,
+        shopeeClicks: pd ? Math.round((pd.shopeeClicks || 0) * dayShare) : 0,
+        estimated: dayShare > 0 && dayShare < 1,
+      };
+    });
     const roasEff = u.spend > 0 ? commEff / u.spend : 0;
     const dv = topOf(u.delivery, 1)[0];
     const active = dv ? /active|aktif/i.test(dv.name) : false;
     return {
       adName: k, tag: u.tag, method: u.method, confidence: u.confidence,
       spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
-      shopeeClicks, cpcShopee,
+      shopeeClicks, cpcShopee, byDate,
       days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
       commEff, orders, roasEff, netEff: commEff - u.spend,
       roi: u.spend > 0 ? (commEff - u.spend) / u.spend * 100 : 0,
