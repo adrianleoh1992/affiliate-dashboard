@@ -99,6 +99,13 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .kpi .dlt{font-size:10.5px;font-weight:700;margin-left:5px}
 .dlt.up{color:var(--ok)} .dlt.down{color:var(--bad)}
 
+/* One switch for all eight cards, so reading every number is one click and
+   not eight. The choice is remembered — someone who wants it all open on
+   every visit should not have to say so on every visit. */
+.kpibar{display:flex;justify-content:flex-end;margin-bottom:8px}
+.kpibar .btn{border:1px solid var(--border-strong)}
+.kpibar .btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+
 /* Four main cards: the detail is one click down, not a ninth tile. */
 .kpis{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
 .kpi .val{font-size:25px}

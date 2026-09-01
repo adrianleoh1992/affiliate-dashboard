@@ -239,11 +239,33 @@ function renderKpi(){
 }
 function bindDrill(id){
   $(id).querySelectorAll('.kpi.expandable').forEach(el=>{
-    const flip=()=>{const o=el.classList.toggle('open');el.setAttribute('aria-expanded',o?'true':'false')};
+    // The all-open preference is applied at render time, not toggled onto an
+    // already-drawn card, so re-rendering keeps whatever state the user chose.
+    if(ALL_DETAIL){el.classList.add('open');el.setAttribute('aria-expanded','true')}
+    const flip=()=>{const o=el.classList.toggle('open');el.setAttribute('aria-expanded',o?'true':'false');syncAllBtn()};
     el.onclick=flip;
     el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();flip()}};
   });
+  syncAllBtn();
 }
+let ALL_DETAIL=false;
+try{ALL_DETAIL=localStorage.getItem('adash_alldetail')==='1'}catch(e){}
+function allCards(){return[...document.querySelectorAll('#kpis .kpi.expandable,#clickKpis .kpi.expandable')]}
+function syncAllBtn(){
+  const c=allCards(),open=c.filter(e=>e.classList.contains('open')).length;
+  const all=c.length>0&&open===c.length;
+  const b=$('btnAllDetail');
+  b.textContent=all?'Sembunyikan semua rincian':'Tampilkan semua rincian';
+  b.setAttribute('aria-pressed',all?'true':'false');
+  b.classList.toggle('hidden',!c.length);
+}
+$('btnAllDetail').onclick=()=>{
+  const c=allCards(),open=c.every(e=>e.classList.contains('open'));
+  ALL_DETAIL=!open;
+  c.forEach(e=>{e.classList.toggle('open',ALL_DETAIL);e.setAttribute('aria-expanded',ALL_DETAIL?'true':'false')});
+  try{localStorage.setItem('adash_alldetail',ALL_DETAIL?'1':'0')}catch(e){}
+  syncAllBtn();
+};
 // Meta reports clicks per platform; Shopee reports them per Perujuk. Keeping
 // both on the main screen is the point — where the two disagree is where the
 // money goes missing.
