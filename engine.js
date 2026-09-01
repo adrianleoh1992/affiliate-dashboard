@@ -554,6 +554,20 @@ function analyze(data, options) {
       bidHint = cpcGap > 0 ? `Ruang naik bid s/d ${Math.round(cpcIdeal)}` : `Turunkan bid ke ${Math.round(cpcIdeal)}`;
     }
 
+    /* The click report usually spans fewer days than the ads export. Dividing
+       full-range spend by window-only Shopee clicks reads far too high, so the
+       Shopee-side cost is matched to the click window on both sides. */
+    let winSpend = 0, winClicks = 0;
+    if (clkStart) {
+      Object.keys(b.daily).forEach(d => {
+        if (!isDate(d) || d < clkStart || d > clkEnd) return;
+        winSpend += b.daily[d].spend * ppnMult;
+        winClicks += b.daily[d].clicks;
+      });
+    }
+    const shopeeClicks = b.shopeeClicks;
+    const cpcShopee = shopeeClicks > 0 && winSpend > 0 ? winSpend / shopeeClicks : 0;
+
     const activeUnits = Object.keys(b.adNames).length;
     const delivery = topOf(b.delivery, 1)[0];
 
@@ -563,6 +577,7 @@ function analyze(data, options) {
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
+      shopeeClicks, cpcShopee, winSpend, winClicks,
       daysProd, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
@@ -589,12 +604,18 @@ function analyze(data, options) {
     const cpm = u.impr > 0 ? u.spend / u.impr * 1000 : 0;
     const ctr = u.impr > 0 ? u.clicks / u.impr * 100 : 0;
     const cpcIdeal = u.clicks > 0 ? (commEff / u.clicks) / targetMult : 0;
+    /* Shopee only reports clicks per tag. Split them by the same spend share
+       used for commission, and carry the tag's Shopee CPC unchanged — two ads
+       on one tag cannot be told apart by anything in the data. */
+    const shopeeClicks = parent ? Math.round((parent.shopeeClicks || 0) * share) : 0;
+    const cpcShopee = parent ? parent.cpcShopee : 0;
     const roasEff = u.spend > 0 ? commEff / u.spend : 0;
     const dv = topOf(u.delivery, 1)[0];
     const active = dv ? /active|aktif/i.test(dv.name) : false;
     return {
       adName: k, tag: u.tag, method: u.method, confidence: u.confidence,
       spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
+      shopeeClicks, cpcShopee,
       days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
       commEff, orders, roasEff, netEff: commEff - u.spend,
       roi: u.spend > 0 ? (commEff - u.spend) / u.spend * 100 : 0,
