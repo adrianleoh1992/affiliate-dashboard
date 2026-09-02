@@ -27,7 +27,12 @@ const drop=$('uploadCard');
 ['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>files(e.dataTransfer.files));
-$('files').onchange=e=>{files(e.target.files);e.target.value=''};
+/* The input is cleared in finish(), never here. Papa reads the File
+   asynchronously, and clearing input.value while that read is in flight makes
+   Chrome revoke the reference — the parse then dies with NotReadableError and
+   the upload silently does nothing. It survived earlier testing because the
+   read usually won the race. */
+$('files').onchange=e=>files(e.target.files);
 document.querySelectorAll('[data-zpick]').forEach(b=>b.onclick=e=>{e.stopPropagation();$('files').click()});
 document.querySelectorAll('[data-zdel]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmZone(b.dataset.zdel)});
 function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';
@@ -35,7 +40,11 @@ function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;a
   // dataset from the survivors instead of forcing a full re-upload.
   FILES.push({name:file.name,size:file.size,type,rows:rows.length,rowsData:rows});
   if(type==='affiliate')DATA.affiliate=DATA.affiliate.concat(rows);else if(type==='ads')DATA.ads=DATA.ads.concat(rows);else if(type==='clicks')DATA.clicks=DATA.clicks.concat(rows);else toast('Format tidak dikenali: '+file.name);if(!--pending)finish()},error:()=>{toast('Gagal membaca '+file.name);if(!--pending)finish()}})})}
-function finish(){renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){DATES.min=ds[0];DATES.max=ds[ds.length-1];$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active());
+function finish(){
+  // Safe now: every parse has completed. Clearing lets the same file be picked
+  // again later and fire another change event.
+  $('files').value='';
+  renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){DATES.min=ds[0];DATES.max=ds[ds.length-1];$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active());
   // Optional add-on layers (e.g. the daily edition) subscribe here. FILES and
   // RESULT are `let`-scoped and not reachable from another script, so hand
   // them over explicitly rather than leaking more globals.
@@ -877,9 +886,9 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
    so it prints blank — every panel is made visible and the charts redrawn
    before the print dialog opens, then everything is put back. */
 const PDFMODE={
-  ringkas:{label:'Ringkas',parts:[]},
-  standar:{label:'Standar',parts:['tags','statsum']},
-  lengkap:{label:'Lengkap',parts:['tags','units','peluang','statsum','statgrid','kalender','klik','harian','produk']},
+  ringkas:{label:'Ringkas',parts:['tags','units','peluang']},
+  standar:{label:'Standar',parts:['tags','units','peluang','harian','kalender']},
+  lengkap:{label:'Lengkap',parts:['tags','units','peluang','harian','kalender','klik','produk','statsum','statgrid']},
 };
 $('btnPdf').onclick=()=>{
   if(!RESULT)return toast('Belum ada hasil analisis');

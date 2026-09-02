@@ -121,6 +121,7 @@
     </div>
 
     <div id="banners"></div>
+    <h3 class="print-sec">Ringkasan Periode</h3>
     <p class="synth" id="synth"></p>
     <div class="kpibar" id="kpiBar">
       <button class="btn ghost sm" id="btnAllDetail" aria-pressed="false">Tampilkan semua rincian</button>
@@ -128,6 +129,7 @@
     <div class="kpis" id="kpis"></div>
     <div class="kpis kpis-sub" id="clickKpis"></div>
     <p class="lagnote" id="lagNote"></p>
+    <h3 class="print-sec">Yang Bisa Dialihkan</h3>
     <div class="action-grid" id="actionGrid"></div>
 
     <div class="tabs">
@@ -142,6 +144,7 @@
 
     <div class="panel active" data-panel="iklan">
       <div class="calibration" id="lagCal"></div>
+      <h3 class="print-sec">Keputusan per Tag</h3>
       <div class="dgrid" id="dgrid"></div>
       <div class="card" data-print="tags">
         <div class="card-head"><h2>Semua Tag</h2>
@@ -165,13 +168,14 @@
         <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
         <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
       </div>
-      <div class="card">
+      <div class="card" data-print="peluang">
         <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
         <div id="concentration"></div>
       </div>
     </div>
 
     <div class="panel" data-panel="klik">
+      <h3 class="print-sec">Klik Meta vs Klik Shopee</h3>
       <div class="card">
         <div class="card-head"><h2>Klik Meta vs Klik Shopee</h2><span class="sub" id="leakRange"></span></div>
         <p class="hint">Kolom <b>± Share</b> bertanda dua arah. <b>Positif</b> berarti klik yang masuk Shopee lebih banyak
@@ -192,6 +196,7 @@
     </div>
 
     <div class="panel" data-panel="harian">
+      <h3 class="print-sec">Rincian Harian</h3>
       <div class="strip" id="dailyStrip"></div>
       <div class="card" data-print="kalender">
         <div class="card-head"><h2>Sebulan Sekali Lihat</h2>
@@ -256,6 +261,7 @@
     </div>
 
     <div class="panel" data-panel="produk">
+      <h3 class="print-sec">Produk dan Toko</h3>
       <div class="ptabs" id="prodTabs">
         <button class="ptab active" data-prod="comm">Komisi Terbesar</button>
         <button class="ptab" data-prod="qty">Produk Terlaris</button>
@@ -278,6 +284,7 @@
     </div>
 
     <div class="panel" data-panel="status">
+      <h3 class="print-sec">Status Order</h3>
       <div class="card" data-print="statsum">
         <div class="card-head"><h2>Laporan Status Order</h2>
           <span class="sub" id="statNote"></span></div>
@@ -388,14 +395,14 @@
       Di HP, setelah tersimpan tombol Bagikan langsung muncul.</p>
     <div class="pdfopts">
       <button class="pdfopt" data-pdf="ringkas">
-        <b>Ringkas</b><span>1 halaman</span>
-        <em>Vonis, 8 kartu utama beserta rinciannya, dan yang perlu ditindak. Untuk dikirim harian lewat WhatsApp.</em></button>
+        <b>Ringkas</b><span>3–4 halaman</span>
+        <em>Ringkasan, keputusan per tag, Semua Tag, Per Ad Unit, dan kandidat iklan dari organik. Laporan harian yang tetap bisa ditelusuri.</em></button>
       <button class="pdfopt" data-pdf="standar">
-        <b>Standar</b><span>2–3 halaman</span>
-        <em>Ringkas, ditambah tabel Semua Tag dan ringkasan status order. Untuk laporan mingguan yang perlu bukti angka per tag.</em></button>
+        <b>Standar</b><span>5–6 halaman</span>
+        <em>Ringkas, ditambah rincian harian: kalender sebulan, grafik, dan tabel per tanggal. Untuk laporan mingguan.</em></button>
       <button class="pdfopt" data-pdf="lengkap">
         <b>Lengkap</b><span>semua bagian</span>
-        <em>Seluruh tabel, grafik, kalender, produk, dan status per tanggal. Untuk arsip bulanan dan diteliti belakangan.</em></button>
+        <em>Semuanya: ditambah klik Meta vs Shopee, produk dan toko, serta status order per tanggal. Untuk arsip bulanan.</em></button>
     </div>
     <p class="hint" id="pdfBusy" style="display:none">Menyiapkan grafik…</p>
   </div>
