@@ -266,6 +266,44 @@
       : '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:26px">Belum ada unggahan tersimpan.</td></tr>';
   }
 
+  /* One table per report, one row per date. A gap in a report is only visible
+     when the three are side by side — a single mixed list hides it. */
+  const KIND=[['affiliate','Laporan Komisi'],['ads','Meta Ads'],['clicks','Laporan Klik']];
+  async function renderDayIndex(){
+    if(!ACCT){$('dayIdx').innerHTML='';return}
+    const idx={};
+    for(const [k] of KIND) idx[k]=await STORE.dailyIndex(ACCT.id,k);
+    const all=new Set(); KIND.forEach(([k])=>idx[k].forEach(r=>all.add(r.date)));
+    const days=[...all].sort();
+    $('dayIdxNote').textContent=days.length
+      ? `${days.length} tanggal · ${days[0]} — ${days[days.length-1]}` : 'belum ada data tersimpan';
+    $('dayIdx').innerHTML=KIND.map(([k,label])=>{
+      const rows=idx[k];
+      const missing=days.filter(d=>!rows.some(r=>r.date===d)).length;
+      const body=rows.length?rows.map(r=>`<tr>
+        <td><b>${r.date}</b></td><td class="num">${nf(r.rows)}</td>
+        <td class="num">${r.updated?new Date(r.updated).toLocaleDateString('id-ID',{day:'2-digit',month:'short'}):'—'}</td>
+        <td class="num"><button class="btn ghost sm danger" data-del-day="${k}|${r.date}">Hapus</button></td></tr>`).join('')
+        :'<tr><td colspan="4" class="tbl-empty">Belum ada data untuk laporan ini.</td></tr>';
+      return `<div class="daycol">
+        <div class="daycol-head"><b>${label}</b>
+          <span>${nf(rows.length)} hari${missing?` · <i>${missing} bolong</i>`:''}</span></div>
+        <div class="tscroll"><table class="daytbl"><thead><tr>
+          <th>Tanggal</th><th class="num">Baris</th><th class="num">Diperbarui</th><th class="num"></th>
+        </tr></thead><tbody>${body}</tbody></table></div></div>`;
+    }).join('');
+    $('dayIdx').querySelectorAll('[data-del-day]').forEach(b=>b.onclick=async()=>{
+      const [k,d]=b.dataset.delDay.split('|');
+      const label=KIND.find(x=>x[0]===k)[1];
+      if(!confirm(`Hapus data ${label} tanggal ${d}?\n\nAngka di dashboard tidak berubah — yang dihapus hanya yang tersimpan. Unggah ulang filenya untuk mengembalikan.`))return;
+      try{
+        const n=await STORE.deleteDay(ACCT.id,k,d);
+        await refreshCoverage(); await renderDayIndex(); await renderStored(); await buildPlan();
+        toast(`${nf(n)} baris ${label} ${d} dihapus`);
+      }catch(e){toast('Gagal menghapus: '+e.message)}
+    });
+  }
+
   /* ── Wire into the dashboard ────────────────────────────────────────────── */
   // app.js calls this once it has parsed and analysed the CSVs — the right
   // moment to compute the ingest plan, because rowsData is available then.
@@ -315,7 +353,7 @@
         + (skipped ? `, ${skipped} file dilewati karena sudah pernah diunggah` : '')
         + `. Buka tab <b>Data Tersimpan</b> untuk melihat trennya.`;
       $('savedNote').classList.remove('hidden');
-      await refreshCoverage(); await renderStored(); await renderUploads(); await buildPlan();
+      await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
       toast('Tersimpan: ' + nf(added) + ' baris baru');
     } catch (e) {
       toast('Gagal menyimpan: ' + e.message);
@@ -328,11 +366,11 @@
   // app.js assigns .onchange directly; addEventListener stacks after it, so its
   // reset() runs first and this re-syncs against the account it switched to.
   $('account').addEventListener('change', async () => {
-    await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads();
+    await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads(); await renderDayIndex();
   });
   $('btnNewAcct').addEventListener('click', () => {
     setTimeout(async () => {
-      await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads();
+      await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads(); await renderDayIndex();
     }, 0);
   });
   const adsField = $('adsAcctName');
@@ -359,6 +397,7 @@
       window.__dailyStore = STORE;
       await refreshAccounts();
       await renderUploads();
+      await renderDayIndex();
     } catch (e) {
       toast('Gagal membuka penyimpanan: ' + e.message);
     }

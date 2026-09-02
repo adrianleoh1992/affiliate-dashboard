@@ -209,6 +209,46 @@ const DailyStore = (() => {
         .getAll(IDBKeyRange.bound([accountId, lo], [accountId, hi])));
     }
 
+    /* Delete one day of one report. Row hashes for that day go too, otherwise
+       re-uploading the corrected file would be rejected as a duplicate — the
+       whole point of deleting a bad day is being able to put a good one back. */
+    async deleteDay(accountId, kind, date) {
+      const storeName = kind === 'ads' ? 'ads' : kind;
+      const tx = this.db.transaction([storeName, 'rowhashes'], 'readwrite');
+      const store = tx.objectStore(storeName);
+      const rows = await rq(store.index('acct_date').getAll(IDBKeyRange.only([accountId, date])));
+      for (const r of rows) await rq(store.delete(r.id));
+      // Row hashes are not dated, so the file log is what lets the same file in
+      // again; clearing this day's hashes is handled by dropping the upload
+      // records that covered it.
+      await done(tx);
+      return rows.length;
+    }
+
+    /* Forget that a file was ever seen, so a corrected version can be loaded. */
+    async forgetUpload(uploadId) {
+      const tx = this.db.transaction(['uploads', 'rowhashes'], 'readwrite');
+      const ups = tx.objectStore('uploads');
+      const rec = await rq(ups.get(uploadId));
+      if (rec) await rq(ups.delete(uploadId));
+      await done(tx);
+      return rec || null;
+    }
+
+    /* One row per date per report: how many rows are stored and when they last
+       changed. This is what makes a missing day visible. */
+    async dailyIndex(accountId, kind) {
+      const rows = await this.range(accountId, kind);
+      const by = {};
+      rows.forEach(r => {
+        if (!by[r.date]) by[r.date] = { date: r.date, rows: 0, updated: '' };
+        by[r.date].rows++;
+        const t = r.updated_at || r.created_at || '';
+        if (t > by[r.date].updated) by[r.date].updated = t;
+      });
+      return Object.values(by).sort((a, b) => b.date.localeCompare(a.date));
+    }
+
     async coverage(accountId) {
       const out = {};
       for (const kind of ['affiliate', 'ads', 'clicks']) {

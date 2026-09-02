@@ -657,3 +657,19 @@ tbody tr:hover{background:var(--surface-2)}
   .panel[data-panel="tersimpan"],#trendBody,#trendEmpty,.sec-split{display:none!important}
   @page{size:A4 portrait;margin:12mm 10mm}
 }
+
+/* ── Data tersimpan per hari ────────────────────────────────────────────────
+   Three tables side by side, one per report. A day missing from one report is
+   only visible when the three are lined up; a single mixed list hides it. */
+.daygrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.daycol{border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--surface)}
+.daycol-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--border)}
+.daycol-head b{font-size:12.5px;font-weight:800}
+.daycol-head span{font-size:10.5px;color:var(--text-mute);font-weight:600}
+.daycol-head i{font-style:normal;color:var(--warn);font-weight:800}
+.daycol .tscroll{max-height:340px;overflow-y:auto}
+.daycol .daytbl th{position:sticky;top:0;z-index:1;background:var(--surface-2)}
+.daycol .daytbl td{padding:6px 10px}
+.daycol .btn.sm{min-height:24px;padding:2px 8px;font-size:10.5px}
+@media(max-width:640px){.daycol .tscroll{max-height:260px}}
