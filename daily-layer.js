@@ -266,33 +266,47 @@
       : '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:26px">Belum ada unggahan tersimpan.</td></tr>';
   }
 
-  /* One table per report, one row per date. A gap in a report is only visible
-     when the three are side by side — a single mixed list hides it. */
+  /* One row per date, one column per report. Three separate tables made you
+     compare three date lists by eye; side by side on one row, a missing cell
+     is the thing you notice first. */
   const KIND=[['affiliate','Laporan Komisi'],['ads','Meta Ads'],['clicks','Laporan Klik']];
   async function renderDayIndex(){
-    if(!ACCT){$('dayIdx').innerHTML='';return}
+    const tb=$('tblDayIdx');
+    if(!ACCT){tb.querySelector('tbody').innerHTML='';$('dayIdxNote').textContent='';return}
     const idx={};
     for(const [k] of KIND) idx[k]=await STORE.dailyIndex(ACCT.id,k);
+    const map={};
+    KIND.forEach(([k])=>{map[k]={};idx[k].forEach(r=>map[k][r.date]=r)});
     const all=new Set(); KIND.forEach(([k])=>idx[k].forEach(r=>all.add(r.date)));
-    const days=[...all].sort();
-    $('dayIdxNote').textContent=days.length
-      ? `${days.length} tanggal · ${days[0]} — ${days[days.length-1]}` : 'belum ada data tersimpan';
-    $('dayIdx').innerHTML=KIND.map(([k,label])=>{
-      const rows=idx[k];
-      const missing=days.filter(d=>!rows.some(r=>r.date===d)).length;
-      const body=rows.length?rows.map(r=>`<tr>
-        <td><b>${r.date}</b></td><td class="num">${nf(r.rows)}</td>
-        <td class="num">${r.updated?new Date(r.updated).toLocaleDateString('id-ID',{day:'2-digit',month:'short'}):'—'}</td>
-        <td class="num"><button class="btn ghost sm danger" data-del-day="${k}|${r.date}">Hapus</button></td></tr>`).join('')
-        :'<tr><td colspan="4" class="tbl-empty">Belum ada data untuk laporan ini.</td></tr>';
-      return `<div class="daycol">
-        <div class="daycol-head"><b>${label}</b>
-          <span>${nf(rows.length)} hari${missing?` · <i>${missing} bolong</i>`:''}</span></div>
-        <div class="tscroll"><table class="daytbl"><thead><tr>
-          <th>Tanggal</th><th class="num">Baris</th><th class="num">Diperbarui</th><th class="num"></th>
-        </tr></thead><tbody>${body}</tbody></table></div></div>`;
+    const days=[...all].sort().reverse();
+
+    tb.querySelector('thead').innerHTML='<tr><th>Tanggal</th>'+
+      KIND.map(([,l])=>`<th class="num">${l}</th>`).join('')+'<th class="num">Status</th></tr>';
+
+    if(!days.length){
+      tb.querySelector('tbody').innerHTML='<tr><td colspan="5" class="tbl-empty">Belum ada data tersimpan untuk akun ini.</td></tr>';
+      $('dayIdxNote').textContent='belum ada data tersimpan';
+      return;
+    }
+    let full=0;
+    tb.querySelector('tbody').innerHTML=days.map(d=>{
+      const have=KIND.filter(([k])=>map[k][d]).length;
+      if(have===KIND.length)full++;
+      const cells=KIND.map(([k,l])=>{
+        const r=map[k][d];
+        return r
+          ? `<td class="num"><span class="cellhas">${nf(r.rows)} baris
+               <button class="cellx" data-del-day="${k}|${d}" title="Hapus ${l} ${d}" aria-label="Hapus ${l} ${d}">×</button></span></td>`
+          : `<td class="num"><span class="cellno">belum ada</span></td>`;
+      }).join('');
+      return `<tr class="${have===KIND.length?'':'partial'}"><td><b>${d}</b></td>${cells}
+        <td class="num">${have===KIND.length
+          ? '<span class="pill ok-pill">Lengkap</span>'
+          : `<span class="pill warn-pill">${KIND.length-have} kurang</span>`}</td></tr>`;
     }).join('');
-    $('dayIdx').querySelectorAll('[data-del-day]').forEach(b=>b.onclick=async()=>{
+    $('dayIdxNote').textContent=`${days.length} tanggal · ${full} lengkap · ${days.length-full} belum lengkap`;
+
+    tb.querySelectorAll('[data-del-day]').forEach(b=>b.onclick=async()=>{
       const [k,d]=b.dataset.delDay.split('|');
       const label=KIND.find(x=>x[0]===k)[1];
       if(!confirm(`Hapus data ${label} tanggal ${d}?\n\nAngka di dashboard tidak berubah — yang dihapus hanya yang tersimpan. Unggah ulang filenya untuk mengembalikan.`))return;
