@@ -6,7 +6,13 @@ let ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};
 let IMPORT_REPORTS=[],IMPORT_SEQUENCE=0,TAG_QUERY='',PDF_BUSY=false;
 const ACTIVE_READERS=new Set();
 const LS={accounts:'adash_accounts_v3',active:'adash_active_v3',map:'adash_map_v3',snaps:'adash_snaps_v3',opts:'adash_opts_v3',theme:'adash_theme_v3'};
-const DEFAULT_MAP={'telesinvideo2':'TelesinGripvideo2','telesinvideo1':'TelesinGripvideo2','telesinvideo3':'TelesinGripvideo3','telesingrip':'TelesinGripvideo2','lemariolymp':'OlymplastLemari','lemariolympic':'OlymplastLemari','minilayarportable':'minilayarportable','helmrsixsolid':'HelmRsixSolid','spinningreelokuma':'Spinningreelokuma','seeouokacamatapolarized':'seeouokacamatapolarized'};
+/* No seeded mapping. What used to sit here was one account's ad names shipped
+   as the default for every account, and it overrode the matcher at full
+   confidence — including a wrong entry, telesinvideo1 → TelesinGripvideo2,
+   which is exactly the "three ads on one tag" the matcher was fixed to stop.
+   A mapping is a fact about one workspace; it belongs in that workspace's own
+   saved map, entered once through Kelola Tag. */
+const DEFAULT_MAP={};
 const esc=E.escapeHtml;
 function rp(n){if(n==null||!isFinite(n))return'Rp0';let a=Math.abs(n),s=n<0?'-':'';if(a>=1e9)return s+'Rp'+(a/1e9).toFixed(2)+' M';if(a>=1e6)return s+'Rp'+(a/1e6).toFixed(1)+' jt';if(a>=1e3)return s+'Rp'+Math.round(a/1e3)+'rb';return s+'Rp'+Math.round(a)}
 function full(n){return'Rp'+Math.round(n||0).toLocaleString('id-ID')} function nf(n){return Math.round(n||0).toLocaleString('id-ID')}

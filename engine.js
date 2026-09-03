@@ -193,12 +193,30 @@ function detectFileType(headers) {
    to an unrelated tag (e.g. any two names sharing "video"). Every match now
    carries a method + confidence so the UI can surface weak ones for review.
    ─────────────────────────────────────────────────────────────────────────── */
+/* The number at the end of an ad name is not noise — it is the identity of the
+   creative. "Telesin Video 1", "2" and "3" are three different ads, and the
+   tokenizer drops anything shorter than three characters, so all three produced
+   the identical token list ["telesin","video"] and every one of them matched
+   TelesinGripvideo2 at full confidence. Three ads' spend collapsed onto one
+   tag, and the two that were wrong looked as certain as the one that was right.
+
+   So: when both names carry a number, the numbers have to agree. When only one
+   side has one, it says nothing either way and the match proceeds. */
+function variantOf(s) {
+  const m = String(s || '').toLowerCase().match(/\d+/g);
+  return m ? m[m.length - 1] : '';
+}
+function variantClash(a, b) {
+  const va = variantOf(a), vb = variantOf(b);
+  return !!va && !!vb && va !== vb;
+}
+
 function extractPipeTag(name) {
   const p = String(name == null ? '' : name).split('|').map(s => s.trim());
   return p.length >= 3 ? p[2] : '';
 }
 
-function matchAdToTag(adName, affiliateTags, tagMap) {
+function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   const raw = String(adName == null ? '' : adName);
   const n = normalize(raw);
   if (!n) return { tag: raw, method: 'kosong', confidence: 0 };
@@ -209,10 +227,27 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
   const manual = Object.keys(map).find(k => normalize(k) === n && String(map[k] || '').trim());
   if (manual !== undefined) return { tag: cleanTag(map[manual]), method: 'Manual', confidence: 1 };
 
-  const piped = extractPipeTag(raw);
+  const piped = noPipe ? '' : extractPipeTag(raw);
   if (piped) {
     const hit = (affiliateTags || []).find(t => normalize(t) === normalize(piped));
-    return { tag: hit || cleanTag(piped), method: 'Pipe', confidence: hit ? 1 : 0.8 };
+    if (hit) return { tag: hit, method: 'Pipe', confidence: 1 };
+    /* No tag is spelled like the segment. Stopping here invented a tag out of
+       the campaign's own words — "1604 | Mentok | Telesin Grip" became a tag
+       called "Telesin Grip" sitting beside the real TelesinGripvideo2. Run the
+       segment through the same matching as any other name instead, and cap the
+       result: this is an inference two steps removed, never a certainty. */
+    const deep = matchAdToTag(piped, affiliateTags, tagMap, true);
+    if (deep.confidence > 0 && !deep.candidateTag) {
+      return { tag: deep.tag, method: 'Pipe+' + deep.method,
+               confidence: Math.min(deep.confidence, 0.85) };
+    }
+    /* Nothing in the Shopee data is named like this segment. Keeping it as its
+       own tag is still the most useful answer — the spend has to land
+       somewhere visible — but calling that 80% certain was wrong. It is a
+       guess, and the Matching table should say so. */
+    const guess = { tag: cleanTag(piped), method: 'Pipe tanpa tag', confidence: 0.4 };
+    if (deep.candidateTag) guess.candidateTag = deep.candidateTag;
+    return guess;
   }
 
   for (const t of affiliateTags || []) {
@@ -223,6 +258,7 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
   for (const t of affiliateTags || []) {
     const nt = normalize(t);
     if (nt.length < 4) continue;
+    if (variantClash(raw, t)) continue;
     if (n.includes(nt) || nt.includes(n)) {
       const conf = Math.min(nt.length, n.length) / Math.max(nt.length, n.length);
       if (!best || conf > best.confidence) best = { tag: t, method: 'Contains', confidence: conf };
@@ -234,6 +270,7 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
   if (at.length) {
     let tb = null;
     for (const t of affiliateTags || []) {
+      if (variantClash(raw, t)) continue;
       const tt = tokens(t);
       if (!tt.length) continue;
       let shared = 0;
@@ -1041,6 +1078,6 @@ function buildTrend(snapshots, account) {
 return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
-  cleanTag, COL, pick, topOf,
+  cleanTag, COL, pick, topOf, variantOf, variantClash,
 };
 });

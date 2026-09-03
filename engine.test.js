@@ -165,4 +165,53 @@ assert.ok(typeof sTag.stable === 'boolean');
 assert.equal(sTag.byLag.length, 3, 'one entry per probe');
 assert.equal(st.counts.length, 3);
 
+/* ── Ad name → tag: the number is the identity ──────────────────────────────
+   Three creatives named "Telesin Video 1/2/3" all tokenised to the same two
+   words, because the tokenizer drops anything under three characters. Every
+   one of them then matched TelesinGripvideo2 at full confidence, merging three
+   ads' spend onto one tag. These lock the number rule in place. */
+const TAGS = ['TelesinGripvideo2', 'OlymplastLemari', 'HelmRsixSolid',
+  'Spinningreelokuma', 'minilayarportable', 'seeouokacamatapolarized'];
+
+// 'video' inside the compound tag is only partial evidence, so video 2 is a
+// candidate for review rather than a certainty — but the number must not block it.
+const v2 = E.matchAdToTag('Telesin video 2', TAGS, {});
+assert.equal(v2.tag === 'TelesinGripvideo2' || v2.candidateTag === 'TelesinGripvideo2', true,
+  'matching number still finds its tag');
+for (const n of ['Telesin Video 1', 'Telesin Video 3']) {
+  const m = E.matchAdToTag(n, TAGS, {});
+  assert.notEqual(m.tag, 'TelesinGripvideo2', n + ' must not land on video 2');
+  assert.notEqual(m.candidateTag, 'TelesinGripvideo2', n + ' must not even be suggested for video 2');
+  assert.equal(m.confidence, 0, n + ' has no tag here, and must say so');
+}
+// A number on one side only carries no information, so it must not block.
+assert.equal(E.matchAdToTag('Mini Layar portable', TAGS, {}).tag, 'minilayarportable');
+assert.equal(E.matchAdToTag('HelmRsixSolid', TAGS, {}).confidence, 1);
+
+// A manual mapping is authoritative on an exact key, and only on that key:
+// a near key for a different creative number must not leak onto it.
+assert.equal(E.matchAdToTag('Telesin Video 1', TAGS,
+  { 'telesinvideo1': 'TelesinGripvideo2' }).tag, 'TelesinGripvideo2',
+  'an exact manual key wins outright');
+assert.notEqual(E.matchAdToTag('Telesin Video 3', TAGS,
+  { 'telesinvideo1': 'TelesinGripvideo2' }).tag, 'TelesinGripvideo2',
+  'a manual key must not leak onto another creative number');
+
+/* ── Pipe segments run through the same matcher ─────────────────────────── */
+const p1 = E.matchAdToTag('1204 | Pantau | OlymplastLemari', TAGS, {});
+assert.equal(p1.tag, 'OlymplastLemari');
+assert.equal(p1.confidence, 1, 'segment naming a real tag is certain');
+
+const p2 = E.matchAdToTag('1604 | Mentok | Telesin Grip', TAGS, {});
+assert.equal(p2.tag, 'TelesinGripvideo2', 'segment resolves through fuzzy matching');
+assert.ok(p2.confidence < 1, 'two steps removed is never a certainty');
+
+const p3 = E.matchAdToTag('1604 | Mentok | Barang Yang Tak Ada', TAGS, {});
+assert.ok(p3.confidence <= 0.5, 'a segment matching nothing must read as a guess');
+
+assert.equal(E.variantOf('TelesinGripvideo2'), '2');
+assert.equal(E.variantOf('seeouokacamatapolarized'), '');
+assert.ok(E.variantClash('Telesin Video 1', 'TelesinGripvideo2'));
+assert.ok(!E.variantClash('Mini Layar portable', 'minilayarportable'));
+
 console.log('engine tests: PASS');
