@@ -168,6 +168,26 @@ function pick(row, keys) {
 }
 function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '').trim(); }
 
+/* The click report packs all five sub-id slots into ONE column, joined by
+   dashes: "tag1-tag2-tag3-tag4-tag5". Stripping the trailing dashes leaves a
+   second slot glued on, so "TelesinGripvideo2-promo" never joined the
+   commission report's "TelesinGripvideo2": the tag showed 0 clicks and 0%
+   arriving — a STOP verdict on a healthy ad — while a phantom tag held all
+   7.226 of its clicks and no spend.
+
+   Splitting blindly would break any tag that legitimately contains a dash, so
+   the first slot is only taken when the commission report actually knows it.
+   Matching through normalize() also lands the canonical spelling, so a tag
+   written with different capitalisation in the two reports still joins. */
+function resolveClickTag(raw, byNorm) {
+  const t = cleanTag(raw);
+  if (!t) return t;
+  const whole = byNorm.get(normalize(t));
+  if (whole) return whole;
+  const first = t.split('-')[0].trim();
+  return (first && byNorm.get(normalize(first))) || t;
+}
+
 /* ── File type detection ─────────────────────────────────────────────────── */
 function detectFileType(headers) {
   const h = (headers || []).map(x => String(x || '').toLowerCase().trim());
@@ -502,8 +522,12 @@ function analyze(data, options) {
 
   /* ── Shopee click report ────────────────────────────────────────────── */
   const clickSrc = dict(), clickRegion = dict(), clickDaily = dict();
+  // Built from the commission report, which is the authority on how a tag is
+  // spelled; the click report is matched against it.
+  const tagByNorm = new Map();
+  Object.keys(T).forEach(k => { if (k) tagByNorm.set(normalize(k), k); });
   fClk.forEach(r => {
-    const t = cleanTag(pick(r, COL.clk.tag));
+    const t = resolveClickTag(pick(r, COL.clk.tag), tagByNorm);
     const d = dayOnly(pick(r, COL.clk.time));
     if (t) {
       const b = bucket(t);
@@ -1078,6 +1102,6 @@ function buildTrend(snapshots, account) {
 return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
-  cleanTag, COL, pick, topOf, variantOf, variantClash,
+  cleanTag, resolveClickTag, COL, pick, topOf, variantOf, variantClash,
 };
 });

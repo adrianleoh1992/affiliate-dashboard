@@ -214,4 +214,47 @@ assert.equal(E.variantOf('seeouokacamatapolarized'), '');
 assert.ok(E.variantClash('Telesin Video 1', 'TelesinGripvideo2'));
 assert.ok(!E.variantClash('Mini Layar portable', 'minilayarportable'));
 
+/* ── Kolom Tag_link laporan klik memuat lima slot ───────────────────────────
+   Shopee joins all five sub-id slots into one column with dashes. Stripping
+   only the trailing dashes left a second slot glued on, so the clicks landed
+   on a tag the commission report had never heard of: the real tag showed 0
+   clicks and 0% arriving — a STOP verdict on a healthy ad — while a phantom
+   tag held every click and no spend. */
+const known = new Map([['telesingripvideo2', 'TelesinGripvideo2'], ['dydlabel', 'DYDlabel']]);
+const rct = raw => E.resolveClickTag(raw, known);
+
+assert.equal(rct('TelesinGripvideo2----'), 'TelesinGripvideo2', 'satu tag, empat slot kosong');
+assert.equal(rct('TelesinGripvideo2-promo---'), 'TelesinGripvideo2', 'slot kedua terisi');
+assert.equal(rct('TelesinGripvideo2-promo-agustus--'), 'TelesinGripvideo2', 'slot kedua dan ketiga');
+// Different capitalisation between the two reports must still join, and join
+// under the spelling the commission report uses.
+assert.equal(rct('TELESINGRIPVIDEO2-promo---'), 'TelesinGripvideo2', 'beda huruf tetap menyatu');
+assert.equal(rct('telesingripvideo2----'), 'TelesinGripvideo2', 'ejaan kanonis dari laporan komisi');
+// A tag nobody knows stays whole rather than being chopped at its first dash.
+assert.equal(rct('kampanyelain-promo---'), 'kampanyelain-promo', 'tag asing tidak dipotong');
+assert.equal(rct('----'), '', 'semua slot kosong');
+assert.equal(rct('-promo---'), '-promo', 'slot pertama kosong bukan tag kita');
+
+/* Attribution must survive a second slot appearing mid-period. */
+const twoSlot = {
+  affiliate: [
+    { 'ID Pemesanan':'1', 'Status Pesanan':'Selesai', 'Waktu Pemesanan':'2026-08-01 10:00:00',
+      'Waktu Klik':'2026-08-01 09:00:00', 'Total Komisi per Pesanan(Rp)':'5000',
+      'Tag_link1':'TAGA', 'Jumlah':'1', 'Nilai Pembelian(Rp)':'50000' },
+  ],
+  ads: [
+    { 'Reporting starts':'2026-08-01', 'Ad name':'TAGA', 'Amount spent (IDR)':'1000',
+      'Link clicks':'10', 'Impressions':'1000' },
+  ],
+  clicks: [
+    { 'Waktu Klik':'2026-08-01 09:00:00', 'Tag_link':'TAGA----' },
+    { 'Waktu Klik':'2026-08-01 09:05:00', 'Tag_link':'TAGA-promo---' },
+  ],
+  tagMap: {},
+};
+const rTwo = E.analyze(twoSlot, { ppn:0, minSpend:0, minDays:1 });
+const tagA = rTwo.tags.find(t => t.tag === 'TAGA');
+assert.equal(tagA.shopeeClicks, 2, 'kedua klik menyatu ke tag yang sama');
+assert.ok(!rTwo.tags.some(t => /^TAGA-/.test(t.tag)), 'tidak ada tag hantu');
+
 console.log('engine tests: PASS');
