@@ -14,29 +14,67 @@ npm start
 # http://127.0.0.1:8899
 ```
 
-Pustaka PapaParse dan Chart.js tersedia di `vendor/`; halaman aplikasi tidak
+Pustaka PapaParse, Chart.js, jsPDF, dan AutoTable tersedia di `vendor/`; halaman aplikasi tidak
 meminta skrip, font, atau data dari pihak ketiga. `index-daily.html` mengarah ke
 halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai
-arsip pembanding dan tidak disertakan dalam build produksi.
+arsip pembanding dan tidak disertakan dalam build produksi. Pustaka dan font PDF
+baru dimuat saat membuat PDF agar pembukaan dashboard tetap ringan.
 
 ## Alur penggunaan
 
 1. Pilih atau buat akun di bagian atas. CSV tidak menjamin identitas akun,
    sehingga konteks akun harus dipilih dengan benar.
 2. Unggah CSV laporan komisi affiliate, laporan Meta Ads **per hari**, dan
-   laporan klik. Laporan affiliate diperlukan untuk analisis keputusan.
+   laporan klik. Baca hasil pemeriksaan per file. Jika hanya sebagian baris valid,
+   perbaiki CSV atau pilih **Muat baris valid saja** secara eksplisit. Laporan
+   affiliate diperlukan untuk analisis keputusan.
 3. Periksa rentang tanggal, kelengkapan laporan, PPN sesuai tagihan, dan mapping.
    PPN awal di antarmuka adalah 0%; pilihan dan ambang disimpan per akun.
 4. Tinjau rencana simpan, lalu tekan **Simpan** untuk memasukkan agregat ke
    riwayat harian. Unggahan saja belum menyimpan transaksi ke IndexedDB.
 5. Gunakan **Simpan Snapshot** untuk menyimpan hasil analisis periode terpilih.
-6. Setelah reload, buka **Data Tersimpan** untuk riwayat harian atau **Riwayat**
+6. Setelah reload, buka **Data Tersimpan** untuk riwayat harian atau **Snapshot**
    untuk snapshot. Tidak perlu mengunggah CSV kembali untuk membuka keduanya.
 
 File identik yang berganti nama dan baris identik dari beberapa file disaring.
 File berbeda dengan nama dan ukuran sama tetap dapat dibaca. File CSV rusak
 atau tidak dikenali ditolak. Menghapus file dari layar menghitung ulang dari
 file yang tersisa; data harian yang telah disimpan dikelola terpisah.
+
+CSV UTF-8 dan UTF-16 dengan BOM, pemisah koma/titik koma/tab, angka lokal, serta
+teks berkutip lintas baris didukung. Ukuran maksimum 75 MiB per CSV; file Excel
+harus diekspor sebagai CSV terlebih dahulu. Laporan Meta yang merangkum beberapa
+hari dalam satu baris ditolak karena tidak dapat menghasilkan riwayat harian
+yang benar. Kesalahan angka, tanggal, atau kolom ditampilkan dengan rincian
+yang dapat diunduh. Tombol batal menghentikan batch yang sedang dibaca.
+
+Rentang tanggal pilihan sendiri dipertahankan saat menambah file; pilihan
+semua tanggal mengikuti cakupan data terbaru. Pencarian tag dan filter keputusan
+membantu mempersempit tabel. Tombol metrik menampilkan kolom tambahan.
+
+## Ekspor analisis dan PDF
+
+Klik **Ekspor data**, lalu pilih format dan isi laporan:
+
+- **CSV:** keputusan tag, rincian iklan, kinerja harian, atau pencocokan nama.
+  Untuk tag, pilih semua tag atau hasil pencarian/filter yang sedang terlihat.
+  Setiap baris menyertakan akun dan periode; angka mempertahankan presisinya,
+  dan teks sumber yang dapat menjadi formula spreadsheet dinetralkan.
+- **JSON:** seluruh hasil analisis, parameter, dan catatan kualitas data dalam
+  format `affiliate-analysis` versi 1. JSON analisis bukan backup yang dapat
+  dipulihkan ke penyimpanan harian.
+- **PDF:** klik **PDF**, isi judul, lalu unduh Ringkas, Standar, atau Lengkap.
+  Semua mode menyertakan seluruh tag pada periode analisis; filter tabel tidak
+  mengurangi PDF. Standar menambahkan metrik tag, iklan, dan harian. Lengkap
+  menambahkan pencocokan, status, dan rincian lain yang tersedia pada hasil.
+
+PDF berupa teks yang dapat dipilih, memakai A4, header tabel berulang dan nomor
+halaman. Nilai Rupiah ditampilkan hingga dua desimal. Banyak halaman mengikuti
+jumlah data. Produk/toko yang sudah dibatasi mesin analisis diberi keterangan
+cakupan ringkasan. Font Noto Sans Latin disertakan lokal; karakter di luar
+cakupannya, misalnya emoji atau sebagian aksara Asia, ditulis sebagai `[U+XXXX]`
+dengan catatan agar identitas label tidak hilang. Data Unicode asli tetap ada
+pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
 
 ## Arti angka dan keputusan
 
@@ -81,10 +119,18 @@ identitas order untuk penggabungan aman akan menolak tambahan yang bertumpang
 tindih dan memberikan petunjuk hapus tanggal lalu impor ulang. Aplikasi tidak
 mencoba merekonstruksi angka lama yang mungkin sudah salah.
 
-Snapshot dapat diekspor dan diimpor dalam JSON. Impor divalidasi sebelum
-mengubah riwayat. Ekspor akun harian berisi agregat dan metadata deduplikasi;
-impor backup akun harian belum tersedia. Menghapus penyimpanan browser tetap
-menghapus data lokal, sehingga simpan CSV sumber dan ekspor cadangan Anda.
+Snapshot dapat diekspor dan diimpor dalam JSON. Di **Data Tersimpan**, gunakan
+**Unduh backup** untuk mencadangkan agregat, fingerprint, identitas order yang
+di-hash, dan log unggahan. **Pulihkan backup** memvalidasi isi dan menampilkan
+akun asal, tujuan, serta cakupan sebelum tombol penggantian dapat dijalankan.
+Pemulihan mengganti seluruh riwayat harian akun aktif dalam satu transaksi;
+akun lain tidak berubah. Parameter backup hanya referensi, bukan pengganti
+pengaturan analisis saat ini. Snapshot dan mapping mempunyai penyimpanan terpisah.
+
+Backup baru memakai `affiliate-daily-backup` versi 1, maksimum 50 MiB. Backup
+lama yang tidak lengkap ditolak dengan penjelasan, bukan dipulihkan sebagian.
+Rincian tersedia di [DAILY-STORE.md](DAILY-STORE.md). Menghapus penyimpanan browser
+tetap menghapus data lokal, sehingga simpan CSV sumber dan backup Anda.
 
 ## Pengujian
 
@@ -99,7 +145,8 @@ npm audit
 ```
 
 `npm test` menjalankan mesin hitung, regresi penyimpanan menggunakan
-fake-indexeddb, dan pengujian browser Chromium dengan server sementara.
+fake-indexeddb, validasi impor/ekspor, pengujian alur browser Chromium dengan
+server sementara, serta PDF dengan fixture hingga 100 tag.
 Semua fixture sintetis; tidak membaca folder Downloads atau data klien.
 Playwright memakai browser terpasangnya, atau Chrome lokal yang ditemukan.
 Gunakan `CHROME_PATH` untuk menentukan executable khusus.
@@ -120,6 +167,9 @@ format ekspor dan kondisi browser telah tercakup.
 | File | Fungsi |
 |---|---|
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
+| `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
+| `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
+| `pdf-export.js` | Pembuatan PDF dengan teks dan tabel multi halaman |
 | `app.js`, `index.html`, `styles.css` | Antarmuka, impor, snapshot, grafik, ekspor |
 | `daily-agg.js` | Deduplikasi dan agregasi harian |
 | `daily-store.js` | Transaksi IndexedDB dan migrasi |
@@ -132,6 +182,11 @@ Build produksi hanya berisi aset aplikasi. Vercel menggunakan `npm run build`
 dan direktori `dist/`; pengujian dan berkas pengembangan tidak ikut dipublikasikan.
 Untuk memperbarui pustaka, ubah dependensi, jalankan `npm run vendor`, kemudian
 jalankan seluruh pengujian dan commit `package-lock.json` beserta aset vendor.
+Font PDF terkemas pada `vendor/pdf-font.js` (Noto Sans Regular/Bold), dengan
+lisensi OFL pada `vendor/NotoSans-LICENSE.txt`; script vendor tidak mengganti font.
+
+Laporan audit awal ada di [AUDIT.md](AUDIT.md), dan perbaikan alur/ekspor terbaru
+beserta batasannya ada di [EXPERIENCE.md](EXPERIENCE.md).
 
 CSV dan spreadsheet diabaikan Git. Tidak ada backend, analytics, pengiriman
 laporan, atau sinkronisasi cloud.

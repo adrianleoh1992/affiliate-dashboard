@@ -8,6 +8,10 @@ for (const [source, destination] of [
   ['papaparse/LICENSE', 'papaparse-LICENSE'],
   ['chart.js/dist/chart.umd.min.js', 'chart.umd.js'],
   ['chart.js/LICENSE.md', 'chartjs-LICENSE.md'],
+  ['jspdf/dist/jspdf.umd.min.js', 'jspdf.umd.min.js'],
+  ['jspdf/LICENSE', 'jspdf-LICENSE'],
+  ['jspdf-autotable/dist/jspdf.plugin.autotable.min.js', 'jspdf.plugin.autotable.min.js'],
+  ['jspdf-autotable/LICENSE.txt', 'jspdf-autotable-LICENSE.txt'],
 ]) {
   fs.copyFileSync(path.join(root, 'node_modules', source), path.join(root, 'vendor', destination));
 }

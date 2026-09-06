@@ -1,6 +1,8 @@
 # Audit dan perbaikan Affiliate Dashboard
 
 Tanggal penyelesaian: 6 September 2026.
+Dokumen ini merekam audit tahap awal. Perbaikan lanjutan impor, UI, backup, dan
+PDF pada 7 September 2026 dijelaskan di [EXPERIENCE.md](EXPERIENCE.md).
 Sumber: https://github.com/adrianleoh1992/affiliate-dashboard
 Baseline: `24e4cf3` pada branch `main` yang dikloning saat audit dimulai.
 Branch perbaikan lokal: `fix/audit-correctness-reliability`.
@@ -93,8 +95,9 @@ node scripts/benchmark-engine.js 24e4cf3
 3. **Format sumber:** diuji dengan fixture sintetis yang mencakup bug di atas.
    Laporan Meta harus diekspor per hari. Belum menguji setiap variasi ekspor,
    browser Safari/Firefox, atau data produksi pengguna.
-4. **Penyimpanan:** tetap lokal per origin browser. Ekspor/impor snapshot tersedia;
-   ekspor backup akun harian tersedia, tetapi impor backup harian belum tersedia.
+4. **Penyimpanan:** tetap lokal per origin browser. Ekspor/impor snapshot tersedia.
+   Pemulihan backup harian yang belum tersedia saat audit awal telah ditambahkan
+   pada tahap lanjutan; lihat [DAILY-STORE.md](DAILY-STORE.md).
 5. Audit ini memperbaiki bug yang ditemukan dan diuji, bukan jaminan bahwa seluruh
    kemungkinan bug di aplikasi telah hilang.
 

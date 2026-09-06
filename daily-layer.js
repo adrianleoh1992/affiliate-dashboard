@@ -16,6 +16,7 @@
   const $ = id => document.getElementById(id);
   let STORE = null, ACCT = null, PLAN = null;
   let ACCOUNT_REV = 0, PLAN_REV = 0, STORED_REV = 0, SAVING = false;
+  let BACKUP_REV = 0, BACKUP = null, RESTORING = false;
   const DCHARTS = {};
 
   /* app.js declares these as top-level `function`, which does land on window.
@@ -44,9 +45,12 @@
     const account = await STORE.ensureAccount('shopee', name);
     if (revision !== ACCOUNT_REV || name !== shopeeName()) return;
     const changed = !ACCT || ACCT.id !== account.id;
-    ACCT = account;
+    // Preserve the account reference when only the optional ads label changes;
+    // pending previews and ingestion plans are bound to this identity.
+    if (changed) ACCT = account;
     if (changed) {
       PLAN = null; ++PLAN_REV; ++STORED_REV;
+      cancelBackup();
       $('dsStart').value = ''; $('dsEnd').value = '';
       Object.values(DCHARTS).forEach(chart => chart.destroy());
       Object.keys(DCHARTS).forEach(key => delete DCHARTS[key]);
@@ -364,6 +368,7 @@
   window.reset = function () {
     origReset.apply(this, arguments);
     PLAN = null; FILES_SNAP = []; ++PLAN_REV; ++STORED_REV;
+    cancelBackup();
     $('ingestPlan').classList.add('hidden');
     $('savedNote').classList.add('hidden');
   };
@@ -384,7 +389,7 @@
   $('btnSaveAll').onclick = async () => {
     const btn = $('btnSaveAll');
     if (btn.dataset.mode === 'close') { $('ingestPlan').classList.add('hidden'); return; }
-    if (SAVING || !PLAN || !ACCT || PLAN.acct !== ACCT || PLAN.acct.name !== shopeeName()) return;
+    if (SAVING || RESTORING || !PLAN || !ACCT || PLAN.acct !== ACCT || PLAN.acct.name !== shopeeName()) return;
     const plan = PLAN, account = plan.acct;
     SAVING = true;
     btn.disabled = true; btn.textContent = 'Menyimpan...';
@@ -437,16 +442,89 @@
     toast(v ? 'Akun iklan: ' + v : 'Nama akun iklan dikosongkan');
   }));
   $('btnExportAcct').onclick = () => run(async () => {
-    if (!ACCT) return toast('Pilih akun dulu');
-    const account = ACCT;
-    const data = await STORE.exportAccount(account.id);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob), a = document.createElement('a');
-    a.href = url;
-    a.download = `harian-${account.name.replace(/[^\p{L}\p{N}_-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast('Riwayat akun diekspor');
+    if (!STORE || !ACCT || ACCT.name !== shopeeName()) return toast('Pilih akun dulu');
+    const account = ACCT, revision = BACKUP_REV;
+    const parameters = window.Engine.normalizeOptions(window.opts ? window.opts() : {});
+    const data = await STORE.exportAccount(account.id, parameters);
+    if (ACCT !== account || account.name !== shopeeName() || revision !== BACKUP_REV) return;
+    // Refuse to advertise a backup that the same app cannot restore.
+    const blob = new Blob([DailyStore.serializeBackup(data)], { type: 'application/json' });
+    window.downloadBlob(blob, `harian-${account.name.replace(/[^\p{L}\p{N}_-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.json`);
+    toast('Cadangan lengkap akun diunduh');
   });
+
+  function cancelBackup() {
+    ++BACKUP_REV;
+    BACKUP = null;
+    if ($('backupPreview')) $('backupPreview').classList.add('hidden');
+    if ($('backupPreviewSummary')) $('backupPreviewSummary').textContent = '';
+    if ($('importAcctFile')) $('importAcctFile').value = '';
+  }
+  if ($('btnImportAcct')) $('btnImportAcct').onclick = () => {
+    if (!STORE || !ACCT || ACCT.name !== shopeeName()) return toast('Penyimpanan akun belum siap');
+    if (RESTORING || SAVING) return toast('Tunggu penyimpanan selesai');
+    cancelBackup();
+    $('importAcctFile').click();
+  };
+  if ($('btnCancelRestore')) $('btnCancelRestore').onclick = cancelBackup;
+  if ($('importAcctFile')) $('importAcctFile').onchange = async event => {
+    const file = event.target.files[0];
+    cancelBackup();
+    if (!file) return;
+    const account = ACCT, revision = BACKUP_REV;
+    const current = () => revision === BACKUP_REV && ACCT === account && account && account.name === shopeeName();
+    try {
+      if (!STORE || !account || RESTORING || SAVING) throw new Error('Tunggu penyimpanan akun siap');
+      if (!/\.json$/i.test(file.name)) throw new Error('Pilih berkas cadangan .json');
+      if (file.size > DailyStore.MAX_BACKUP_BYTES) throw new Error('Ukuran cadangan maksimal 50 MiB');
+      const text = await file.text();
+      if (!current()) return;
+      let parsed;
+      try { parsed = JSON.parse(text); } catch (_) { throw new Error('Isi berkas bukan JSON yang valid'); }
+      const validated = DailyStore.validateBackup(parsed);
+      const coverage = await STORE.coverage(account.id);
+      if (!current()) return;
+      BACKUP = { account, revision, ...validated };
+      const s = validated.summary;
+      const existing = Object.values(coverage).reduce((sum, value) => sum + value.rows, 0);
+      $('backupPreviewSummary').textContent = `Cadangan dari akun “${s.source}” akan dipulihkan ke akun aktif “${account.name}”. `
+        + `${nf(s.days)} tanggal${s.start ? ` (${s.start} — ${s.end})` : ''}; ${nf(s.counts.affiliate)} agregat komisi, `
+        + `${nf(s.counts.ads)} agregat iklan, ${nf(s.counts.clicks)} agregat klik, ${nf(s.counts.uploads)} unggahan. `
+        + `Seluruh ${nf(existing)} agregat harian, fingerprint, dan riwayat unggahan akun ini akan diganti. `
+        + 'Akun lain tetap aman. Parameter dalam cadangan hanya referensi; pengaturan analisis saat ini tetap digunakan. '
+        + 'Unduh cadangan akun ini terlebih dahulu jika riwayat lama masih diperlukan.';
+      $('backupPreview').classList.remove('hidden');
+      $('btnRestoreAcct').focus();
+    } catch (error) {
+      if (current()) toast('Gagal membaca cadangan: ' + error.message);
+    }
+  };
+  if ($('btnRestoreAcct')) $('btnRestoreAcct').onclick = async () => {
+    const backup = BACKUP;
+    if (RESTORING || SAVING || !backup || backup.account !== ACCT ||
+        backup.revision !== BACKUP_REV || backup.account.name !== shopeeName()) return;
+    const button = $('btnRestoreAcct'), oldText = button.textContent;
+    RESTORING = true;
+    let committed = false;
+    button.disabled = true;
+    button.textContent = 'Memulihkan...';
+    try {
+      await STORE.importAccount(backup.account.id, backup.data, { replace: true });
+      committed = true;
+      if (ACCT !== backup.account || backup.account.name !== shopeeName()) return;
+      cancelBackup();
+      ++STORED_REV; ++PLAN_REV;
+      await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
+      toast('Cadangan dipulihkan ke ' + backup.account.name);
+    } catch (error) {
+      toast((committed ? 'Cadangan tersimpan, tetapi tampilan gagal diperbarui: ' :
+        'Pemulihan gagal; riwayat sebelumnya tetap utuh: ') + error.message);
+    } finally {
+      RESTORING = false;
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  };
 
   (async () => {
     try {

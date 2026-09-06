@@ -100,8 +100,16 @@ const DailyAgg = (() => {
     let duplicates = 0;
     for (const r of rows) {
       const h = hashRow(r);
-      if (seen.has(h)) { duplicates++; continue; }
-      seen.add(h); kept.push(r); hashes.push(h);
+      // The validated reader normalizes numeric cells/headers. Old v2 row
+      // guards hash the original strings, so test that exact source shape as
+      // well. Only new canonical hashes are persisted: there remains exactly
+      // one fingerprint per aggregate source row, including after backup.
+      const source = r[Symbol.for('affiliate-dashboard.source-row')];
+      const sourceHash = source ? hashRow(source) : h;
+      const duplicate = seen.has(h) || seen.has(sourceHash);
+      seen.add(h); seen.add(sourceHash);
+      if (duplicate) { duplicates++; continue; }
+      kept.push(r); hashes.push(h);
     }
     return { kept, hashes, duplicates, total: rows.length };
   }

@@ -189,10 +189,11 @@ async function main() {
   for (const action of ['switch', 'reset']) {
     test(`CSV parse completion cannot resurrect data after ${action}`, async page => {
       await page.evaluate(() => {
-        const parse = Papa.parse;
+        const read = FileReader.prototype.readAsArrayBuffer;
         window.__heldParses = [];
-        Papa.parse = (file, options) => parse(file, { ...options,
-          complete: result => window.__heldParses.push(() => options.complete(result)) });
+        FileReader.prototype.readAsArrayBuffer = function (...args) {
+          window.__heldParses.push(() => read.apply(this, args));
+        };
       });
       await page.setInputFiles('#files', { name: 'slow.csv', mimeType: 'text/csv', buffer: Buffer.from(csv([aff()])) });
       await page.waitForFunction(() => window.__heldParses.length > 0);
@@ -378,7 +379,7 @@ async function main() {
       };
     });
     await page.locator('#btnPdf').click();
-    await page.locator('[data-pdf="ringkas"]').click();
+    await page.locator('#btnBrowserPrint').click();
     await page.waitForFunction(() => window.__printState);
     assert.deepEqual(await page.evaluate(() => window.__printState), { printing: true, mode: true, panels: true });
     assert.deepEqual(await page.evaluate(() => ({
@@ -394,9 +395,10 @@ async function main() {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', formula)] }]);
     const pending = page.waitForEvent('download');
     await page.locator('#btnExport').click();
+    await page.locator('#btnDownloadData').click();
     const text = await readDownload(await pending);
     const rows = await page.evaluate(text => Papa.parse(text).data, text);
-    assert.equal(rows[1][0], "'" + formula);
+    assert.equal(rows[1][rows[0].indexOf('Tag')], "'" + formula);
   });
 
   for (const entry of ['index.html', 'index-daily.html']) {
@@ -464,5 +466,5 @@ async function main() {
   if (failed) process.exitCode = 1;
 }
 
-module.exports = { createHarness, csv, aff, ad, click, upload, snapshot, importSnapshots, saveDaily, storedRows };
+module.exports = { createHarness, csv, aff, ad, click, upload, snapshot, importSnapshots, saveDaily, storedRows, readDownload };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

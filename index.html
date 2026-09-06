@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Baca laporan Shopee dan Meta Ads, periksa kualitas data, lalu ekspor keputusan dan laporan PDF. Seluruh data diproses di perangkat Anda.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23e0653a'/><text x='16' y='22' font-size='15' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>BD</text></svg>">
 <title>Affiliate Decision Dashboard · Berlima Digital</title>
 <link rel="stylesheet" href="styles.css">
@@ -10,6 +11,7 @@
 <script src="vendor/chart.umd.js"></script>
 </head>
 <body>
+<a class="skip-link" href="#workspace">Langsung ke analisis</a>
 
 <header>
   <div class="hdr">
@@ -21,16 +23,16 @@
       </div>
     </div>
     <div class="acct">
-      <select id="account" title="Akun aktif"></select>
+      <select id="account" title="Akun aktif" aria-label="Akun aktif"></select>
       <button class="btn sm" id="btnNewAcct" title="Tambah akun">+</button>
     </div>
     <button class="btn ghost" id="btnMap">Kelola Tag<span class="badge-dot hidden" id="mapAlert"></span></button>
-    <button class="btn ghost" id="btnHist">Riwayat</button>
+    <button class="btn ghost" id="btnHist">Snapshot</button>
     <button class="btn" id="btnStored">Data Tersimpan</button>
     <button class="btn ghost" id="btnSet">Setelan</button>
     <button class="btn ghost" id="btnTheme">Mode Gelap</button>
-    <button class="btn" id="btnExport">Export CSV</button>
-    <button class="btn" id="btnPdf">Export PDF</button>
+    <button class="btn" id="btnExport">Ekspor data</button>
+    <button class="btn" id="btnPdf">Unduh PDF</button>
     <button class="btn primary" id="btnSave">Simpan Snapshot</button>
   </div>
 </header>
@@ -40,11 +42,13 @@
   <div class="ph-sub"><span id="phRange"></span><span id="phMade"></span></div>
 </div>
 
-<div class="wrap">
+<main class="wrap" id="workspace" tabindex="-1">
+  <div class="workspace-heading"><div><p class="eyebrow">Shopee Affiliate + Meta Ads</p><h2>Analisis akun</h2><p>Pilih akun, periksa laporan, lalu ambil keputusan dari periode yang sama.</p></div><span class="local-note">Tersimpan di perangkat Anda</span></div>
+  <ol class="workflow" aria-label="Langkah analisis"><li class="done"><span>1</span><div><b>Akun aktif</b><small id="flowAccount">default</small></div></li><li id="flowImport"><span>2</span><div><b>Periksa data</b><small id="flowImportNote">Unggah laporan CSV</small></div></li><li id="flowAnalyze"><span>3</span><div><b>Analisis &amp; ekspor</b><small id="flowAnalyzeNote">Menunggu laporan komisi</small></div></li></ol>
 
   <div class="card" id="uploadCard">
     <div class="card-head">
-      <h2>Muat Data</h2>
+      <h2>Laporan sumber</h2>
       <span class="sub" id="uploadStatus"></span>
       <button class="btn ghost" id="btnReset">Kosongkan</button>
     </div>
@@ -72,8 +76,11 @@
       </div>
     </div>
     <p class="drop-hint" id="dropHint">Bisa juga menarik file ke mana saja di kartu ini — jenisnya dikenali dari isi file, bukan dari kotak tujuan.</p>
-    <input type="file" id="files" multiple accept=".csv" class="hidden">
+    <input type="file" id="files" multiple accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" class="hidden">
+    <div id="importProgress" class="import-progress hidden" role="status" aria-live="polite"><div><b id="importProgressLabel">Membaca laporan</b><progress id="importProgressBar" max="1" value="0"></progress></div><button class="btn sm" id="btnCancelImport">Batalkan pembacaan</button></div>
+    <section id="importFeedback" class="import-feedback hidden" aria-label="Hasil pemeriksaan file"><div class="feedback-head"><h3>Hasil pemeriksaan</h3><button class="btn ghost sm" id="btnClearFeedback">Tutup hasil</button></div><div id="importFeedbackRows"></div></section>
 
+    <p class="storage-scope-label">Riwayat akun yang sudah disimpan</p>
     <div class="chips covstrip" id="covStrip"></div>
 
     <div id="ingestPlan" class="hidden">
@@ -145,11 +152,12 @@
       <h3 class="print-sec">Keputusan per Tag</h3>
       <div class="dgrid" id="dgrid"></div>
       <div class="card" data-print="tags">
-        <div class="card-head"><h2>Semua Tag</h2>
+        <div class="card-head"><h2>Keputusan per tag</h2>
           <span class="sub" id="filterNote"></span>
           <button class="btn ghost hidden" id="btnClearFilter">Tampilkan Semua</button>
           <span class="sub" id="tagNote"></span></div>
-        <div class="tscroll"><table id="tblMain"><thead></thead><tbody></tbody></table></div>
+        <div class="table-tools"><label for="tagSearch">Cari tag atau alasan</label><input id="tagSearch" type="search" placeholder="Ketik nama tag, status, atau alasan…" autocomplete="off"><span id="tagSearchCount" class="hint"></span><button class="btn sm" id="btnMetrics" aria-pressed="false">Semua metrik</button></div>
+        <div class="tscroll"><table class="compact-columns" id="tblMain"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
@@ -305,7 +313,8 @@
       <div class="card">
         <div class="card-head"><h2>Riwayat Harian Tersimpan</h2>
           <span class="sub" id="storedNote"></span>
-          <button class="btn ghost sm" id="btnExportAcct">Ekspor Akun</button></div>
+          <button class="btn sm" id="btnExportAcct">Unduh backup</button><button class="btn sm" id="btnImportAcct">Pulihkan backup</button><input id="importAcctFile" type="file" accept=".json,application/json" class="hidden"></div>
+        <div id="backupPreview" class="backup-preview hidden"><h3>Periksa sebelum memulihkan</h3><p id="backupPreviewSummary"></p><div class="button-row"><button id="btnCancelRestore" class="btn">Batal</button><button id="btnRestoreAcct" class="btn primary">Ganti data harian akun ini</button></div></div>
         <p class="hint">Data ini menumpuk lintas periode dari setiap unggahan yang Anda simpan — tidak perlu mengunggah ulang CSV lama.</p>
         <div class="ctrls ctrls-inline">
           <div class="field"><label>Dari</label><input type="date" id="dsStart"></div>
@@ -369,7 +378,7 @@
     </div>
 
   </div>
-</div>
+</main>
 
 <div class="modal" id="mapModal">
   <div class="modal-box">
@@ -381,7 +390,7 @@
       yang pertama dipakai sebagai tag induk.</p>
     <h3 class="sec-split">Hasil pencocokan saat ini</h3>
     <p class="hint">Metode bertanda <b>Lemah</b> atau <b>Tidak cocok</b> perlu diperiksa —
-      biaya iklannya bisa menempel ke tag yang keliru.</p>
+      kandidatnya perlu dipilih lewat mapping manual sebelum komisi diatribusikan.</p>
     <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
     <h3 class="sec-split">Perbaiki manual</h3>
     <div id="mapRows"></div>
@@ -393,24 +402,30 @@
   </div>
 </div>
 
+<div class="modal" id="exportModal"><div class="modal-box narrow">
+  <div class="card-head"><h2>Ekspor analisis</h2><button class="btn ghost" data-close>Tutup</button></div>
+  <p id="exportContext" class="export-context"></p>
+  <div class="ctrls"><div class="field"><label for="exportFormat">Format</label><select id="exportFormat"><option value="csv">CSV - untuk spreadsheet</option><option value="json">JSON - analisis lengkap</option></select></div>
+  <div class="field" id="exportDatasetField"><label for="exportDataset">Jenis data</label><select id="exportDataset"><option value="tags">Keputusan per tag</option><option value="units">Performa per iklan</option><option value="daily">Rincian per tanggal</option><option value="matching">Pencocokan iklan dan tag</option></select></div>
+  <div class="field" id="exportScopeField"><label for="exportScope">Cakupan baris</label><select id="exportScope"><option value="all">Semua tag dalam periode</option><option value="visible">Hasil pencarian dan filter saat ini</option></select></div></div>
+  <p id="exportPreview" class="export-preview" role="status"></p><p class="hint">CSV menyertakan akun dan periode di setiap baris. JSON berisi hasil analisis, bukan backup untuk pemulihan akun.</p>
+  <div class="button-row"><button class="btn" id="btnExportPdf">Pilih laporan PDF</button><button class="btn primary" id="btnDownloadData">Unduh CSV</button></div>
+</div></div>
+
 <div class="modal" id="pdfModal">
   <div class="modal-box narrow">
-    <div class="card-head"><h2>Export PDF</h2>
-      <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Browser akan membuka dialog cetak — pilih <b>Save as PDF</b> sebagai tujuan.
-      Di HP, setelah tersimpan tombol Bagikan langsung muncul.</p>
+    <div class="card-head"><h2>Unduh laporan PDF</h2><button class="btn ghost" data-close>Tutup</button></div>
+    <p class="export-context" id="pdfContext"></p>
+    <div class="field"><label for="pdfTitle">Judul laporan</label><input id="pdfTitle" maxlength="100" value="Laporan kinerja affiliate"></div>
+    <p class="hint pdf-intro">PDF dibuat langsung di perangkat ini. Semua tag dalam periode terpilih disertakan, dengan angka lengkap, header tabel berulang, dan nomor halaman.</p>
     <div class="pdfopts">
-      <button class="pdfopt" data-pdf="ringkas">
-        <b>Ringkas</b><span>3–4 halaman</span>
-        <em>Ringkasan, keputusan per tag, Semua Tag, Per Ad Unit, dan kandidat iklan dari organik. Laporan harian yang tetap bisa ditelusuri.</em></button>
-      <button class="pdfopt" data-pdf="standar">
-        <b>Standar</b><span>5–6 halaman</span>
-        <em>Ringkas, ditambah rincian harian: kalender sebulan, grafik, dan tabel per tanggal. Untuk laporan mingguan.</em></button>
-      <button class="pdfopt" data-pdf="lengkap">
-        <b>Lengkap</b><span>semua bagian</span>
-        <em>Semuanya: ditambah klik Meta vs Shopee, produk dan toko, serta status order per tanggal. Untuk arsip bulanan.</em></button>
+      <button class="pdfopt" data-pdf="ringkas"><b>Ringkas</b><span>Keputusan utama</span><em>Ringkasan akun, kualitas data, semua tag beserta keputusan dan alasannya.</em></button>
+      <button class="pdfopt" data-pdf="standar"><b>Standar</b><span>Evaluasi berkala</span><em>Ringkas ditambah metrik per tag, performa iklan, dan rincian per tanggal.</em></button>
+      <button class="pdfopt" data-pdf="lengkap"><b>Lengkap</b><span>Arsip analisis</span><em>Standar ditambah matching, status pesanan, produk, toko, dan rincian sumber.</em></button>
     </div>
-    <p class="hint" id="pdfBusy" style="display:none">Menyiapkan grafik…</p>
+    <p class="hint">Jumlah halaman menyesuaikan banyaknya data. Baris tidak dipotong untuk mengejar jumlah halaman tertentu.</p>
+    <p class="pdf-busy hidden" id="pdfBusy" role="status">Menyiapkan PDF…</p><p class="inline-error hidden" id="pdfError" role="alert"></p>
+    <button class="btn ghost sm" id="btnBrowserPrint">Alternatif: cetak tampilan ringkas</button>
   </div>
 </div>
 
@@ -457,7 +472,7 @@
     <div class="card-head"><h2>Riwayat Snapshot</h2>
       <span class="sub" id="histAcct"></span>
       <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Tersimpan di browser ini, terpisah per akun. Muat kembali tanpa mengunggah ulang CSV.</p>
+    <p class="hint">Tersimpan di browser ini, terpisah per akun. Lihat hasil ringkasan tanpa mengunggah ulang CSV; snapshot tidak menyimpan transaksi sumber.</p>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn" id="btnExportSnaps">Ekspor Riwayat</button>
       <button class="btn" id="btnImportSnaps">Impor Riwayat</button>
@@ -472,6 +487,8 @@
 <script src="engine.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
+<script src="import-pipeline.js"></script>
+<script src="export-data.js"></script>
 <script src="app.js"></script>
 <script src="daily-layer.js"></script>
 </body>

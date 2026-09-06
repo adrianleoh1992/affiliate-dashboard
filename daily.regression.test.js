@@ -3,9 +3,11 @@
 // Synthetic fixtures exercise actual IndexedDB transactions and the v1 schema.
 // No personal reports, local browser profiles, network, or running server needed.
 const assert = require('node:assert/strict');
-const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
+const { IDBFactory, IDBKeyRange, IDBObjectStore } = require('fake-indexeddb');
 const A = require('./daily-agg');
 const DailyStore = require('./daily-store');
+const DashboardImport = require('./import-pipeline');
+const Papa = require('papaparse');
 global.IDBKeyRange = IDBKeyRange;
 
 const cases = [];
@@ -111,6 +113,41 @@ test('overlapping uploads add unseen amounts instead of replacing a partial day'
   assert.equal(day.rows, 2);
   assert.equal(day.orders, 2);
   assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 2);
+  store.close();
+});
+
+test('validated imports preserve old string-row dedup for repeated, overlapping and restored uploads', async () => {
+  const { store, account } = await context();
+  const fixtures = {
+    affiliate: [affiliate(), affiliate('order-2')],
+    ads: [ad(), ad('ad-2')],
+    clicks: [click('10:00:00', '2026-08-01', { Tag_link: ' Alpha ' }), click('11:00:00')],
+  };
+  const parsed = {};
+  for (const [kind, rows] of Object.entries(fixtures)) {
+    await save(store, account, kind, rows.slice(0, 1));
+    const repeated = DashboardImport.parseText(Papa.unparse(rows.slice(0, 1)));
+    assert.equal(repeated.ok, true);
+    const repeat = await save(store, account, kind, repeated.rows);
+    assert.equal(repeat.added, 0);
+    assert.equal(repeat.updated, 0);
+    parsed[kind] = DashboardImport.parseText(Papa.unparse(rows)).rows;
+    assert.deepEqual(await save(store, account, kind, parsed[kind]), { added: 0, updated: 1, duplicates: 1 });
+    const [day] = await store.range(account.id, kind);
+    assert.equal(kind === 'clicks' ? day.clicks : day.rows, 2);
+    assert.equal((await store.knownRowHashes(account.id, kind)).size, 2);
+  }
+  const backup = await store.exportAccount(account.id);
+  DailyStore.validateBackup(backup);
+  const target = await store.ensureAccount('shopee', 'Validated Restore');
+  await store.importAccount(target.id, backup, { replace: true });
+  for (const [kind, rows] of Object.entries(parsed)) {
+    assert.equal((await save(store, target, kind, rows)).skipped, true);
+    const revisedFormatting = DashboardImport.parseText(Papa.unparse(fixtures[kind].slice(1))).rows;
+    const repeat = await save(store, target, kind, revisedFormatting, { fileHash: '' });
+    assert.equal(repeat.updated, 0);
+    assert.equal(repeat.duplicates, 1);
+  }
   store.close();
 });
 
@@ -343,6 +380,204 @@ test('account rename conflicts abort without changing account identities', async
   assert.equal((await store.ensureAccount('shopee', account.name)).id, account.id);
   await assert.rejects(store.renameAccount(account.id, '  '), /Nama akun kosong/);
   assert.equal((await store.listAccounts()).length, 2);
+  store.close();
+});
+
+const clone = value => JSON.parse(JSON.stringify(value));
+const backupRecords = backup => Object.fromEntries(['affiliate', 'ads', 'clicks', 'rowhashes', 'uploads'].map(kind =>
+  [kind, backup[kind].map(({ id, account_id, ...row }) => row)]));
+async function seedBackup(store, account) {
+  await save(store, account, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'second-product' }), affiliate('order-2', '2026-08-02')]);
+  await save(store, account, 'ads', [ad(), ad('ad-2', '2026-08-02')]);
+  await save(store, account, 'clicks', [click(), click('11:00:00', '2026-08-02', { 'Wilayah Klik': '__proto__', 'Perujuk': 'constructor' })]);
+  return store.exportAccount(account.id, { ppn: 11, pendingFactor: 0.95, dateStart: '', dateEnd: '' });
+}
+
+test('versioned backup restores every aggregate, order key, fingerprint and upload into the chosen account', async () => {
+  const { store, account } = await context();
+  const target = await store.ensureAccount('shopee', 'Restore Target');
+  const other = await store.ensureAccount('shopee', 'Untouched Account');
+  const backup = await seedBackup(store, account);
+  await save(store, target, 'affiliate', [affiliate('old-target', '2026-07-01')]);
+  await save(store, other, 'affiliate', [affiliate('other')]);
+  const otherBefore = backupRecords(await store.exportAccount(other.id));
+  assert.equal(backup.format, DailyStore.BACKUP_FORMAT);
+  assert.equal(backup.version, DailyStore.BACKUP_VERSION);
+  assert.equal(backup.database_version, 2);
+  assert.equal(backup.rowhashes.length, 7);
+  const validated = DailyStore.validateBackup(clone(backup));
+  assert.equal(validated.summary.days, 2);
+  assert.deepEqual(validated.data.parameters, backup.parameters);
+  await store.importAccount(target.id, validated.data, { replace: true });
+  const restored = await store.exportAccount(target.id);
+  assert.equal(restored.account.id, target.id);
+  assert.equal(restored.account.name, target.name);
+  assert.deepEqual(backupRecords(restored), backupRecords(backup));
+  assert.deepEqual(backupRecords(await store.exportAccount(other.id)), otherBefore);
+  assert.deepEqual(backupRecords(await store.exportAccount(account.id)), backupRecords(backup));
+  for (const kind of ['affiliate', 'ads', 'clicks', 'rowhashes', 'uploads']) {
+    assert.ok(restored[kind].every(row => row.account_id === target.id));
+    assert.ok(restored[kind].every(row => !backup[kind].some(source => source.id === row.id)));
+  }
+  assert.equal((await save(store, target, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'second-product' }), affiliate('order-2', '2026-08-02')])).skipped, true);
+  const next = await save(store, target, 'affiliate', [affiliate(), affiliate('order-3')]);
+  assert.deepEqual(next, { added: 0, updated: 1, duplicates: 1 });
+  assert.equal((await store.range(target.id, 'affiliate'))[0].orders, 2);
+  assert.equal((await store.range(target.id, 'affiliate'))[0].comm, 600);
+  assert.equal({}.polluted, undefined);
+  store.close();
+});
+
+test('restoration requires explicit replacement and an existing target account', async () => {
+  const { store, account } = await context();
+  const backup = await seedBackup(store, account);
+  await assert.rejects(store.importAccount(account.id, backup), /Konfirmasi/);
+  await assert.rejects(store.importAccount(999, backup, { replace: true }), /Akun tujuan/);
+  assert.deepEqual(backupRecords(await store.exportAccount(account.id)), backupRecords(backup));
+  store.close();
+});
+
+test('compact serialized backups roundtrip supported records and pass restore validation', async () => {
+  const { store, account } = await context();
+  const target = await store.ensureAccount('shopee', 'Serialized Restore');
+  const backup = await seedBackup(store, account);
+  const text = DailyStore.serializeBackup(backup), parsed = JSON.parse(text);
+  assert.equal(text, JSON.stringify(parsed));
+  assert.ok(Buffer.byteLength(text, 'utf8') <= DailyStore.MAX_BACKUP_BYTES);
+  assert.deepEqual(backupRecords(parsed), backupRecords(backup));
+  assert.deepEqual(parsed.parameters, backup.parameters);
+  await store.importAccount(target.id, parsed, { replace: true });
+  assert.deepEqual(backupRecords(await store.exportAccount(target.id)), backupRecords(backup));
+  assert.throws(() => DailyStore.serializeBackup({ ...backup, version: 999 }), /Cadangan tidak valid/);
+  store.close();
+});
+
+test('backup export rejects actual UTF-8 bytes over the same limit used by restore', () => {
+  // A few thousand valid breakdown labels exercise the real 50 MiB limit
+  // without creating hundreds of thousands of IndexedDB source rows.
+  const count = 8500;
+  const source = Object.fromEntries(Array.from({ length: count }, (_, i) => ['界'.repeat(2040) + i, 1]));
+  const backup = {
+    format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 2,
+    exported_at: '2026-09-07T00:00:00Z', account: { id: 1, kind: 'shopee', name: 'Unicode labels' },
+    affiliate: [], ads: [], uploads: [],
+    clicks: [{ account_id: 1, date: '2026-08-01', tag: 'sample', clicks: count,
+      by_region: { Jakarta: count }, by_source: source, merge_version: 1 }],
+    rowhashes: Array.from({ length: count }, (_, i) => ({ account_id: 1, kind: 'clicks',
+      hash: i.toString(16).padStart(16, '0'), date: '2026-08-01' })),
+  };
+  const text = JSON.stringify(DailyStore.validateBackup(backup).data);
+  assert.ok(text.length < DailyStore.MAX_BACKUP_BYTES, 'character count alone would wrongly permit this export');
+  assert.ok(Buffer.byteLength(text, 'utf8') > DailyStore.MAX_BACKUP_BYTES);
+  assert.throws(() => DailyStore.serializeBackup(backup), /melebihi batas 50 MiB/);
+});
+
+test('backup roundtrips quoted multiline ad names and click breakdown labels', async () => {
+  const { store, account } = await context();
+  const target = await store.ensureAccount('shopee', 'Multiline Restore');
+  const ads = DashboardImport.parseText(Papa.unparse([ad('ad-1', '2026-08-01', { 'Ad name': 'Alpha\nPromotion\tOne' })]));
+  const clicks = DashboardImport.parseText(Papa.unparse([{
+    'Click Time': '2026-08-01 10:00:00', Tag_link: 'Alpha\nPromotion', Referrer: 'Facebook\nApp', 'Wilayah Klik': 'Jakarta\nTimur',
+  }]));
+  assert.equal(ads.ok, true);
+  assert.equal(clicks.ok, true);
+  await save(store, account, 'ads', ads.rows);
+  await save(store, account, 'clicks', clicks.rows);
+  const backup = await store.exportAccount(account.id);
+  await store.importAccount(target.id, clone(backup), { replace: true });
+  assert.deepEqual(backupRecords(await store.exportAccount(target.id)), backupRecords(backup));
+  assert.equal((await store.range(target.id, 'clicks'))[0].by_source['Facebook\nApp'], 1);
+  store.close();
+});
+
+test('corrupt schema, dates, numbers, revisions and mixed account rows never replace existing history', async () => {
+  const { store, account } = await context();
+  const backup = await seedBackup(store, account);
+  const alterations = [
+    data => { data.version = 999; },
+    data => { delete data.format; },
+    data => { data.database_version = 99; },
+    data => { delete data.rowhashes; },
+    data => { data.rowhashes.splice(0, 1); },
+    data => { data.affiliate[0].comm = Infinity; },
+    data => { data.ads[0].spend = null; },
+    data => { data.clicks[0].clicks = '1'; },
+    data => { data.affiliate[0].date = '2026-02-30'; },
+    data => { data.exported_at = '2026-09-06T24:00:00Z'; },
+    data => { data.affiliate[0].account_id = account.id + 1; },
+    data => { data.uploads[0].account_id = account.id + 1; },
+    data => { data.rowhashes[0].account_id = account.id + 1; },
+    data => { data.rowhashes[0].date = '2026-08-30'; },
+    data => { data.affiliate[0].order_keys = ['clear-private-order']; },
+    data => { data.affiliate[0].merge_version = 9; },
+    data => { data.clicks[0].by_region.Jakarta = 999; },
+    data => { data.uploads[0].period_end = '2026-07-01'; },
+    data => { data.parameters.ppn = NaN; },
+    data => { data.affiliate[0].polluted = true; },
+    data => { data.account = JSON.parse('{"id":1,"name":"Unsafe","kind":"shopee","__proto__":{"polluted":true}}'); },
+    data => { data.clicks[0].by_source = JSON.parse('{"__proto__":{"polluted":true}}'); },
+  ];
+  for (const alter of alterations) {
+    const damaged = clone(backup);
+    alter(damaged);
+    await assert.rejects(store.importAccount(account.id, damaged, { replace: true }), /Cadangan tidak valid/);
+    assert.deepEqual(backupRecords(await store.exportAccount(account.id)), backupRecords(backup));
+  }
+  assert.equal({}.polluted, undefined);
+  store.close();
+});
+
+test('restore rejects duplicate IDs and conflicting logical keys while coalescing identical keys', async () => {
+  const { store, account } = await context();
+  const backup = await seedBackup(store, account);
+  const ids = clone(backup);
+  ids.affiliate[1].id = ids.affiliate[0].id;
+  await assert.rejects(store.importAccount(account.id, ids, { replace: true }), /ID affiliate.*duplikat/);
+  const conflict = clone(backup);
+  conflict.ads.push({ ...conflict.ads[0], id: 999, spend: 456 });
+  await assert.rejects(store.importAccount(account.id, conflict, { replace: true }), /kunci ads duplikat/);
+  const same = clone(backup);
+  same.ads.push({ ...same.ads[0], id: 999 });
+  same.rowhashes.push({ ...same.rowhashes[0], id: 999 });
+  assert.equal(DailyStore.validateBackup(same).summary.duplicates, 2);
+  await store.importAccount(account.id, same, { replace: true });
+  assert.deepEqual(backupRecords(await store.exportAccount(account.id)), backupRecords(backup));
+  store.close();
+});
+
+test('storage failure after restore deletes and writes aborts the entire replacement', async () => {
+  const { store, account } = await context();
+  const target = await store.ensureAccount('shopee', 'Existing History');
+  const backup = await seedBackup(store, account);
+  await save(store, target, 'affiliate', [affiliate('prior', '2026-07-01')]);
+  await save(store, target, 'clicks', [click('09:00:00', '2026-07-01')]);
+  const before = backupRecords(await store.exportAccount(target.id));
+  const originalAdd = IDBObjectStore.prototype.add;
+  let failed = false;
+  IDBObjectStore.prototype.add = function (value, ...args) {
+    if (this.name === 'ads' && value.account_id === target.id) {
+      failed = true;
+      throw new Error('Synthetic quota failure');
+    }
+    return originalAdd.call(this, value, ...args);
+  };
+  try {
+    await assert.rejects(store.importAccount(target.id, backup, { replace: true }), /Synthetic quota failure/);
+  } finally { IDBObjectStore.prototype.add = originalAdd; }
+  assert.equal(failed, true);
+  assert.deepEqual(backupRecords(await store.exportAccount(target.id)), before);
+  assert.deepEqual(backupRecords(await store.exportAccount(account.id)), backupRecords(backup));
+  store.close();
+});
+
+test('new backups preserve migrated legacy history without enabling unsafe incremental merges', async () => {
+  await seedV1();
+  const store = await DailyStore.open(), target = await store.ensureAccount('shopee', 'Restored Legacy');
+  const backup = await store.exportAccount(1);
+  await store.importAccount(target.id, backup, { replace: true });
+  assert.equal((await store.range(target.id, 'affiliate'))[0].orders, 1);
+  assert.equal((await store.knownRowHashes(target.id, 'affiliate')).size, 1);
+  await assert.rejects(save(store, target, 'affiliate', [affiliate('new-overlap')]), /Riwayat lama/);
   store.close();
 });
 

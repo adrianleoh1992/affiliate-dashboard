@@ -4,6 +4,9 @@
 const DailyStore = (() => {
   const DB_NAME = 'affiliate_daily', VERSION = 2;
   const KINDS = ['affiliate', 'ads', 'clicks'];
+  const BACKUP_FORMAT = 'affiliate-daily-backup', BACKUP_VERSION = 1;
+  const MAX_BACKUP_RECORDS = 500000;
+  const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
   const agg = () => typeof DailyAgg !== 'undefined' ? DailyAgg : require('./daily-agg');
   const kindOf = kind => {
     if (!KINDS.includes(kind)) throw new Error('Jenis laporan tidak dikenal');
@@ -14,6 +17,162 @@ const DailyStore = (() => {
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
+
+  // Backups are untrusted input. Build new records from the supported schema,
+  // never spread imported objects into IndexedDB records or account settings.
+  function validateBackup(input) {
+    const bad = message => { throw new Error('Cadangan tidak valid: ' + message); };
+    const object = (value, keys, label) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value) ||
+          ![Object.prototype, null].includes(Object.getPrototypeOf(value))) bad(label + ' harus berupa objek');
+      if (keys && Object.keys(value).some(key => !keys.includes(key))) bad(label + ' memuat kolom tidak dikenal');
+      return value;
+    };
+    const string = (value, label, max = 2048, empty = false) => {
+      // Quoted CSV cells legitimately contain tabs/newlines (for example an
+      // ad label). Preserve those on roundtrip; reject other control bytes.
+      if (typeof value !== 'string' || (!empty && !value.trim()) || value.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) bad(label + ' tidak valid');
+      return value;
+    };
+    const number = (value, label, count = false) => {
+      if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER ||
+          (count && (!Number.isSafeInteger(value) || value < 0))) bad(label + ' harus berupa angka valid');
+      return value;
+    };
+    const date = (value, label) => { if (!agg().isDate(value)) bad(label + ' tidak valid'); return value; };
+    const stamp = (value, label) => {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/.test(value) ||
+          !agg().isDate(value.slice(0, 10)) || !Number.isFinite(Date.parse(value))) bad(label + ' tidak valid');
+      return value;
+    };
+    object(input, ['format', 'version', 'database_version', 'exported_at', 'account', ...KINDS, 'uploads', 'rowhashes', 'parameters'], 'berkas');
+    if (input.format !== BACKUP_FORMAT || input.version !== BACKUP_VERSION || input.database_version !== VERSION)
+      bad('format/versi tidak didukung. Gunakan cadangan lengkap terbaru, bukan ekspor riwayat lama atau snapshot');
+    stamp(input.exported_at, 'waktu ekspor');
+    const source = object(input.account, ['id', 'kind', 'name', 'created'], 'akun');
+    if (!Number.isSafeInteger(source.id) || source.id <= 0 || source.kind !== 'shopee') bad('identitas akun sumber');
+    const account = { id: source.id, kind: source.kind, name: string(source.name, 'nama akun') };
+    if (source.created !== undefined) account.created = stamp(source.created, 'waktu akun');
+    const result = { format: BACKUP_FORMAT, version: BACKUP_VERSION, database_version: VERSION,
+      exported_at: input.exported_at, account };
+    let total = 0, duplicates = 0;
+    const list = (key, fields, validate, identity) => {
+      const rows = input[key];
+      if (!Array.isArray(rows) || (total += rows.length) > MAX_BACKUP_RECORDS) bad('jumlah record terlalu besar atau daftar ' + key + ' hilang');
+      const records = new Map(), ids = new Set();
+      for (const row of rows) {
+        object(row, ['id', 'account_id', ...fields], key);
+        if (row.account_id !== source.id) bad(key + ' mengandung data akun lain');
+        if (row.id !== undefined) {
+          if (!Number.isSafeInteger(row.id) || row.id <= 0 || ids.has(row.id)) bad('ID ' + key + ' tidak valid atau duplikat');
+          ids.add(row.id);
+        }
+        const clean = { account_id: source.id, ...validate(row) }, keyValue = identity(clean), prior = records.get(keyValue);
+        if (prior) {
+          if (JSON.stringify(prior) !== JSON.stringify(clean)) bad('kunci ' + key + ' duplikat dengan isi berbeda');
+          duplicates++;
+        } else records.set(keyValue, clean);
+      }
+      result[key] = [...records.values()];
+    };
+    const timestamps = (row, clean) => {
+      for (const field of ['created_at', 'updated_at']) if (row[field] !== undefined) clean[field] = stamp(row[field], field);
+      if (row.merge_version !== undefined) {
+        if (row.merge_version !== 1) bad('versi agregasi tidak didukung');
+        clean.merge_version = 1;
+      }
+      return clean;
+    };
+    const amounts = {
+      affiliate: ['comm', 'comm_done', 'comm_pending', 'gmv', 'qty', 'refund', 'orders', 'excluded', 'rows'],
+      ads: ['spend', 'impressions', 'reach', 'clicks', 'shop_clicks', 'lpv', 'results', 'rows', 'cpm', 'cpc', 'ctr'],
+      clicks: ['clicks'],
+    };
+    for (const kind of KINDS) {
+      const field = kind === 'ads' ? 'ad_unit' : 'tag';
+      const extras = kind === 'affiliate' ? ['order_keys'] : kind === 'ads' ? ['delivery'] : ['by_region', 'by_source'];
+      list(kind, ['date', field, ...amounts[kind], ...extras, 'merge_version', 'created_at', 'updated_at'], row => {
+        const clean = { date: date(row.date, 'tanggal ' + kind), [field]: string(row[field], field) };
+        for (const name of amounts[kind]) clean[name] = number(row[name], kind + '.' + name, ['orders', 'excluded', 'rows'].includes(name) || kind === 'clicks');
+        if (kind === 'affiliate') {
+          if (row.order_keys !== undefined) {
+            if (!Array.isArray(row.order_keys) || row.order_keys.length > MAX_BACKUP_RECORDS ||
+                row.order_keys.some(key => typeof key !== 'string' || !/^[a-f0-9]{16}$/.test(key)) ||
+                new Set(row.order_keys).size !== row.order_keys.length || row.orders !== row.order_keys.length) bad('identitas order tidak konsisten');
+            clean.order_keys = [...row.order_keys];
+          } else if (row.merge_version === 1) bad('identitas order untuk agregasi gabungan hilang');
+          if (row.excluded > row.rows || row.orders > row.rows - row.excluded) bad('jumlah order/baris tidak konsisten');
+        } else if (kind === 'ads') {
+          clean.delivery = string(row.delivery, 'status iklan', 256, true);
+        } else {
+          for (const name of extras) {
+            const values = object(row[name], null, name);
+            // Object.fromEntries preserves literal CSV labels such as
+            // __proto__ safely as own data keys, never as prototype setters.
+            const entries = Object.entries(values).map(([key, value]) => [string(key, name, 2048), number(value, name, true)]);
+            if (entries.reduce((sum, [, value]) => sum + value, 0) !== row.clicks) bad(name + ' tidak sesuai jumlah klik');
+            clean[name] = Object.fromEntries(entries);
+          }
+        }
+        return timestamps(row, clean);
+      }, row => JSON.stringify([row.date, row[field]]));
+    }
+    list('rowhashes', ['kind', 'hash', 'date'], row => {
+      if (!KINDS.includes(row.kind)) bad('jenis fingerprint');
+      const hash = string(row.hash, 'fingerprint', 256);
+      return { kind: row.kind, hash, date: row.date == null ? null : date(row.date, 'tanggal fingerprint') };
+    }, row => JSON.stringify([row.kind, row.hash]));
+    list('uploads', ['kind', 'file_hash', 'file_name', 'rows', 'added', 'updated', 'duplicates', 'period_start', 'period_end', 'uploaded_at'], row => {
+      if (!KINDS.includes(row.kind)) bad('jenis unggahan');
+      const clean = { kind: row.kind, file_hash: string(row.file_hash, 'hash berkas', 256),
+        file_name: string(row.file_name || '', 'nama berkas', 1024, true) };
+      for (const field of ['rows', 'added', 'updated', 'duplicates']) clean[field] = number(row[field] === undefined ? 0 : row[field], 'unggahan.' + field, true);
+      clean.period_start = row.period_start == null ? null : date(row.period_start, 'awal periode');
+      clean.period_end = row.period_end == null ? null : date(row.period_end, 'akhir periode');
+      if (!!clean.period_start !== !!clean.period_end || clean.period_start > clean.period_end) bad('rentang unggahan');
+      if (row.uploaded_at !== undefined) clean.uploaded_at = stamp(row.uploaded_at, 'waktu unggahan');
+      return clean;
+    }, row => JSON.stringify([row.kind, row.file_hash]));
+    // Dated fingerprints must belong to an existing aggregate date. Keeping
+    // orphan guards would silently suppress a later valid CSV upload.
+    for (const kind of KINDS) {
+      const dates = new Set(result[kind].map(row => row.date));
+      if (result.rowhashes.some(row => row.kind === kind && row.date && !dates.has(row.date))) bad('fingerprint tanpa data harian');
+      const guarded = new Set(result.rowhashes.filter(row => row.kind === kind && row.date).map(row => row.date));
+      if (result[kind].some(row => row.merge_version === 1 && !guarded.has(row.date))) bad('fingerprint agregasi gabungan hilang');
+      const rowsByDay = new Map(), hashesByDay = new Map();
+      for (const row of result[kind]) {
+        const day = rowsByDay.get(row.date) || { count: 0, modern: true };
+        day.count += kind === 'clicks' ? row.clicks : row.rows;
+        day.modern = day.modern && row.merge_version === 1;
+        rowsByDay.set(row.date, day);
+      }
+      for (const row of result.rowhashes) if (row.kind === kind && row.date)
+        hashesByDay.set(row.date, (hashesByDay.get(row.date) || 0) + 1);
+      for (const [date, day] of rowsByDay) if (day.modern && day.count !== hashesByDay.get(date))
+        bad('jumlah fingerprint tidak sesuai baris agregasi gabungan');
+    }
+    if (input.parameters !== undefined) {
+      const numeric = ['ppn', 'thScale', 'thPantau', 'minSpend', 'minDays', 'lagDays', 'lagCoverage', 'streakDays', 'pendingFactor', 'targetROI'];
+      object(input.parameters, [...numeric, 'dateStart', 'dateEnd'], 'parameter');
+      result.parameters = Object.fromEntries(Object.entries(input.parameters).map(([key, value]) =>
+        [key, numeric.includes(key) ? number(value, 'parameter.' + key) : value === '' ? '' : date(value, key)]));
+    }
+    const dates = [...new Set(KINDS.flatMap(kind => result[kind].map(row => row.date)))].sort();
+    const summary = { source: account.name, days: dates.length, start: dates[0] || null, end: dates[dates.length - 1] || null,
+      counts: Object.fromEntries([...KINDS, 'uploads', 'rowhashes'].map(kind => [kind, result[kind].length])), duplicates };
+    return { data: result, summary };
+  }
+
+  function serializeBackup(input) {
+    // Export exactly the schema that restore accepts. Compact JSON saves
+    // space, while the byte check includes multibyte labels/account names.
+    const { data } = validateBackup(input);
+    const text = JSON.stringify(data);
+    if (new TextEncoder().encode(text).byteLength > MAX_BACKUP_BYTES)
+      throw new Error('Ukuran cadangan melebihi batas 50 MiB yang dapat dipulihkan. Ekspor tidak dibuat; riwayat tetap tersimpan.');
+    return text;
+  }
 
   function openDB() {
     return new Promise((resolve, reject) => {
@@ -266,14 +425,46 @@ const DailyStore = (() => {
         return limit > 0 ? rows.slice(0, limit) : rows;
       });
     }
-    async exportAccount(accountId) {
-      return this.transaction(['accounts', ...KINDS, 'uploads'], 'readonly', async tx => {
-        const [account, affiliate, ads, clicks, uploads] = await Promise.all([
+    async exportAccount(accountId, parameters) {
+      return this.transaction(['accounts', ...KINDS, 'uploads', 'rowhashes'], 'readonly', async tx => {
+        const [account, affiliate, ads, clicks, uploads, ...hashes] = await Promise.all([
           rq(tx.objectStore('accounts').get(accountId)),
           ...KINDS.map(kind => rq(tx.objectStore(kind).index('acct_date').getAll(bounds(accountId)))),
           rq(tx.objectStore('uploads').index('acct').getAll(accountId)),
+          ...KINDS.map(kind => rq(tx.objectStore('rowhashes').index('acct_kind').getAll([accountId, kind]))),
         ]);
-        return { version: VERSION, exported_at: new Date().toISOString(), account, affiliate, ads, clicks, uploads };
+        if (!account) throw new Error('Akun tidak ditemukan');
+        const metadata = { id: account.id, kind: account.kind, name: account.name };
+        if (account.created !== undefined) metadata.created = account.created;
+        return { format: BACKUP_FORMAT, version: BACKUP_VERSION, database_version: VERSION,
+          exported_at: new Date().toISOString(), account: metadata, affiliate, ads, clicks, uploads,
+          rowhashes: hashes.flat(), ...(parameters ? { parameters } : {}) };
+      });
+    }
+    async importAccount(accountId, input, options = {}) {
+      if (options.replace !== true) throw new Error('Konfirmasi penggantian riwayat akun diperlukan');
+      const { data, summary } = validateBackup(input);
+      return this.transaction(['accounts', ...KINDS, 'uploads', 'rowhashes'], 'readwrite', async tx => {
+        const account = await rq(tx.objectStore('accounts').get(accountId));
+        if (!account || account.kind !== 'shopee') throw new Error('Akun tujuan tidak ditemukan');
+        // Every delete and add shares one transaction. A constraint, quota, or
+        // browser failure rolls back the original account history in full.
+        for (const kind of KINDS) {
+          const s = tx.objectStore(kind);
+          (await rq(s.index('acct_date').getAllKeys(bounds(accountId)))).forEach(key => s.delete(key));
+          const hs = tx.objectStore('rowhashes');
+          (await rq(hs.index('acct_kind').getAllKeys([accountId, kind]))).forEach(key => hs.delete(key));
+        }
+        const uploads = tx.objectStore('uploads');
+        (await rq(uploads.index('acct').getAllKeys(accountId))).forEach(key => uploads.delete(key));
+        for (const kind of [...KINDS, 'uploads', 'rowhashes']) {
+          const s = tx.objectStore(kind), rows = data[kind];
+          for (let offset = 0; offset < rows.length; offset += 500) {
+            await Promise.all(rows.slice(offset, offset + 500).map(row =>
+              rq(s.add({ ...row, account_id: accountId }))));
+          }
+        }
+        return { ...summary, target: account.name };
       });
     }
     async estimate() {
@@ -282,7 +473,7 @@ const DailyStore = (() => {
       return { usage: e.usage, quota: e.quota, pct: e.quota ? e.usage / e.quota * 100 : 0 };
     }
   }
-  return { open: () => Store.open(), DB_NAME };
+  return { open: () => Store.open(), DB_NAME, validateBackup, serializeBackup, BACKUP_FORMAT, BACKUP_VERSION, MAX_BACKUP_BYTES };
 })();
 if (typeof window !== 'undefined') window.DailyStore = DailyStore;
 if (typeof module !== 'undefined' && module.exports) module.exports = DailyStore;
