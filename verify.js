@@ -2,30 +2,20 @@
 const fs = require('fs');
 const E = require('./engine.js');
 
-function parseCSV(text) {
-  const rows = []; let row = [], cell = '', q = false;
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (q) {
-      if (c === '"') { if (text[i+1] === '"') { cell += '"'; i++; } else q = false; }
-      else cell += c;
-    } else if (c === '"') q = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
-    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
-    else if (c !== '\r') cell += c;
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row); }
-  const head = rows.shift().map(h => h.trim());
-  return rows.filter(r => r.length > 1).map(r => {
-    const o = {}; head.forEach((h, i) => o[h] = (r[i] || '').trim()); return o;
-  });
+const Papa = require('papaparse');
+const files = process.argv.slice(2);
+if (files.length !== 3) {
+  console.error('Usage: node verify.js affiliate.csv ads.csv clicks.csv');
+  process.exit(1);
 }
-
-const D = '/Users/hadipradata/Downloads/';
-const aff = parseCSV(fs.readFileSync(D + 'AffiliateCommissionReport_202608222201.csv', 'utf8'));
-const ads = parseCSV(fs.readFileSync(D + 'AW-Adrian-Ads-Jul-23-2026-Aug-21-2026.csv', 'utf8'));
-const clk = parseCSV(fs.readFileSync(D + 'WebsiteClickReport202608222201.csv', 'utf8'));
+function parseCSV(file) {
+  const result = Papa.parse(fs.readFileSync(file, 'utf8'), {
+    header: true, skipEmptyLines: 'greedy', transformHeader: h => h.replace(/^\uFEFF/, '').trim(),
+  });
+  if (result.errors.length) throw new Error(file + ': ' + result.errors[0].message);
+  return result.data;
+}
+const [aff, ads, clk] = files.map(parseCSV);
 
 const TAGMAP = {
   'telesinvideo2':'TelesinGripvideo2','lemariolympic':'OlymplastLemari',

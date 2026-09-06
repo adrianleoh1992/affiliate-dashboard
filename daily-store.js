@@ -1,296 +1,288 @@
-/* ── Daily storage on IndexedDB ─────────────────────────────────────────────
-   Persists the deduped daily records produced by daily-agg.js, keyed per
-   account so two Shopee accounts never mix.
-
-   IndexedDB transactions auto-close at the end of the current microtask, so a
-   transaction must never be held across an `await`. Every method here opens a
-   transaction, does all its work inside request callbacks, and resolves only
-   when the transaction itself completes.
-
-   Accounts are user-declared, not detected: the CSVs carry no account identity
-   at all (no Account name in the Meta export, and "Nama Toko" in the affiliate
-   report is the seller's shop, not the user's account).
-*/
+/* Account-isolated daily history. Every write, dedup guard and upload log
+   commits in one IndexedDB transaction; raw CSV rows are never persisted. */
 'use strict';
-
 const DailyStore = (() => {
-  const DB_NAME = 'affiliate_daily';
-  const VERSION = 1;
+  const DB_NAME = 'affiliate_daily', VERSION = 2;
+  const KINDS = ['affiliate', 'ads', 'clicks'];
+  const agg = () => typeof DailyAgg !== 'undefined' ? DailyAgg : require('./daily-agg');
+  const kindOf = kind => {
+    if (!KINDS.includes(kind)) throw new Error('Jenis laporan tidak dikenal');
+    return kind;
+  };
+  const bounds = id => IDBKeyRange.bound([id, '0000-00-00'], [id, '9999-99-99']);
+  const rq = r => new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
 
   function openDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, VERSION);
+      let blocked = false;
       req.onerror = () => reject(req.error);
-      req.onblocked = () => reject(new Error('Database terkunci oleh tab lain'));
-      req.onsuccess = () => resolve(req.result);
-      req.onupgradeneeded = e => {
-        const db = e.target.result;
+      req.onblocked = () => { blocked = true; reject(new Error('Database terkunci oleh tab lain; tutup tab lama lalu muat ulang')); };
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onversionchange = () => db.close();
+        if (blocked) db.close(); else resolve(db);
+      };
+      req.onupgradeneeded = () => {
+        const db = req.result, tx = req.transaction;
         if (!db.objectStoreNames.contains('accounts')) {
-          const s = db.createObjectStore('accounts', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('kind_name', ['kind', 'name'], { unique: true });
+          db.createObjectStore('accounts', { keyPath: 'id', autoIncrement: true })
+            .createIndex('kind_name', ['kind', 'name'], { unique: true });
         }
-        if (!db.objectStoreNames.contains('affiliate')) {
-          const s = db.createObjectStore('affiliate', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('acct_date_tag', ['account_id', 'date', 'tag'], { unique: true });
-          s.createIndex('acct_date', ['account_id', 'date']);
+        for (const kind of KINDS) {
+          if (!db.objectStoreNames.contains(kind)) {
+            const s = db.createObjectStore(kind, { keyPath: 'id', autoIncrement: true });
+            const field = kind === 'ads' ? 'unit' : 'tag';
+            s.createIndex('acct_date_' + field, ['account_id', 'date', kind === 'ads' ? 'ad_unit' : 'tag'], { unique: true });
+            s.createIndex('acct_date', ['account_id', 'date']);
+          }
         }
-        if (!db.objectStoreNames.contains('ads')) {
-          const s = db.createObjectStore('ads', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('acct_date_unit', ['account_id', 'date', 'ad_unit'], { unique: true });
-          s.createIndex('acct_date', ['account_id', 'date']);
-        }
-        if (!db.objectStoreNames.contains('clicks')) {
-          const s = db.createObjectStore('clicks', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('acct_date_tag', ['account_id', 'date', 'tag'], { unique: true });
-          s.createIndex('acct_date', ['account_id', 'date']);
-        }
+        let uploads;
         if (!db.objectStoreNames.contains('uploads')) {
-          const s = db.createObjectStore('uploads', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('acct_hash', ['account_id', 'file_hash'], { unique: true });
-          s.createIndex('acct', 'account_id');
-        }
+          uploads = db.createObjectStore('uploads', { keyPath: 'id', autoIncrement: true });
+          uploads.createIndex('acct', 'account_id');
+        } else uploads = tx.objectStore('uploads');
+        // Report kinds must not share a file guard. Keep the old lookup API.
+        if (uploads.indexNames.contains('acct_hash')) uploads.deleteIndex('acct_hash');
+        uploads.createIndex('acct_hash', ['account_id', 'file_hash']);
+        if (!uploads.indexNames.contains('acct_kind_hash')) uploads.createIndex('acct_kind_hash', ['account_id', 'kind', 'file_hash'], { unique: true });
+        let hashes;
         if (!db.objectStoreNames.contains('rowhashes')) {
-          const s = db.createObjectStore('rowhashes', { keyPath: 'id', autoIncrement: true });
-          s.createIndex('acct_kind_hash', ['account_id', 'kind', 'hash'], { unique: true });
-          s.createIndex('acct_kind', ['account_id', 'kind']);
-        }
+          hashes = db.createObjectStore('rowhashes', { keyPath: 'id', autoIncrement: true });
+          hashes.createIndex('acct_kind_hash', ['account_id', 'kind', 'hash'], { unique: true });
+          hashes.createIndex('acct_kind', ['account_id', 'kind']);
+        } else hashes = tx.objectStore('rowhashes');
+        if (!hashes.indexNames.contains('acct_kind_date')) hashes.createIndex('acct_kind_date', ['account_id', 'kind', 'date']);
       };
     });
   }
 
-  /* Promisify one request. */
-  const rq = r => new Promise((res, rej) => {
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-  /* Resolve when the whole transaction commits — the only safe "it is written". */
-  const done = tx => new Promise((res, rej) => {
-    tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
-    tx.onabort = () => rej(tx.error || new Error('Transaksi dibatalkan'));
-  });
-
   class Store {
     constructor(db) { this.db = db; }
     static async open() { return new Store(await openDB()); }
-    close() { try { this.db.close(); } catch (e) {} }
+    close() { this.db.close(); }
 
-    /* ── Accounts ───────────────────────────────────────────────────────── */
-    async listAccounts(kind) {
-      const tx = this.db.transaction('accounts', 'readonly');
-      const all = await rq(tx.objectStore('accounts').getAll());
-      return kind ? all.filter(a => a.kind === kind) : all;
+    async transaction(names, mode, work) {
+      const tx = this.db.transaction(names, mode);
+      // Attach completion listeners BEFORE issuing requests, including no-ops.
+      const completion = new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error || new Error('Transaksi dibatalkan'));
+        tx.onerror = () => {}; // onabort carries the final transaction outcome.
+      });
+      completion.catch(() => {});
+      try {
+        const result = await work(tx);
+        await completion;
+        return result;
+      } catch (error) {
+        try { tx.abort(); } catch (_) {}
+        await completion.catch(() => {});
+        throw error;
+      }
     }
-
+    async listAccounts(kind) {
+      return this.transaction('accounts', 'readonly', async tx => {
+        const rows = await rq(tx.objectStore('accounts').getAll());
+        return kind ? rows.filter(a => a.kind === kind) : rows;
+      });
+    }
     async ensureAccount(kind, name, meta) {
       name = String(name || '').trim();
       if (!name) throw new Error('Nama akun kosong');
-      const tx = this.db.transaction('accounts', 'readwrite');
-      const store = tx.objectStore('accounts');
-      const found = await rq(store.index('kind_name').get([kind, name]));
-      if (found) { await done(tx); return found; }
-      const rec = { kind, name, created: new Date().toISOString(), ...(meta || {}) };
-      rec.id = await rq(store.add(rec));
-      await done(tx);
-      return rec;
-    }
-
-    async renameAccount(id, name) {
-      const tx = this.db.transaction('accounts', 'readwrite');
-      const store = tx.objectStore('accounts');
-      const rec = await rq(store.get(id));
-      if (!rec) { await done(tx); throw new Error('Akun tidak ditemukan'); }
-      rec.name = String(name).trim();
-      await rq(store.put(rec));
-      await done(tx);
-      return rec;
-    }
-
-    /* Deleting an account must take its data with it, or the rows become
-       orphans that still count toward storage and can resurface. */
-    async deleteAccount(id) {
-      const names = ['accounts', 'affiliate', 'ads', 'clicks', 'uploads', 'rowhashes'];
-      const tx = this.db.transaction(names, 'readwrite');
-      tx.objectStore('accounts').delete(id);
-      for (const s of ['affiliate', 'ads', 'clicks']) {
-        const idx = tx.objectStore(s).index('acct_date');
-        const keys = await rq(idx.getAllKeys(IDBKeyRange.bound([id, '0000-00-00'], [id, '9999-99-99'])));
-        keys.forEach(k => tx.objectStore(s).delete(k));
-      }
-      const upKeys = await rq(tx.objectStore('uploads').index('acct').getAllKeys(IDBKeyRange.only(id)));
-      upKeys.forEach(k => tx.objectStore('uploads').delete(k));
-      for (const kind of ['affiliate', 'ads', 'clicks']) {
-        const hk = await rq(tx.objectStore('rowhashes').index('acct_kind').getAllKeys(IDBKeyRange.only([id, kind])));
-        hk.forEach(k => tx.objectStore('rowhashes').delete(k));
-      }
-      await done(tx);
-    }
-
-    /* ── Upload guards ──────────────────────────────────────────────────── */
-    async seenFile(accountId, fileHash) {
-      const tx = this.db.transaction('uploads', 'readonly');
-      return (await rq(tx.objectStore('uploads').index('acct_hash').get([accountId, fileHash]))) || null;
-    }
-
-    async knownRowHashes(accountId, kind) {
-      const tx = this.db.transaction('rowhashes', 'readonly');
-      const rows = await rq(tx.objectStore('rowhashes').index('acct_kind')
-        .getAll(IDBKeyRange.only([accountId, kind])));
-      return new Set(rows.map(r => r.hash));
-    }
-
-    async existingKeys(accountId, kind) {
-      const storeName = kind === 'ads' ? 'ads' : kind;
-      const tx = this.db.transaction(storeName, 'readonly');
-      const rows = await rq(tx.objectStore(storeName).index('acct_date')
-        .getAll(IDBKeyRange.bound([accountId, '0000-00-00'], [accountId, '9999-99-99'])));
-      const field = kind === 'ads' ? 'ad_unit' : 'tag';
-      return new Set(rows.map(r => `${r.date}|${r[field]}`));
-    }
-
-    /* ── Writing daily records ──────────────────────────────────────────── */
-    /* One transaction covers the records, the row hashes, and the upload log,
-       so a failure leaves nothing half-written. */
-    async saveDaily(accountId, kind, records, opts) {
-      const o = opts || {};
-      const storeName = kind === 'ads' ? 'ads' : kind;
-      const idxName = kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag';
-      const field = kind === 'ads' ? 'ad_unit' : 'tag';
-      const tx = this.db.transaction([storeName, 'rowhashes', 'uploads'], 'readwrite');
-      const store = tx.objectStore(storeName);
-      const idx = store.index(idxName);
-
-      let added = 0, updated = 0;
-      for (const r of records) {
-        const key = [accountId, r.date, r[field]];
-        const found = await rq(idx.get(key));
-        if (found) {
-          await rq(store.put({ ...found, ...r, account_id: accountId, id: found.id,
-            updated_at: new Date().toISOString() }));
-          updated++;
-        } else {
-          await rq(store.add({ ...r, account_id: accountId,
-            created_at: new Date().toISOString() }));
-          added++;
-        }
-      }
-
-      if (o.rowHashes && o.rowHashes.length) {
-        const hs = tx.objectStore('rowhashes');
-        for (const h of o.rowHashes) {
-          // Unique index rejects repeats; that is the intent, so swallow it.
-          try { await rq(hs.add({ account_id: accountId, kind, hash: h })); } catch (e) {}
-        }
-      }
-
-      if (o.fileHash) {
-        try {
-          await rq(tx.objectStore('uploads').add({
-            account_id: accountId, kind, file_hash: o.fileHash,
-            file_name: o.fileName || '', rows: o.sourceRows || 0,
-            added, updated, duplicates: o.duplicates || 0,
-            period_start: o.period ? o.period.start : null,
-            period_end: o.period ? o.period.end : null,
-            uploaded_at: new Date().toISOString(),
-          }));
-        } catch (e) {}
-      }
-
-      await done(tx);
-      return { added, updated };
-    }
-
-    /* ── Reading ────────────────────────────────────────────────────────── */
-    async range(accountId, kind, start, end) {
-      const storeName = kind === 'ads' ? 'ads' : kind;
-      const tx = this.db.transaction(storeName, 'readonly');
-      const lo = start || '0000-00-00', hi = end || '9999-99-99';
-      return rq(tx.objectStore(storeName).index('acct_date')
-        .getAll(IDBKeyRange.bound([accountId, lo], [accountId, hi])));
-    }
-
-    /* Delete one day of one report. Row hashes for that day go too, otherwise
-       re-uploading the corrected file would be rejected as a duplicate — the
-       whole point of deleting a bad day is being able to put a good one back. */
-    async deleteDay(accountId, kind, date) {
-      const storeName = kind === 'ads' ? 'ads' : kind;
-      const tx = this.db.transaction([storeName, 'rowhashes'], 'readwrite');
-      const store = tx.objectStore(storeName);
-      const rows = await rq(store.index('acct_date').getAll(IDBKeyRange.only([accountId, date])));
-      for (const r of rows) await rq(store.delete(r.id));
-      // Row hashes are not dated, so the file log is what lets the same file in
-      // again; clearing this day's hashes is handled by dropping the upload
-      // records that covered it.
-      await done(tx);
-      return rows.length;
-    }
-
-    /* Forget that a file was ever seen, so a corrected version can be loaded. */
-    async forgetUpload(uploadId) {
-      const tx = this.db.transaction(['uploads', 'rowhashes'], 'readwrite');
-      const ups = tx.objectStore('uploads');
-      const rec = await rq(ups.get(uploadId));
-      if (rec) await rq(ups.delete(uploadId));
-      await done(tx);
-      return rec || null;
-    }
-
-    /* One row per date per report: how many rows are stored and when they last
-       changed. This is what makes a missing day visible. */
-    async dailyIndex(accountId, kind) {
-      const rows = await this.range(accountId, kind);
-      const by = {};
-      rows.forEach(r => {
-        if (!by[r.date]) by[r.date] = { date: r.date, rows: 0, updated: '' };
-        by[r.date].rows++;
-        const t = r.updated_at || r.created_at || '';
-        if (t > by[r.date].updated) by[r.date].updated = t;
+      if (!['shopee', 'ads'].includes(kind)) throw new Error('Jenis akun tidak dikenal');
+      return this.transaction('accounts', 'readwrite', async tx => {
+        const s = tx.objectStore('accounts');
+        const found = await rq(s.index('kind_name').get([kind, name]));
+        if (found) return found;
+        const rec = { ...(meta || {}), kind, name, created: new Date().toISOString() };
+        delete rec.id;
+        rec.id = await rq(s.add(rec));
+        return rec;
       });
-      return Object.values(by).sort((a, b) => b.date.localeCompare(a.date));
+    }
+    async renameAccount(id, name) {
+      name = String(name || '').trim();
+      if (!name) throw new Error('Nama akun kosong');
+      return this.transaction('accounts', 'readwrite', async tx => {
+        const s = tx.objectStore('accounts'), rec = await rq(s.get(id));
+        if (!rec) throw new Error('Akun tidak ditemukan');
+        rec.name = name;
+        await rq(s.put(rec));
+        return rec;
+      });
+    }
+    async deleteAccount(id) {
+      return this.transaction(['accounts', ...KINDS, 'uploads', 'rowhashes'], 'readwrite', async tx => {
+        tx.objectStore('accounts').delete(id);
+        for (const kind of KINDS) {
+          const s = tx.objectStore(kind);
+          (await rq(s.index('acct_date').getAllKeys(bounds(id)))).forEach(key => s.delete(key));
+          const hs = tx.objectStore('rowhashes');
+          (await rq(hs.index('acct_kind').getAllKeys([id, kind]))).forEach(key => hs.delete(key));
+        }
+        const ups = tx.objectStore('uploads');
+        (await rq(ups.index('acct').getAllKeys(id))).forEach(key => ups.delete(key));
+      });
+    }
+    async seenFile(accountId, fileHash, kind) {
+      return this.transaction('uploads', 'readonly', async tx => {
+        const s = tx.objectStore('uploads');
+        return (await rq(kind ? s.index('acct_kind_hash').get([accountId, kindOf(kind), fileHash])
+          : s.index('acct_hash').get([accountId, fileHash]))) || null;
+      });
+    }
+    async knownRowHashes(accountId, kind) {
+      kindOf(kind);
+      return this.transaction('rowhashes', 'readonly', async tx => new Set(
+        (await rq(tx.objectStore('rowhashes').index('acct_kind').getAll([accountId, kind]))).map(r => r.hash)));
+    }
+    async existingKeys(accountId, kind) {
+      const field = kindOf(kind) === 'ads' ? 'ad_unit' : 'tag';
+      return new Set((await this.range(accountId, kind)).map(r => `${r.date}|${r[field]}`));
     }
 
-    async coverage(accountId) {
-      const out = {};
-      for (const kind of ['affiliate', 'ads', 'clicks']) {
-        const rows = await this.range(accountId, kind);
-        const dates = [...new Set(rows.map(r => r.date))].sort();
-        out[kind] = {
-          rows: rows.length, days: dates.length,
-          start: dates[0] || null, end: dates[dates.length - 1] || null,
-        };
+    // New ingestion passes rawRows for transactional row dedup. They are used
+    // only in memory; the store retains daily figures, hashed order IDs and
+    // dated row fingerprints. The older aggregate API remains a replacement.
+    async saveDaily(accountId, kind, records, opts) {
+      kindOf(kind);
+      const o = opts || {}, A = agg(), field = kind === 'ads' ? 'ad_unit' : 'tag';
+      const indexName = kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag';
+      return this.transaction(['accounts', kind, 'rowhashes', 'uploads'], 'readwrite', async tx => {
+        if (!await rq(tx.objectStore('accounts').get(accountId))) throw new Error('Akun tidak ditemukan');
+        const uploads = tx.objectStore('uploads');
+        if (o.fileHash && await rq(uploads.index('acct_kind_hash').get([accountId, kind, o.fileHash]))) {
+          return { added: 0, updated: 0, duplicates: o.sourceRows || 0, skipped: true };
+        }
+        const hs = tx.objectStore('rowhashes');
+        const knownRows = await rq(hs.index('acct_kind').getAll([accountId, kind]));
+        const known = new Map(knownRows.map(r => [r.hash, r]));
+        let hashes = [], duplicates = o.duplicates || 0, period = o.period;
+        const incremental = Array.isArray(o.rawRows);
+        if (incremental) {
+          const valid = o.rawRows.filter(r => A.isDate(A.rowDate(r, kind)));
+          const dates = valid.map(r => A.rowDate(r, kind)).sort();
+          period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
+          const dedup = A.dedupe(valid, new Set(known.keys()));
+          duplicates = dedup.duplicates;
+          records = A.aggregate(kind, dedup.kept);
+          hashes = dedup.kept.map((r, i) => ({ hash: dedup.hashes[i], date: A.rowDate(r, kind) }));
+        } else {
+          hashes = [...new Set(o.rowHashes || [])].filter(h => !known.has(h)).map(hash => ({ hash,
+            date: records.length && records.every(r => r.date === records[0].date) ? records[0].date : null }));
+        }
+        const store = tx.objectStore(kind), idx = store.index(indexName);
+        let added = 0, updated = 0;
+        for (const r of records || []) {
+          if (!A.isDate(r.date) || typeof r[field] !== 'string' || !r[field]) throw new Error('Record harian tidak valid');
+          const found = await rq(idx.get([accountId, r.date, r[field]]));
+          if (incremental && found && found.merge_version !== 1) {
+            throw new Error(`Riwayat lama ${r.date} perlu dihapus lalu diunggah ulang sebelum digabung`);
+          }
+          const rec = incremental && found ? A.mergeDaily(kind, found, r) : { ...r };
+          delete rec.id;
+          rec.account_id = accountId;
+          if (incremental) rec.merge_version = 1;
+          if (found) {
+            await rq(store.put({ ...rec, id: found.id, created_at: found.created_at, updated_at: new Date().toISOString() }));
+            updated++;
+          } else {
+            await rq(store.add({ ...rec, created_at: new Date().toISOString() }));
+            added++;
+          }
+        }
+        // No caught ConstraintError: duplicate guards were checked in this
+        // same serialized transaction. Other failures must roll everything back.
+        await Promise.all(hashes.map(h => rq(hs.add({ ...h, account_id: accountId, kind }))));
+        if (o.fileHash) await rq(uploads.add({
+          account_id: accountId, kind, file_hash: o.fileHash, file_name: o.fileName || '',
+          rows: o.sourceRows || 0, added, updated, duplicates,
+          period_start: period ? period.start : null, period_end: period ? period.end : null,
+          uploaded_at: new Date().toISOString(),
+        }));
+        return { added, updated, duplicates };
+      });
+    }
+    async range(accountId, kind, start, end) {
+      kindOf(kind);
+      const A = agg();
+      if ((start && !A.isDate(start)) || (end && !A.isDate(end))) throw new Error('Tanggal tidak valid');
+      if (start && end && start > end) throw new Error('Tanggal mulai harus sebelum tanggal akhir');
+      return this.transaction(kind, 'readonly', tx => rq(tx.objectStore(kind).index('acct_date')
+        .getAll(IDBKeyRange.bound([accountId, start || '0000-00-00'], [accountId, end || '9999-99-99']))));
+    }
+    async deleteDay(accountId, kind, date) {
+      kindOf(kind);
+      if (!agg().isDate(date)) throw new Error('Tanggal tidak valid');
+      return this.transaction([kind, 'rowhashes', 'uploads'], 'readwrite', async tx => {
+        const s = tx.objectStore(kind), keys = await rq(s.index('acct_date').getAllKeys([accountId, date]));
+        keys.forEach(key => s.delete(key));
+        const hs = tx.objectStore('rowhashes');
+        const hashes = await rq(hs.index('acct_kind').getAll([accountId, kind]));
+        // Legacy fingerprints have no date. Clear these too; saveDaily refuses
+        // to append to legacy aggregates, so retained history cannot double count.
+        hashes.filter(h => h.date === date || !h.date).forEach(h => hs.delete(h.id));
+        const ups = tx.objectStore('uploads');
+        const uploads = await rq(ups.index('acct').getAll(accountId));
+        uploads.filter(u => u.kind === kind && (!u.period_start || !u.period_end ||
+          (u.period_start <= date && u.period_end >= date))).forEach(u => ups.delete(u.id));
+        return keys.length;
+      });
+    }
+    // Forgetting an upload only clears its file guard. Row dedup still protects
+    // existing daily totals; deleteDay is the supported correction workflow.
+    async forgetUpload(id) {
+      return this.transaction('uploads', 'readwrite', async tx => {
+        const s = tx.objectStore('uploads'), rec = await rq(s.get(id));
+        if (rec) s.delete(id);
+        return rec || null;
+      });
+    }
+    async dailyIndex(accountId, kind) {
+      const by = new Map();
+      for (const r of await this.range(accountId, kind)) {
+        const b = by.get(r.date) || { date: r.date, rows: 0, updated: '' };
+        b.rows++;
+        b.updated = [b.updated, r.updated_at || r.created_at || ''].sort().pop();
+        by.set(r.date, b);
       }
-      return out;
+      return [...by.values()].sort((a, b) => b.date.localeCompare(a.date));
     }
-
+    async coverage(accountId) {
+      const entries = await Promise.all(KINDS.map(async kind => {
+        const rows = await this.range(accountId, kind), dates = [...new Set(rows.map(r => r.date))].sort();
+        return [kind, { rows: rows.length, days: dates.length, start: dates[0] || null, end: dates[dates.length - 1] || null }];
+      }));
+      return Object.fromEntries(entries);
+    }
     async uploadHistory(accountId, limit) {
-      const tx = this.db.transaction('uploads', 'readonly');
-      const rows = await rq(tx.objectStore('uploads').index('acct').getAll(IDBKeyRange.only(accountId)));
-      rows.sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)));
-      return limit ? rows.slice(0, limit) : rows;
+      return this.transaction('uploads', 'readonly', async tx => {
+        const rows = await rq(tx.objectStore('uploads').index('acct').getAll(accountId));
+        rows.sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)) || b.id - a.id);
+        return limit > 0 ? rows.slice(0, limit) : rows;
+      });
     }
-
-    /* Export everything for one account, so history is never trapped in a
-       browser profile. */
     async exportAccount(accountId) {
-      const tx = this.db.transaction('accounts', 'readonly');
-      const acct = await rq(tx.objectStore('accounts').get(accountId));
-      return {
-        version: 1, exported_at: new Date().toISOString(), account: acct,
-        affiliate: await this.range(accountId, 'affiliate'),
-        ads: await this.range(accountId, 'ads'),
-        clicks: await this.range(accountId, 'clicks'),
-        uploads: await this.uploadHistory(accountId),
-      };
+      return this.transaction(['accounts', ...KINDS, 'uploads'], 'readonly', async tx => {
+        const [account, affiliate, ads, clicks, uploads] = await Promise.all([
+          rq(tx.objectStore('accounts').get(accountId)),
+          ...KINDS.map(kind => rq(tx.objectStore(kind).index('acct_date').getAll(bounds(accountId)))),
+          rq(tx.objectStore('uploads').index('acct').getAll(accountId)),
+        ]);
+        return { version: VERSION, exported_at: new Date().toISOString(), account, affiliate, ads, clicks, uploads };
+      });
     }
-
     async estimate() {
-      if (!navigator.storage || !navigator.storage.estimate) return null;
+      if (typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.estimate) return null;
       const e = await navigator.storage.estimate();
       return { usage: e.usage, quota: e.quota, pct: e.quota ? e.usage / e.quota * 100 : 0 };
     }
   }
-
   return { open: () => Store.open(), DB_NAME };
 })();
-
 if (typeof window !== 'undefined') window.DailyStore = DailyStore;
+if (typeof module !== 'undefined' && module.exports) module.exports = DailyStore;

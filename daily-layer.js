@@ -14,7 +14,8 @@
 (() => {
   const A = window.DailyAgg;
   const $ = id => document.getElementById(id);
-  let STORE = null, ACCT = null, AD_ACCT = null, PLAN = null;
+  let STORE = null, ACCT = null, PLAN = null;
+  let ACCOUNT_REV = 0, PLAN_REV = 0, STORED_REV = 0, SAVING = false;
   const DCHARTS = {};
 
   /* app.js declares these as top-level `function`, which does land on window.
@@ -24,7 +25,8 @@
   const rp = window.rp, nf = n => Math.round(n || 0).toLocaleString('id-ID');
   const rx = window.rx, esc = window.Engine.escapeHtml;
   const toast = window.toast;
-  let FILES_SNAP = [], OPTS_SNAP = {};
+  const run = fn => Promise.resolve().then(fn).catch(e => toast('Penyimpanan: ' + e.message));
+  let FILES_SNAP = [];
 
   /* ── Accounts ───────────────────────────────────────────────────────────── */
   /* The main dashboard already owns one account selector in the header, and a
@@ -37,13 +39,20 @@
   function shopeeName() { return (window.active && window.active()) || 'default'; }
 
   async function refreshAccounts() {
-    const name = shopeeName();
-    ACCT = await STORE.ensureAccount('shopee', name);
+    if (!STORE) return;
+    const revision = ++ACCOUNT_REV, name = shopeeName();
+    const account = await STORE.ensureAccount('shopee', name);
+    if (revision !== ACCOUNT_REV || name !== shopeeName()) return;
+    const changed = !ACCT || ACCT.id !== account.id;
+    ACCT = account;
+    if (changed) {
+      PLAN = null; ++PLAN_REV; ++STORED_REV;
+      $('dsStart').value = ''; $('dsEnd').value = '';
+      Object.values(DCHARTS).forEach(chart => chart.destroy());
+      Object.keys(DCHARTS).forEach(key => delete DCHARTS[key]);
+    }
     let adsName = '';
     try { adsName = localStorage.getItem(adsKey(name)) || ''; } catch (e) {}
-    AD_ACCT = adsName
-      ? await STORE.ensureAccount('ads', adsName, { shopee_id: ACCT.id })
-      : null;
     const f = $('adsAcctName'); if (f) f.value = adsName;
     const b = $('adsAcctNote');
     if (b) b.textContent = adsName ? `Spend dicap "${adsName}"` : 'Belum diberi nama — opsional';
@@ -52,7 +61,9 @@
 
   async function refreshCoverage() {
     if (!ACCT) { $('covStrip').innerHTML = '<span class="chip empty">Belum ada akun dipilih</span>'; return; }
-    const c = await STORE.coverage(ACCT.id);
+    const account = ACCT;
+    const c = await STORE.coverage(account.id);
+    if (ACCT !== account || account.name !== shopeeName()) return;
     const label = { affiliate: 'Affiliate', ads: 'Iklan', clicks: 'Klik' };
     $('covStrip').innerHTML = Object.keys(label).map(k => {
       const v = c[k];
@@ -64,38 +75,47 @@
 
   /* ── Ingest plan: computed after the dashboard has parsed the files ─────── */
   async function buildPlan() {
-    if (!ACCT || !FILES_SNAP.length) {
-      $('ingestPlan').classList.add('hidden');
-      return;
-    }
-    const plan = { acct: ACCT, items: [], total: { added: 0, updated: 0, dup: 0 } };
-    for (const f of FILES_SNAP) {
+    const revision = ++PLAN_REV, account = ACCT, files = FILES_SNAP.slice();
+    PLAN = null;
+    $('ingestPlan').classList.add('hidden');
+    if (!STORE || !account || account.name !== shopeeName() || !files.length) return;
+    const plan = { acct: account, items: [], total: { added: 0, updated: 0, dup: 0 } };
+    const cache = new Map(), batchFiles = new Map();
+    for (const f of files) {
       if (!['affiliate', 'ads', 'clicks'].includes(f.type)) continue;
       const rows = f.rowsData || [];
       if (!rows.length) continue;
-      const fileHash = A.hashRows(rows);
-      const seen = await STORE.seenFile(ACCT.id, fileHash);
-      const known = await STORE.knownRowHashes(ACCT.id, f.type);
-      const dedup = A.dedupe(rows, known);
-      const agg = f.type === 'affiliate' ? A.aggregateAffiliate(dedup.kept)
-        : f.type === 'ads' ? A.aggregateAds(dedup.kept)
-        : A.aggregateClicks(dedup.kept);
+      if (!cache.has(f.type)) {
+        const [known, existing] = await Promise.all([
+          STORE.knownRowHashes(account.id, f.type), STORE.existingKeys(account.id, f.type),
+        ]);
+        cache.set(f.type, { known, existing, dates: new Set([...existing].map(key => key.slice(0, 10))) });
+      }
+      const { known, existing, dates } = cache.get(f.type);
+      const fileHash = A.hashRows(rows), batchKey = f.type + '|' + fileHash;
+      const seen = batchFiles.get(batchKey) || await STORE.seenFile(account.id, fileHash, f.type);
+      const valid = rows.filter(r => A.isDate(A.rowDate(r, f.type)));
+      const dedup = A.dedupe(valid, known);
+      const records = A.aggregate(f.type, dedup.kept);
       const keyFields = f.type === 'ads' ? ['date', 'ad_unit'] : ['date', 'tag'];
-      const existing = await STORE.existingKeys(ACCT.id, f.type);
-      const ing = A.planIngest(agg, existing, keyFields);
+      const ing = A.planIngest(records, existing, keyFields);
       plan.items.push({
         file: f.name, kind: f.type, fileHash, seenBefore: seen,
-        sourceRows: rows.length, duplicates: dedup.duplicates,
-        rowHashes: dedup.hashes, records: agg,
-        added: ing.newCount, updated: ing.updateCount,
+        sourceRows: rows.length, duplicates: dedup.duplicates, invalid: rows.length - valid.length,
+        overlapsDate: records.some(record => dates.has(record.date)),
+        rawRows: rows, records, added: ing.newCount, updated: ing.updateCount,
         period: ing.period, days: ing.days,
       });
       if (!seen) {
+        records.forEach(r => existing.add(keyFields.map(key => r[key]).join('|')));
+        records.forEach(r => dates.add(r.date));
+        batchFiles.set(batchKey, { uploaded_at: new Date().toISOString() });
         plan.total.added += ing.newCount;
         plan.total.updated += ing.updateCount;
         plan.total.dup += dedup.duplicates;
       }
     }
+    if (revision !== PLAN_REV || ACCT !== account || account.name !== shopeeName()) return;
     PLAN = plan;
     renderPlan();
   }
@@ -122,6 +142,7 @@
               it.added ? `<span class="plan-pill new">${nf(it.added)} baru</span>` : '',
               it.updated ? `<span class="plan-pill upd">${nf(it.updated)} diperbarui</span>` : '',
               it.duplicates ? `<span class="plan-pill dup">${nf(it.duplicates)} baris duplikat dilewati</span>` : '',
+              it.invalid ? `<span class="plan-pill dup">${nf(it.invalid)} tanggal tidak valid dilewati</span>` : '',
               (!it.added && !it.updated) ? '<span class="plan-pill dup">tidak ada perubahan</span>' : '',
             ].join('');
         const per = it.period
@@ -130,12 +151,15 @@
           <div class="plan-nums">${pills}${per}</div></div>`;
       }).join('');
     }
+    if (PLAN.items.some(it => !it.seenBefore && it.overlapsDate)) {
+      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> penyimpanan hanya mengenali duplikat dengan isi baris yang sama. Jika status, komisi, atau angka laporan lama berubah, hapus tanggal terkait dari Riwayat Harian lalu unggah ulang laporan lengkap tanggal tersebut sebelum menyimpan. Menambahkan laporan revisi langsung dapat menghitung ulang transaksi lama.</p>');
+    }
 
     $('ingestPlan').querySelector('.ingest-head').classList.toggle('hidden', allSeen);
     const btn = $('btnSaveAll');
     // Stays clickable either way: a disabled button cannot dismiss the panel,
     // and "nothing to save" is a status, not an action.
-    btn.disabled = false;
+    btn.disabled = SAVING;
     btn.dataset.mode = writable ? 'save' : 'close';
     btn.textContent = writable
       ? `Simpan ${nf(PLAN.total.added)} baru · ${nf(PLAN.total.updated)} perbarui`
@@ -165,13 +189,16 @@
   }
 
   async function renderStored() {
-    if (!ACCT) return;
-    const aff = await STORE.range(ACCT.id, 'affiliate', $('dsStart').value || null, $('dsEnd').value || null);
-    const ads = await STORE.range(ACCT.id, 'ads', $('dsStart').value || null, $('dsEnd').value || null);
-    const clk = await STORE.range(ACCT.id, 'clicks', $('dsStart').value || null, $('dsEnd').value || null);
-
-    if (!aff.length) {
-      $('storedNote').textContent = 'Belum ada data tersimpan';
+    const revision = ++STORED_REV, account = ACCT;
+    if (!STORE || !account || account.name !== shopeeName()) return;
+    const start = $('dsStart').value || null, end = $('dsEnd').value || null;
+    if (start && end && start > end) { toast('Tanggal mulai harus sebelum tanggal akhir'); return; }
+    const [aff, ads, clk] = await Promise.all(['affiliate', 'ads', 'clicks'].map(kind => STORE.range(account.id, kind, start, end)));
+    if (revision !== STORED_REV || ACCT !== account || account.name !== shopeeName()) return;
+    if (!aff.length && !ads.length && !clk.length) {
+      Object.values(DCHARTS).forEach(chart => chart.destroy());
+      Object.keys(DCHARTS).forEach(key => delete DCHARTS[key]);
+      $('storedNote').textContent = start || end ? 'Tidak ada data pada rentang ini' : 'Belum ada data tersimpan';
       $('storedStrip').innerHTML = '';
       $('tblStored').querySelector('thead').innerHTML = '';
       $('tblStored').querySelector('tbody').innerHTML =
@@ -182,11 +209,13 @@
     const byDay = new Map();
     const touch = d => {
       if (!byDay.has(d)) byDay.set(d, { date: d, comm: 0, pending: 0, orders: 0, gmv: 0,
-        spend: 0, clicks: 0, impr: 0, shopeeClicks: 0 });
+        spend: 0, clicks: 0, impr: 0, shopeeClicks: 0, orderKeys: new Set() });
       return byDay.get(d);
     };
     aff.forEach(r => { const b = touch(r.date); b.comm += r.comm || 0; b.pending += r.comm_pending || 0;
-      b.orders += r.orders || 0; b.gmv += r.gmv || 0; });
+      if (Array.isArray(r.order_keys)) r.order_keys.forEach(key => b.orderKeys.add(key));
+      else b.orders += r.orders || 0;
+      b.gmv += r.gmv || 0; });
     ads.forEach(r => { const b = touch(r.date); b.spend += r.spend || 0; b.clicks += r.clicks || 0;
       b.impr += r.impressions || 0; });
     clk.forEach(r => { const b = touch(r.date); b.shopeeClicks += r.clicks || 0; });
@@ -194,9 +223,11 @@
     const days = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
     // Same two adjustments engine.js makes, or the tabs disagree: Meta reports
     // spend without VAT, and pending commission is discounted.
-    const ppn = 1 + (OPTS_SNAP.ppn != null ? OPTS_SNAP.ppn : 11) / 100;
-    const pf = OPTS_SNAP.pendingFactor != null ? OPTS_SNAP.pendingFactor : 0.95;
+    const options = window.Engine.normalizeOptions(window.opts ? window.opts() : {});
+    const ppn = 1 + options.ppn / 100;
+    const pf = options.pendingFactor;
     days.forEach(d => {
+      d.orders += d.orderKeys.size;
       d.spendPpn = d.spend * ppn;
       d.commEff = (d.comm - d.pending) + d.pending * pf;
       d.net = d.commEff - d.spendPpn;
@@ -208,7 +239,7 @@
     const sum = f => days.reduce((s, d) => s + (d[f] || 0), 0);
     const totComm = sum('commEff'), totSpend = sum('spendPpn');
     $('storedNote').textContent = `${days.length} hari · ${days[0].date} — ${days[days.length - 1].date}`;
-    if (!$('dsStart').value) { $('dsStart').value = days[0].date; $('dsEnd').value = days[days.length - 1].date; }
+    // Empty range inputs mean all history, including later uploads.
 
     const paidDays = days.filter(d => d.spendPpn > 0);
     $('storedStrip').innerHTML = [
@@ -251,7 +282,9 @@
 
   async function renderUploads() {
     if (!ACCT) return;
-    const ups = await STORE.uploadHistory(ACCT.id, 80);
+    const account = ACCT;
+    const ups = await STORE.uploadHistory(account.id, 80);
+    if (ACCT !== account || account.name !== shopeeName()) return;
     const cols = ['Waktu', 'File', 'Jenis', 'Baris Sumber', 'Baru', 'Diperbarui', 'Duplikat', 'Periode'];
     $('tblUploads').querySelector('thead').innerHTML = '<tr>' +
       cols.map((h, i) => `<th class="${i > 2 && i < 7 ? 'num' : ''}">${h}</th>`).join('') + '</tr>';
@@ -259,10 +292,10 @@
     $('tblUploads').querySelector('tbody').innerHTML = ups.length ? ups.map(u => `<tr>
       <td>${new Date(u.uploaded_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
       <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(u.file_name)}">${esc(u.file_name)}</td>
-      <td><span class="pill">${label[u.kind] || u.kind}</span></td>
+      <td><span class="pill">${esc(label[u.kind] || u.kind)}</span></td>
       <td class="num">${nf(u.rows)}</td><td class="num pos">${nf(u.added)}</td>
       <td class="num">${nf(u.updated)}</td><td class="num">${u.duplicates ? nf(u.duplicates) : '—'}</td>
-      <td>${u.period_start ? u.period_start + ' — ' + u.period_end : '—'}</td></tr>`).join('')
+      <td>${u.period_start ? esc(u.period_start) + ' — ' + esc(u.period_end) : '—'}</td></tr>`).join('')
       : '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:26px">Belum ada unggahan tersimpan.</td></tr>';
   }
 
@@ -273,8 +306,9 @@
   async function renderDayIndex(){
     const tb=$('tblDayIdx');
     if(!ACCT){tb.querySelector('tbody').innerHTML='';$('dayIdxNote').textContent='';return}
-    const idx={};
-    for(const [k] of KIND) idx[k]=await STORE.dailyIndex(ACCT.id,k);
+    const account=ACCT, idx={};
+    await Promise.all(KIND.map(async ([k])=>{idx[k]=await STORE.dailyIndex(account.id,k)}));
+    if(ACCT!==account || account.name!==shopeeName())return;
     const map={};
     KIND.forEach(([k])=>{map[k]={};idx[k].forEach(r=>map[k][r.date]=r)});
     const all=new Set(); KIND.forEach(([k])=>idx[k].forEach(r=>all.add(r.date)));
@@ -311,7 +345,8 @@
       const label=KIND.find(x=>x[0]===k)[1];
       if(!confirm(`Hapus data ${label} tanggal ${d}?\n\nAngka di dashboard tidak berubah — yang dihapus hanya yang tersimpan. Unggah ulang filenya untuk mengembalikan.`))return;
       try{
-        const n=await STORE.deleteDay(ACCT.id,k,d);
+        const n=await STORE.deleteDay(account.id,k,d);
+        if(ACCT!==account)return;
         await refreshCoverage(); await renderDayIndex(); await renderStored(); await buildPlan();
         toast(`${nf(n)} baris ${label} ${d} dihapus`);
       }catch(e){toast('Gagal menghapus: '+e.message)}
@@ -321,15 +356,14 @@
   /* ── Wire into the dashboard ────────────────────────────────────────────── */
   // app.js calls this once it has parsed and analysed the CSVs — the right
   // moment to compute the ingest plan, because rowsData is available then.
-  window.onDashboardData = ({ files, result }) => {
+  window.onDashboardData = ({ files }) => {
     FILES_SNAP = files || [];
-    OPTS_SNAP = (result && result.options) || {};
-    buildPlan();
+    run(async () => { await buildPlan(); await renderStored(); });
   };
   const origReset = window.reset;
   window.reset = function () {
     origReset.apply(this, arguments);
-    PLAN = null; FILES_SNAP = [];
+    PLAN = null; FILES_SNAP = []; ++PLAN_REV; ++STORED_REV;
     $('ingestPlan').classList.add('hidden');
     $('savedNote').classList.add('hidden');
   };
@@ -337,8 +371,8 @@
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
     // Charts need a real layout box, so render once the panel is visible.
     requestAnimationFrame(() => {
-      if (t.dataset.tab === 'tersimpan') renderStored();
-      else if (t.dataset.tab === 'unggahan') renderUploads();
+      if (t.dataset.tab === 'tersimpan') run(renderStored);
+      else if (t.dataset.tab === 'unggahan') run(renderUploads);
     });
   }));
 
@@ -350,66 +384,77 @@
   $('btnSaveAll').onclick = async () => {
     const btn = $('btnSaveAll');
     if (btn.dataset.mode === 'close') { $('ingestPlan').classList.add('hidden'); return; }
-    if (!PLAN || !ACCT) return;
+    if (SAVING || !PLAN || !ACCT || PLAN.acct !== ACCT || PLAN.acct.name !== shopeeName()) return;
+    const plan = PLAN, account = plan.acct;
+    SAVING = true;
     btn.disabled = true; btn.textContent = 'Menyimpan...';
     let added = 0, updated = 0, skipped = 0;
     try {
-      for (const it of PLAN.items) {
+      for (const it of plan.items) {
         if (it.seenBefore) { skipped++; continue; }
-        const res = await STORE.saveDaily(ACCT.id, it.kind, it.records, {
-          rowHashes: it.rowHashes, fileHash: it.fileHash, fileName: it.file,
+        const res = await STORE.saveDaily(account.id, it.kind, it.records, {
+          rawRows: it.rawRows, fileHash: it.fileHash, fileName: it.file,
           sourceRows: it.sourceRows, duplicates: it.duplicates, period: it.period,
         });
         added += res.added; updated += res.updated;
+        if (res.skipped) skipped++;
       }
+      if (ACCT !== account || account.name !== shopeeName()) return;
+      await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
       $('ingestPlan').classList.add('hidden');
-      $('savedNote').innerHTML = `<b>Tersimpan ke ${esc(ACCT.name)}</b> — ${nf(added)} baris baru, ${nf(updated)} diperbarui`
+      $('savedNote').innerHTML = `<b>Tersimpan ke ${esc(account.name)}</b> — ${nf(added)} baris baru, ${nf(updated)} diperbarui`
         + (skipped ? `, ${skipped} file dilewati karena sudah pernah diunggah` : '')
         + `. Buka tab <b>Data Tersimpan</b> untuk melihat trennya.`;
       $('savedNote').classList.remove('hidden');
-      await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
       toast('Tersimpan: ' + nf(added) + ' baris baru');
     } catch (e) {
       toast('Gagal menyimpan: ' + e.message);
-      btn.disabled = false; renderPlan();
+      if (ACCT === account && account.name === shopeeName()) await run(buildPlan);
+    } finally {
+      SAVING = false;
+      btn.disabled = false;
     }
   };
 
-  $('btnRange').onclick = () => renderStored();
+  $('btnRange').onclick = () => run(renderStored);
+  ['ppn', 'pendingFactor'].forEach(id => $(id).addEventListener('change', () => run(renderStored)));
 
   // app.js assigns .onchange directly; addEventListener stacks after it, so its
   // reset() runs first and this re-syncs against the account it switched to.
-  $('account').addEventListener('change', async () => {
+  $('account').addEventListener('change', () => run(async () => {
     await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads(); await renderDayIndex();
-  });
+  }));
   $('btnNewAcct').addEventListener('click', () => {
-    setTimeout(async () => {
+    setTimeout(() => run(async () => {
       await refreshAccounts(); await buildPlan(); await renderStored(); await renderUploads(); await renderDayIndex();
-    }, 0);
+    }), 0);
   });
   const adsField = $('adsAcctName');
-  if (adsField) adsField.addEventListener('change', async () => {
+  if (adsField) adsField.addEventListener('change', () => run(async () => {
     const v = adsField.value.trim();
     try { v ? localStorage.setItem(adsKey(shopeeName()), v) : localStorage.removeItem(adsKey(shopeeName())); } catch (e) {}
     await refreshAccounts();
     toast(v ? 'Akun iklan: ' + v : 'Nama akun iklan dikosongkan');
-  });
-  $('btnExportAcct').onclick = async () => {
+  }));
+  $('btnExportAcct').onclick = () => run(async () => {
     if (!ACCT) return toast('Pilih akun dulu');
-    const data = await STORE.exportAccount(ACCT.id);
+    const account = ACCT;
+    const data = await STORE.exportAccount(account.id);
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob), a = document.createElement('a');
     a.href = url;
-    a.download = `harian-${ACCT.name.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click(); URL.revokeObjectURL(url);
+    a.download = `harian-${account.name.replace(/[^\p{L}\p{N}_-]+/gu, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('Riwayat akun diekspor');
-  };
+  });
 
   (async () => {
     try {
       STORE = await DailyStore.open();
       window.__dailyStore = STORE;
       await refreshAccounts();
+      await buildPlan();
+      await renderStored();
       await renderUploads();
       await renderDayIndex();
     } catch (e) {

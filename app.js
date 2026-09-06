@@ -1,25 +1,36 @@
 'use strict';
 const E=window.Engine,$=id=>document.getElementById(id);
 let DATA={affiliate:[],ads:[],clicks:[]},FILES=[],RESULT=null,CHARTS={},SORT={key:'spend',dir:-1},FILTER=null,STAB=null;
+let IMPORT_EPOCH=0, IMPORT_QUEUE=Promise.resolve(), PENDING_IMPORTS=0;
+let ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};
 const LS={accounts:'adash_accounts_v3',active:'adash_active_v3',map:'adash_map_v3',snaps:'adash_snaps_v3',opts:'adash_opts_v3',theme:'adash_theme_v3'};
 const DEFAULT_MAP={'telesinvideo2':'TelesinGripvideo2','telesinvideo1':'TelesinGripvideo2','telesinvideo3':'TelesinGripvideo3','telesingrip':'TelesinGripvideo2','lemariolymp':'OlymplastLemari','lemariolympic':'OlymplastLemari','minilayarportable':'minilayarportable','helmrsixsolid':'HelmRsixSolid','spinningreelokuma':'Spinningreelokuma','seeouokacamatapolarized':'seeouokacamatapolarized'};
 const esc=E.escapeHtml;
 function rp(n){if(n==null||!isFinite(n))return'Rp0';let a=Math.abs(n),s=n<0?'-':'';if(a>=1e9)return s+'Rp'+(a/1e9).toFixed(2)+' M';if(a>=1e6)return s+'Rp'+(a/1e6).toFixed(1)+' jt';if(a>=1e3)return s+'Rp'+Math.round(a/1e3)+'rb';return s+'Rp'+Math.round(a)}
 function full(n){return'Rp'+Math.round(n||0).toLocaleString('id-ID')} function nf(n){return Math.round(n||0).toLocaleString('id-ID')}
-function rx(n){return n===Infinity?'∞':isFinite(n)?n.toFixed(2)+'x':'—'} function toast(s){let e=$('toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2400)}
-function accounts(){try{return JSON.parse(localStorage.getItem(LS.accounts))||['default']}catch(e){return['default']}}
-function active(){return localStorage.getItem(LS.active)||accounts()[0]||'default'}
+function rx(n){return n===Infinity?'∞':Number.isFinite(n)?n.toFixed(2)+'x':'—'} function toast(s){let e=$('toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2400)}
+function readStorage(key){try{return localStorage.getItem(key)}catch(e){return null}}
+function accounts(){try{const a=JSON.parse(readStorage(LS.accounts));return Array.isArray(a)&&a.length&&a.every(x=>typeof x==='string'&&x.trim())?[...new Set(a)]:['default']}catch(e){return['default']}}
+function active(){const a=accounts(),saved=readStorage(LS.active);return a.includes(saved)?saved:a[0]}
 function setActive(a){localStorage.setItem(LS.active,a)}
-function map(){try{return JSON.parse(localStorage.getItem(LS.map+'_'+active()))||DEFAULT_MAP}catch(e){return DEFAULT_MAP}}
+function map(){try{const m=JSON.parse(readStorage(LS.map+'_'+active()));return m&&typeof m==='object'&&!Array.isArray(m)?Object.fromEntries(Object.entries(m).filter(([k,v])=>k&&typeof v==='string')):{...DEFAULT_MAP}}catch(e){return{...DEFAULT_MAP}}}
 function saveMap(m){localStorage.setItem(LS.map+'_'+active(),JSON.stringify(m))}
-function snaps(){try{return JSON.parse(localStorage.getItem(LS.snaps+'_'+active()))||[]}catch(e){return[]}}
+const SNAP_STATUSES=new Set(['scale','pantau','stop','organik','evaluasi']);
+function validSnapshot(x){
+  if(!x||typeof x!=='object'||!Number.isSafeInteger(x.id)||x.id<0||typeof x.saved!=='string'||!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/.test(x.saved)||!Number.isFinite(Date.parse(x.saved.replace(' ','T'))))return false;
+  if(!x.range||!E.isDate(x.range.start)||!E.isDate(x.range.end)||x.range.start>x.range.end)return false;
+  if(!x.kpi||!['spend','commEff','netEff'].every(k=>Number.isFinite(x.kpi[k])))return false;
+  if(!Object.entries(x.kpi).every(([k,v])=>k==='counts'?v&&typeof v==='object'&&!Array.isArray(v)&&Object.entries(v).every(([status,n])=>SNAP_STATUSES.has(status)&&Number.isSafeInteger(n)&&n>=0):v===null||Number.isFinite(v)))return false;
+  return Array.isArray(x.tags)&&x.tags.length<=20000&&x.tags.every(t=>t&&typeof t.tag==='string'&&typeof t.label==='string'&&typeof t.reason==='string'&&SNAP_STATUSES.has(t.status)&&Object.entries(t).every(([k,v])=>['tag','label','reason','status'].includes(k)||v===null||Number.isFinite(v)));
+}
+function snaps(){try{const a=JSON.parse(readStorage(LS.snaps+'_'+active()));return Array.isArray(a)?a.filter(validSnapshot).filter(s=>!s.account||s.account===active()).slice(0,120):[]}catch(e){return[]}}
 function saveSnaps(a){localStorage.setItem(LS.snaps+'_'+active(),JSON.stringify(a.slice(0,120)))}
 function renderAccounts(){let a=accounts(),s=$('account');s.innerHTML=a.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');s.value=active()}
-function applyTheme(t){document.documentElement.setAttribute('data-theme',t);$('btnTheme').textContent=t==='dark'?'Mode Terang':'Mode Gelap';localStorage.setItem(LS.theme,t);if(RESULT)render()}
-applyTheme(localStorage.getItem(LS.theme)||'light');renderAccounts();
+function applyTheme(t){t=t==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);$('btnTheme').textContent=t==='dark'?'Mode Terang':'Mode Gelap';try{localStorage.setItem(LS.theme,t)}catch(e){}if(RESULT)render()}
+applyTheme(readStorage(LS.theme)||'light');renderAccounts();
 $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
-$('account').onchange=()=>{setActive($('account').value);reset();renderAccounts();loadOpts();renderHistory()};
-$('btnNewAcct').onclick=()=>{let n=prompt('Nama akun baru');if(!n)return;n=n.trim();if(!n)return;let a=accounts();if(!a.includes(n))a.push(n);localStorage.setItem(LS.accounts,JSON.stringify(a));setActive(n);reset();renderAccounts();toast('Akun dibuat: '+n)};
+$('account').onchange=()=>{try{setActive($('account').value);reset();loadOpts();renderHistory()}catch(e){toast('Penyimpanan akun tidak tersedia')}renderAccounts()};
+$('btnNewAcct').onclick=()=>{let n=prompt('Nama akun baru');if(!n||!n.trim())return;n=n.trim();try{let a=accounts();if(!a.includes(n))a.push(n);localStorage.setItem(LS.accounts,JSON.stringify(a));setActive(n);reset();renderAccounts();loadOpts();renderHistory();toast('Akun dipilih: '+n)}catch(e){toast('Penyimpanan akun tidak tersedia')}};
 // The whole card is the drop target; the three boxes are for reading and
 // deleting, not for routing. File type comes from the header row either way,
 // so a file dropped on the wrong box still lands in the right place.
@@ -35,20 +46,59 @@ drop.addEventListener('drop',e=>files(e.dataTransfer.files));
 $('files').onchange=e=>files(e.target.files);
 document.querySelectorAll('[data-zpick]').forEach(b=>b.onclick=e=>{e.stopPropagation();$('files').click()});
 document.querySelectorAll('[data-zdel]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmZone(b.dataset.zdel)});
-function files(list){let ar=[...list||[]],pending=ar.length;if(!pending)return;ar.forEach(file=>{if(FILES.some(x=>x.name===file.name&&x.size===file.size)){toast('File sudah dimuat, dilewati');if(!--pending)finish();return}Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>{let rows=r.data||[],type=rows.length?E.detectFileType(Object.keys(rows[0])):'unknown';
-  // Keep the parsed rows on the entry so removing one file can rebuild the
-  // dataset from the survivors instead of forcing a full re-upload.
-  FILES.push({name:file.name,size:file.size,type,rows:rows.length,rowsData:rows});
-  if(type==='affiliate')DATA.affiliate=DATA.affiliate.concat(rows);else if(type==='ads')DATA.ads=DATA.ads.concat(rows);else if(type==='clicks')DATA.clicks=DATA.clicks.concat(rows);else toast('Format tidak dikenali: '+file.name);if(!--pending)finish()},error:()=>{toast('Gagal membaca '+file.name);if(!--pending)finish()}})})}
+function parseFile(file){return new Promise((resolve,reject)=>{
+  Papa.parse(file,{header:true,skipEmptyLines:'greedy',transformHeader:h=>h.replace(/^\uFEFF/,'').trim(),complete:resolve,error:reject});
+})}
+function rowKey(row){return JSON.stringify(Object.keys(row).sort().map(k=>[k,row[k]]))}
+function rebuildData(){
+  DATA={affiliate:[],ads:[],clicks:[]};
+  ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};
+  FILES.forEach(f=>appendRows(f));
+}
+function appendRows(f,keys){f.duplicates=0;(f.rowsData||[]).forEach((row,i)=>{const key=keys?keys[i]:rowKey(row);if(ROW_KEYS[f.type].has(key)){f.duplicates++;return}ROW_KEYS[f.type].add(key);DATA[f.type].push(row)})}
+function notifyData(){if(typeof window.onDashboardData==='function')window.onDashboardData({files:FILES.slice(),result:RESULT,data:DATA})}
+function files(list){
+  const ar=[...list||[]];if(!ar.length)return;
+  const epoch=IMPORT_EPOCH,account=active();PENDING_IMPORTS++;
+  IMPORT_QUEUE=IMPORT_QUEUE.catch(()=>{}).then(async()=>{
+    if(epoch!==IMPORT_EPOCH||account!==active())return;
+    let added=0;
+    for(const file of ar){
+      try{
+        const r=await parseFile(file);
+        if(epoch!==IMPORT_EPOCH||account!==active())return;
+        if(r.errors&&r.errors.length)throw new Error('CSV rusak: '+r.errors[0].message);
+        const rows=r.data||[],type=E.detectFileType(r.meta&&r.meta.fields||Object.keys(rows[0]||{}));
+        if(!rows.length||!Object.hasOwn(DATA,type))throw new Error('Format tidak dikenali atau file kosong');
+        const keys=rows.map(rowKey);
+        if(keys.every(key=>ROW_KEYS[type].has(key))){toast('File sudah dimuat, dilewati');continue}
+        const entry={name:file.name,size:file.size,type,rows:rows.length,rowsData:rows};
+        FILES.push(entry);appendRows(entry,keys);added++;
+      }catch(err){if(epoch===IMPORT_EPOCH)toast('Gagal membaca '+file.name+': '+err.message)}
+    }
+    if(epoch===IMPORT_EPOCH&&account===active()&&added)finish();
+  }).finally(()=>{if(epoch===IMPORT_EPOCH){PENDING_IMPORTS--;if(!PENDING_IMPORTS)$('files').value=''}});
+  return IMPORT_QUEUE;
+}
+function updateDates(){
+  let min='',max='';
+  for(const [kind,col] of [['affiliate','Waktu Pemesanan'],['ads','Reporting starts'],['clicks','Waktu Klik']]){
+    for(const row of DATA[kind]){const d=E.dayOnly(row[col]);if(E.isDate(d)){if(!min||d<min)min=d;if(!max||d>max)max=d}}
+  }
+  DATES.min=min;DATES.max=max;
+  $('dateStart').value=min;$('dateEnd').value=max;
+}
+function clearResult(){
+  RESULT=null;STAB=null;FILTER=null;
+  updateAnalysisAvailability();
+  $('main').classList.add('hidden');$('emptyState').classList.remove('hidden');$('gapCard').classList.add('hidden');
+  Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={};
+}
 function finish(){
-  // Safe now: every parse has completed. Clearing lets the same file be picked
-  // again later and fire another change event.
-  $('files').value='';
-  renderChips();if(!DATA.affiliate.length)return toast('Laporan affiliate belum dimuat');let ds=[];DATA.affiliate.forEach(r=>{let d=E.dayOnly(r['Waktu Pemesanan']);if(E.isDate(d))ds.push(d)});DATA.ads.forEach(r=>{let d=E.dayOnly(r['Reporting starts']);if(E.isDate(d))ds.push(d)});ds.sort();if(ds.length){DATES.min=ds[0];DATES.max=ds[ds.length-1];$('dateStart').value=ds[0];$('dateEnd').value=ds[ds.length-1]}$('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();toast('Data dimuat untuk '+active());
-  // Optional add-on layers (e.g. the daily edition) subscribe here. FILES and
-  // RESULT are `let`-scoped and not reachable from another script, so hand
-  // them over explicitly rather than leaking more globals.
-  if(typeof window.onDashboardData==='function')window.onDashboardData({files:FILES,result:RESULT,data:DATA});}
+  renderChips();updateDates();
+  if(!DATA.affiliate.length){clearResult();notifyData();return toast('Laporan affiliate belum dimuat')}
+  $('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();notifyData();toast('Data dimuat untuk '+active());
+}
 const ZONE_EMPTY={affiliate:'Belum ada file',ads:'Belum ada file',clicks:'Belum ada file'};
 // One box per report instead of one pile. Deleting a whole report used to mean
 // hunting its files inside a single list of chips.
@@ -57,7 +107,7 @@ function renderChips(){
     const box=document.querySelector(`[data-zchips="${z}"]`);
     const mine=FILES.map((f,i)=>({f,i})).filter(x=>x.f.type===z);
     box.innerHTML=mine.length?mine.map(({f,i})=>`<span class="chip ${f.type}"><span class="file-row">
-      <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows)} baris</span>
+      <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span>· ${nf(f.rows-f.duplicates)} baris${f.duplicates?' · '+nf(f.duplicates)+' duplikat dilewati':''}</span>
       <button class="rmfile" data-rm="${i}" title="Hapus file ini" aria-label="Hapus ${esc(f.name)}">×</button></span></span>`).join('')
       :`<span class="zone-empty">${ZONE_EMPTY[z]}</span>`;
     document.querySelector(`[data-zone="${z}"]`).classList.toggle('filled',mine.length>0);
@@ -68,31 +118,26 @@ function renderChips(){
   // forces clearing everything and re-uploading all three reports.
   $('zones').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});
   $('uploadCard').classList.toggle('compact',FILES.length>0);}
+function invalidateImports(){IMPORT_EPOCH++;PENDING_IMPORTS=0;IMPORT_QUEUE=Promise.resolve();$('files').value=''}
 function rmZone(z){
-  const n=FILES.filter(f=>f.type===z).length; if(!n)return;
+  const n=FILES.filter(f=>f.type===z).length;if(!n)return;
   if(!confirm(`Hapus ${n} file ${z}? Snapshot tersimpan tidak terhapus.`))return;
-  const keep=FILES.filter(f=>f.type!==z);
-  DATA={affiliate:[],ads:[],clicks:[]};FILES=[];
-  keep.forEach(k=>{FILES.push(k);if(k.rowsData&&DATA[k.type])DATA[k.type]=DATA[k.type].concat(k.rowsData)});
-  renderChips();
-  if(DATA.affiliate.length){recalc();toast(n+' file dihapus')}
-  else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast(n+' file dihapus')}
+  invalidateImports();FILES=FILES.filter(f=>f.type!==z);rebuildData();finish();toast(n+' file dihapus');
 }
 function rmFile(i){
-  const f=FILES[i]; if(!f)return;
-  FILES.splice(i,1);
-  const keep=FILES.slice();
-  DATA={affiliate:[],ads:[],clicks:[]};FILES=[];
-  keep.forEach(k=>{FILES.push(k);if(k.rowsData){if(k.type==='affiliate')DATA.affiliate=DATA.affiliate.concat(k.rowsData);else if(k.type==='ads')DATA.ads=DATA.ads.concat(k.rowsData);else if(k.type==='clicks')DATA.clicks=DATA.clicks.concat(k.rowsData)}});
-  renderChips();
-  if(DATA.affiliate.length){recalc();toast('File dihapus: '+f.name)}
-  else{$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');toast('File dihapus')}
+  const f=FILES[i];if(!f)return;
+  invalidateImports();FILES.splice(i,1);rebuildData();finish();toast('File dihapus: '+f.name);
 }
-function reset(){DATA={affiliate:[],ads:[],clicks:[]};FILES=[];RESULT=null;FILTER=null;STAB=null;$('files').value='';renderChips();$('uploadStatus').textContent='';$('main').classList.add('hidden');$('emptyState').classList.remove('hidden');$('gapCard').classList.add('hidden');Object.values(CHARTS).forEach(c=>{try{c.destroy()}catch(e){}});CHARTS={}}
+function reset(){
+  invalidateImports();DATA={affiliate:[],ads:[],clicks:[]};ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};FILES=[];clearResult();
+  DATES.min='';DATES.max='';$('dateStart').value='';$('dateEnd').value='';renderChips();$('uploadStatus').textContent='';notifyData();
+}
 // Clearing is destructive and used to fire on a single click.
 $('btnReset').onclick=()=>{if(!FILES.length)return reset();if(confirm(`Kosongkan ${FILES.length} file yang dimuat? Snapshot tersimpan tidak terhapus.`)){reset();toast('Data dikosongkan')}};
-const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
-function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=parseFloat($(k).value)||0);return o}
+const O=['ppn','targetROI','thScale','thPantau','minSpend','minDays','lagDays','streakDays','pendingFactor'];
+const UI_DEFAULTS=Object.fromEntries(O.map(k=>[k,Number($(k).value)]));
+O.concat(['dateStart','dateEnd']).forEach(id=>$(id).addEventListener('change',recalc));
+function opts(){let o={dateStart:$('dateStart').value,dateEnd:$('dateEnd').value};O.forEach(k=>o[k]=$(k).value===''?UI_DEFAULTS[k]:Number($(k).value));return E.normalizeOptions(o)}
 // Presets count back from the last day that has data, not from the real
 // calendar today. Uploading on Monday should still show Sunday as "kemarin".
 const DATES={min:'',max:''};
@@ -114,8 +159,7 @@ function renderPeriod(){
     const r=presetRange(+b.dataset.days);
     // A preset that would resolve to the same window as "Semua" is not a
     // separate choice — hide it rather than offer two buttons doing one thing.
-    const dup=+b.dataset.days>0&&r&&r[0]===DATES.min&&DATES.min!==DATES.max&&
-      shiftDay(DATES.max,-(+b.dataset.days-1))<DATES.min;
+    const dup=+b.dataset.days>0&&r&&r[0]===DATES.min;
     b.classList.toggle('hidden',!!dup);
     b.classList.toggle('active',!!r&&r[0]===s&&r[1]===e);
   });
@@ -124,7 +168,7 @@ function renderPeriod(){
 }
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>$('setModal').classList.add('show');
-function recalc(){if(!DATA.affiliate.length)return;RESULT=E.analyze({...DATA,tagMap:map()},opts());render()}
+function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map()},o);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
 function render(){if(!RESULT)return;let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
@@ -149,7 +193,7 @@ function renderCalibration(){
   // Lag is the single most decision-changing setting, so show whether the
   // current value actually matches this account's observed behaviour.
   let unstable=0;
-  try{const S=E.stability({...DATA,tagMap:map()},RESULT.options,[0,3,5,7]);unstable=S.unstable;STAB=S}catch(e){STAB=null}
+  try{if(!STAB)STAB=E.stability({...DATA,tagMap:map()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
   const warn=!L.matches||unstable>0;
   el.className='calibration'+(warn?' warn':'');
   const parts=[];
@@ -159,15 +203,15 @@ function renderCalibration(){
   if(unstable>0)parts.push(`<b>${unstable} vonis berubah</b> bila lag digeser — ditandai di kolom Tag.`);
   el.innerHTML=parts.join(' ');
   const b=$('btnApplyLag');
-  if(b)b.onclick=()=>{$('lagDays').value=L.suggested;recalc();toast('Lag disetel ke '+L.suggested+' hari')};
+  if(b)b.onclick=()=>{$('lagDays').value=L.suggested;recalc();saveOpts();toast('Lag disetel ke '+L.suggested+' hari')};
 }
 function renderOpportunity(){
   const A=RESULT.actions,C=A.concentration;
-  $('tblOrganic').querySelector('thead').innerHTML='<tr>'+['Tag','Komisi','Order','Komisi/Order','Maks CPC','Kanal Utama'].map((h,i)=>`<th class="${i&&i<5?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblOrganic').querySelector('thead').innerHTML='<tr>'+['Tag','Komisi','Order','Komisi/Order','Maks Biaya/Order','Kanal Utama'].map((h,i)=>`<th class="${i&&i<5?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblOrganic').querySelector('tbody').innerHTML=A.organicCandidates.length
     ? A.organicCandidates.map(c=>`<tr><td><b>${esc(c.tag)}</b></td>
       <td class="num">${rp(c.comm)}</td><td class="num">${nf(c.orders)}</td>
-      <td class="num">${rp(c.avgComm)}</td><td class="num col-ideal"><b>${rp(c.maxCpc)}</b></td>
+      <td class="num">${rp(c.avgComm)}</td><td class="num col-ideal"><b>${rp(c.maxCpa)}</b></td>
       <td>${esc(c.topPlatform||'—')}</td></tr>`).join('')
     : `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:22px">Belum ada tag organik dengan komisi.</td></tr>`;
   if(!C){$('concentration').innerHTML='<p class="hint">Belum ada tag berbayar.</p>';return}
@@ -211,7 +255,8 @@ function renderGaps(){
     have[k].forEach(d=>{if(!min||d<min)min=d;if(!max||d>max)max=d});
   });
   if(!min){card.classList.add('hidden');return}
-  const all=[];
+  const all=[],span=E.diffDays(min,max)+1;
+  if(span>3660){card.classList.remove('hidden');$('gapNote').textContent=min+' — '+max;$('gapBody').textContent='Rentang laporan melebihi 10 tahun. Periksa tanggal sumber; rincian tanggal kosong tidak ditampilkan.';return}
   for(let d=min;d<=max;d=shiftDay(d,1))all.push(d);
   const rows=[],adsDays=have.ads;
   let clickGapWithSpend=0;
@@ -433,7 +478,13 @@ function renderClickKpi(){
   el.innerHTML=out.join('');
   bindDrill('clickKpis');
 }
-function renderSynth(){let k=RESULT.kpi,g=RESULT.tags.filter(t=>t.spend>0),s=g.reduce((a,t)=>a+t.spend,0),c=g.reduce((a,t)=>a+t.commEff,0),ro=s?c/s:0,st=RESULT.kpi.counts.stop||0;$('synth').innerHTML=s?`Laba ${rp(k.netEff)} ditopang komisi organik <b>${rp(k.organicComm)}</b>. Iklan berbayar sendiri hanya ROAS <b>${rx(ro)}</b> — ${st?'ada '+st+' tag yang sebaiknya dihentikan.':'belum ada yang perlu dihentikan.'}`:''}
+function renderSynth(){
+  const k=RESULT.kpi,st=k.counts.stop||0;
+  $('synth').innerHTML=k.spend?`Periode ini menghasilkan ${k.netEff>=0?'laba':'rugi'} <b>${rp(Math.abs(k.netEff))}</b>. `
+    +(k.organicComm>0?`Komisi organik efektif <b>${rp(k.organicComm)}</b>. `:'')
+    +`ROAS iklan berbayar <b>${rx(k.paidRoas)}</b>. `
+    +(st?`${st} tag berstatus STOP berdasarkan data matang.`:'Belum ada tag berstatus STOP.'):'';
+}
 function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()})}
 
 /* Rows in Semua Tag and Per Ad Unit open into their own day-by-day history.
@@ -482,7 +533,7 @@ function bindBreakdown(tableId,lookup,cols){
   });
 }
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
-function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=RESULT.tags.filter(t=>!FILTER||t.status===FILTER).slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(y-x)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
+function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=RESULT.tags.filter(t=>!FILTER||t.status===FILTER).slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
@@ -672,7 +723,7 @@ function renderTrend(){
     return ` <span class="dlt ${good?'up':'down'}">${v>0?'▲':'▼'} ${fmt(Math.abs(v))}</span>`};
   const pct=v=>n(v).toFixed(2);
   $('trendRange').textContent=tr.series.length+' snapshot · '+tr.series[0].period+' — '+last.period;
-  $('trendBase').innerHTML=prev?`Perubahan dibanding periode <b>${prev.period}</b>.`:'';
+  $('trendBase').innerHTML=prev?`Perubahan dibanding periode <b>${esc(prev.period)}</b>.`:'';
   $('trendStrip').innerHTML=[
     ['Laba',rp(n(last.netEff))+dl(d.netEff,rp)],
     ['ROAS Berbayar',rx(n(last.paidRoas))+dl(d.paidRoas,pct)],
@@ -687,8 +738,8 @@ function renderTrend(){
   $('tblMovers').querySelector('tbody').innerHTML=mv.length?mv.map(m=>`<tr>
     <td><b>${esc(m.tag)}</b></td><td class="num">${rx(n(m.from))}</td><td class="num">${rx(n(m.to))}</td>
     <td class="num ${n(m.delta)>=0?'pos':'neg'}">${n(m.delta)>=0?'+':''}${n(m.delta).toFixed(2)}</td>
-    <td><span class="badge ${m.fromStatus||'evaluasi'}">${esc(m.fromStatus||'—')}</span></td>
-    <td><span class="badge ${m.toStatus||'evaluasi'}">${esc(m.toStatus||'—')}</span>${m.changed?' <span class="pill">berubah</span>':''}</td></tr>`).join('')
+    <td><span class="badge ${esc(m.fromStatus||'evaluasi')}">${esc(m.fromStatus||'—')}</span></td>
+    <td><span class="badge ${esc(m.toStatus||'evaluasi')}">${esc(m.toStatus||'—')}</span>${m.changed?' <span class="pill">berubah</span>':''}</td></tr>`).join('')
     :`<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Belum ada tag yang muncul di dua snapshot.</td></tr>`;
 }
 let PRODVIEW='comm';
@@ -782,7 +833,7 @@ function renderMatch(){
   $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>a.confidence-b.confidence).map(m=>{
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
     return `<tr><td><b>${esc(m.adName)}</b></td><td><span class="pill">${esc(m.tag)}</span></td>
-      <td>${esc(m.method)}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+      <td>${esc(m.method)}${m.candidateTag?'<div class="hint">Saran: '+esc(m.candidateTag)+' · perlu mapping manual</div>':''}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
   // The mapping table now lives behind one button, so that button has to say
@@ -796,7 +847,7 @@ function renderMatch(){
 /* ── Part 3: charts, tabs, modals, snapshots, export ── */
 function cv(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
 function mk(id,cfg){
-  const el=$(id); if(!el) return;
+  const el=$(id); if(!el||typeof Chart==='undefined') return;
   // A canvas inside a hidden tab measures 0x0 and stays blank; the tab switch
   // re-runs renderCharts() once it has a real box.
   if(!el.offsetParent&&!(el.offsetWidth&&el.offsetHeight)) return;
@@ -812,6 +863,7 @@ function mk(id,cfg){
   CHARTS[id]=new Chart(el,cfg);
 }
 function renderCharts(){
+  if(!RESULT)return;
   const R=RESULT,d=R.daily,lbl=d.map(x=>x.date.slice(5)),b=R.breakdown;
   const acc=cv('--accent'),ok=cv('--ok'),info=cv('--info'),warn=cv('--warn'),bad=cv('--bad'),org=cv('--organic');
   $('matureNote').textContent=R.range.matureUntil?'Titik pudar = data belum matang':'';
@@ -843,10 +895,10 @@ function renderCharts(){
   mk('chSettle',{type:'line',data:{labels:st.map(s=>'umur '+s.age),datasets:[{label:'% tertunda',
     data:st.map(s=>s.pendingPct),borderColor:warn,backgroundColor:warn+'22',fill:true,tension:.3,pointRadius:2}]}});
   const sc=b.clickSource.slice(0,6);
-  if(sc.length)mk('chSrc',{type:'doughnut',data:{labels:sc.map(x=>x.name),datasets:[{data:sc.map(x=>x.count),
+  mk('chSrc',{type:'doughnut',data:{labels:sc.map(x=>x.name),datasets:[{data:sc.map(x=>x.count),
     backgroundColor:[info,ok,acc,warn,bad,org]}]}});
   const rg=b.clickRegion.slice(0,6);
-  if(rg.length)mk('chRegion',{type:'bar',data:{labels:rg.map(x=>x.name.slice(0,18)),datasets:[{label:'Klik',
+  mk('chRegion',{type:'bar',data:{labels:rg.map(x=>x.name.slice(0,18)),datasets:[{label:'Klik',
     data:rg.map(x=>x.count),backgroundColor:warn}]},options:{indexAxis:'y'}});
 
   const tr=E.buildTrend(snaps(),active());
@@ -869,6 +921,14 @@ function renderCharts(){
       options:{scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}}}});
   }
 }
+function updateAnalysisAvailability(){
+  $('main').classList.toggle('stored-only',!RESULT);
+  document.querySelectorAll('.tab').forEach(t=>t.disabled=!RESULT&&t.dataset.tab!=='tersimpan');
+}
+$('btnStored').onclick=()=>{
+  updateAnalysisAvailability();$('main').classList.remove('hidden');$('emptyState').classList.add('hidden');
+  document.querySelector('[data-tab="tersimpan"]').click();
+};
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -897,7 +957,7 @@ $('btnPdf').onclick=()=>{
 document.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>runPrint(b.dataset.pdf));
 
 function runPrint(mode){
-  const M=PDFMODE[mode]; if(!M||!RESULT)return;
+  const M=PDFMODE[mode]; if(!M||!RESULT||document.body.classList.contains('printing'))return;
   const r=RESULT.range;
   $('phAcct').textContent=active();
   $('phRange').textContent=`Periode ${r.start} — ${r.end}`;
@@ -917,7 +977,13 @@ function runPrint(mode){
   // there is nothing to click on paper.
   cards.forEach(e=>e.classList.add('open'));
 
+  const printMedia=window.matchMedia('print');
+  let restored=false,printOpened=false;
+  const onMedia=e=>{if(e.matches)printOpened=true;else if(printOpened)restore()};
+  const onFocus=()=>{if(!printMedia.matches)restore()};
   const restore=()=>{
+    if(restored)return;restored=true;
+    window.removeEventListener('afterprint',restore);window.removeEventListener('focus',onFocus);printMedia.removeEventListener('change',onMedia);
     document.body.classList.remove('printing','pr-ringkas','pr-standar','pr-lengkap');
     M.parts.forEach(p=>document.body.classList.remove('pp-'+p));
     panels.forEach((p,i)=>p.classList.toggle('active',wasActive[i]));
@@ -930,9 +996,10 @@ function runPrint(mode){
     try{renderCharts()}catch(e){}
     setTimeout(()=>{
       window.addEventListener('afterprint',restore,{once:true});
-      // Safari and some mobile browsers never fire afterprint.
-      setTimeout(()=>{if(document.body.classList.contains('printing'))restore()},4000);
-      window.print();
+      printMedia.addEventListener('change',onMedia);
+      window.addEventListener('focus',onFocus);
+      Object.values(CHARTS).forEach(chart=>chart.update('none'));
+      try{window.print()}catch(e){restore();toast('Dialog cetak tidak tersedia')}
     },mode==='ringkas'?150:700);
   }));
 }
@@ -954,16 +1021,16 @@ document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{
   recalc(); toast('Preset '+b.dataset.preset+' dipakai');
 });
 $('btnAddMap').onclick=()=>{$('mapRows').insertAdjacentHTML('beforeend',mapRow('',''));bindDel()};
-$('btnSaveMap').onclick=()=>{const m={};$('mapRows').querySelectorAll('.maprow').forEach(r=>{
+$('btnSaveMap').onclick=()=>{const m=Object.create(null);$('mapRows').querySelectorAll('.maprow').forEach(r=>{
   const k=E.normalize(r.querySelector('[data-k]').value),v=r.querySelector('[data-v]').value.trim();
-  if(k&&v)m[k]=v});saveMap(m);$('mapModal').classList.remove('show');toast('Mapping disimpan');recalc()};
+  if(k&&v)m[k]=v});try{saveMap(m)}catch(e){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')} $('mapModal').classList.remove('show');toast('Mapping disimpan');recalc()};
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('.modal').classList.remove('show'));
 document.querySelectorAll('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.classList.remove('show')});
 /* Snapshots — per account */
 $('btnSave').onclick=()=>{
   if(!RESULT)return toast('Belum ada hasil analisis');
   const all=snaps();
-  all.unshift(E.toSnapshot(RESULT,{account:active()}));
+  all.unshift(E.toSnapshot(RESULT,{account:active(),id:Math.max(Date.now(),...all.map(x=>x.id+1))}));
   try{
     saveSnaps(all);
     toast('Snapshot disimpan untuk '+active());
@@ -976,18 +1043,18 @@ function renderHistory(){
   const s=snaps();
   $('histAcct').textContent=active()+' · '+s.length+' snapshot';
   $('histRows').innerHTML=s.length?s.map(x=>`<div class="snaprow">
-    <div class="meta"><div class="d">${x.range.start} — ${x.range.end}</div>
-    <div class="t">disimpan ${x.saved} · ROAS berbayar ${rx(x.kpi.paidRoas)} · laba ${rp(x.kpi.netEff)}</div></div>
-    <button class="btn sm" data-view="${x.id}">Lihat</button>
-    <button class="btn sm danger" data-del="${x.id}">Hapus</button></div>`).join('')
+    <div class="meta"><div class="d">${esc(x.range.start)} — ${esc(x.range.end)}</div>
+    <div class="t">disimpan ${esc(x.saved)} · ROAS berbayar ${rx(x.kpi.paidRoas)} · laba ${rp(x.kpi.netEff)}</div></div>
+    <button class="btn sm" data-view="${esc(x.id)}">Lihat</button>
+    <button class="btn sm danger" data-del="${esc(x.id)}">Hapus</button></div>`).join('')
     :'<p class="hint">Belum ada snapshot untuk akun ini.</p>';
   $('histRows').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
     const x=snaps().find(y=>y.id===+b.dataset.view); if(!x)return;
     const lines=x.tags.filter(t=>t.spend>0).map(t=>`${t.tag} — ${t.label} · ROAS ${rx(t.roasEff)} · ${t.reason}`).join('\n');
-    alert(`${x.range.start} — ${x.range.end}\nDisimpan ${x.saved}\n\nBiaya ${full(x.kpi.spend)}\nKomisi efektif ${full(x.kpi.commEff)}\nLaba ${full(x.kpi.netEff)}\nROAS berbayar ${rx(x.kpi.paidRoas)}\n\n${lines}`);
+    alert(`${esc(x.range.start)} — ${esc(x.range.end)}\nDisimpan ${x.saved}\n\nBiaya ${full(x.kpi.spend)}\nKomisi efektif ${full(x.kpi.commEff)}\nLaba ${full(x.kpi.netEff)}\nROAS berbayar ${rx(x.kpi.paidRoas)}\n\n${lines}`);
   });
   $('histRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
-    saveSnaps(snaps().filter(y=>y.id!==+b.dataset.del));renderHistory();renderTrend();toast('Snapshot dihapus')});
+    try{saveSnaps(snaps().filter(y=>y.id!==+b.dataset.del));renderHistory();renderTrend();renderCharts();toast('Snapshot dihapus')}catch(e){toast('Snapshot gagal dihapus')}});
 }
 $('btnHist').onclick=()=>{renderHistory();$('histModal').classList.add('show')};
 // Snapshots are the only record of how an account developed. Keeping them
@@ -1001,23 +1068,23 @@ $('btnExportSnaps').onclick=()=>{
 };
 $('btnImportSnaps').onclick=()=>$('importFile').click();
 $('importFile').onchange=e=>{
-  const f=e.target.files&&e.target.files[0]; if(!f)return;
-  const rd=new FileReader();
+  const f=e.target.files&&e.target.files[0];if(!f)return;
+  const account=active(),epoch=IMPORT_EPOCH,rd=new FileReader();
+  if(f.size>20*1024*1024){$('importFile').value='';return toast('File snapshot terlalu besar (maksimum 20 MB)')}
   rd.onload=()=>{
     try{
-      const d=JSON.parse(rd.result);
-      const incoming=Array.isArray(d)?d:(d.snapshots||[]);
-      if(!incoming.length)return toast('File tidak berisi snapshot');
-      const cur=snaps(),ids=new Set(cur.map(x=>x.id));
-      // Re-stamp to the active account so importing into a different account
-      // does not silently mix two accounts' histories.
-      const add=incoming.filter(x=>!ids.has(x.id)).map(x=>({...x,account:active()}));
+      if(account!==active()||epoch!==IMPORT_EPOCH)return;
+      const d=JSON.parse(rd.result),incoming=Array.isArray(d)?d:d&&d.snapshots;
+      if(!Array.isArray(incoming)||!incoming.length||incoming.length>1000||!incoming.every(validSnapshot))return toast('File tidak berisi snapshot yang valid');
+      const cur=snaps(),ids=new Set(cur.map(x=>x.id)),add=[];
+      for(const x of incoming){if(ids.has(x.id))continue;ids.add(x.id);add.push({...x,account})}
       saveSnaps(cur.concat(add).sort((a,b)=>String(b.saved).localeCompare(String(a.saved))));
-      renderHistory();renderTrend();requestAnimationFrame(()=>renderCharts());
+      renderHistory();renderTrend();renderCharts();
       toast(add.length+' snapshot diimpor'+(incoming.length-add.length?', '+(incoming.length-add.length)+' duplikat dilewati':''));
-    }catch(err){toast('File tidak valid')}
-    $('importFile').value='';
+    }catch(err){toast('Impor gagal: file tidak valid atau penyimpanan penuh')}
+    finally{$('importFile').value=''}
   };
+  rd.onerror=()=>{$('importFile').value='';toast('Gagal membaca snapshot')};
   rd.readAsText(f);
 };
 /* Export */
@@ -1029,7 +1096,7 @@ $('btnExport').onclick=()=>{
     Math.round(t.cpm),Math.round(t.cpc),Math.round(t.cpcIdeal),Math.round(t.cpcGap),t.impr,t.reach,t.clicks,
     t.leak?t.leak.shopeeClicks:'',t.leak?t.leak.pct.toFixed(1):'',t.ctr.toFixed(2),t.orders,t.convRate.toFixed(2),
     Math.round(t.costPerOrder),Math.round(t.gmv),t.daysProd]);
-  const csv=[head].concat(rows).map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const csv=[head].concat(rows).map(r=>r.map(c=>`"${String(typeof c==='string'&&/^[\s]*[=+@\-\t\r]/.test(c)?"'"+c:c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const url=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   const a=document.createElement('a');
   a.href=url;a.download=`keputusan-${active()}-${RESULT.range.start}_${RESULT.range.end}.csv`;a.click();
@@ -1039,14 +1106,15 @@ $('btnExport').onclick=()=>{
 // tolerate different risk. The old global key was read but never written, so
 // nothing carries over from it.
 function loadOpts(){
-  try{const o=JSON.parse(localStorage.getItem(LS.opts+'_'+active()));
-    if(o)O.forEach(k=>{if(o[k]!=null&&$(k))$(k).value=o[k]})}catch(e){}
+  let saved={};try{const o=JSON.parse(readStorage(LS.opts+'_'+active()));if(o&&typeof o==='object'&&!Array.isArray(o))saved=o}catch(e){}
+  const o=E.normalizeOptions({...UI_DEFAULTS,...saved});if(![...$('ppn').options].some(x=>Number(x.value)===o.ppn))o.ppn=UI_DEFAULTS.ppn;O.forEach(k=>$(k).value=o[k]);
 }
 function saveOpts(){
   const o={};O.forEach(k=>{if($(k))o[k]=$(k).value});
-  try{localStorage.setItem(LS.opts+'_'+active(),JSON.stringify(o))}catch(e){}
+  try{localStorage.setItem(LS.opts+'_'+active(),JSON.stringify(o))}catch(e){toast('Pengaturan belum tersimpan: penyimpanan tidak tersedia')}
 }
 O.forEach(id=>$(id).addEventListener('change',saveOpts));
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',saveOpts));
 loadOpts();
+updateAnalysisAvailability();
 renderHistory();

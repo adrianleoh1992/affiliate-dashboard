@@ -328,9 +328,11 @@ tbody tr:hover{background:var(--surface-2)}
 .tblnote{font-size:10.5px;color:var(--text-mute);margin-top:8px;font-weight:500}
 
 /* Charts */
-.chartbox{position:relative;height:270px}
+.chartbox{position:relative;height:270px;min-width:0;max-width:100%}
+.chartbox canvas{max-width:100%}
 .chartbox.tall{height:320px}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px}
+.grid2>*{min-width:0}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
 
 /* Stat strip */
@@ -681,3 +683,7 @@ tbody tr:hover{background:var(--surface-2)}
   #tblDayIdx td{padding:6px 8px}
   .cellx{width:26px;height:26px}
 }
+
+/* Saved history remains reachable without re-uploading analysis files. */
+#main.stored-only > :not(.tabs):not([data-panel="tersimpan"]){display:none!important}
+.tab:disabled{opacity:.45;cursor:not-allowed}

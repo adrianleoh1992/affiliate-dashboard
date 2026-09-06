@@ -67,17 +67,18 @@ assert.equal(a.leak.shopeeClicks, 2);
 assert.equal(a.leak.failed, 18);
 assert.equal(a.leak.severity, 'bad');
 
-/* Verdict: aggregate ROAS 275/400 = 0.69x -> STOP, but NOT via a streak built
-   on immature days. Aug 2-4 sit inside the 3-day lag window. */
-assert.equal(a.status, 'stop');
+/* Verdict: mature ROAS is 275/100 = 2.75x. Aug 2-4 sit inside the
+   3-day lag window and must not turn this profitable mature tag into STOP. */
+assert.equal(a.status, 'scale');
+assert.equal(a.matureRoasEff, 2.75);
 assert.ok(a.streak < 3, 'immature days must not feed the streak, got ' + a.streak);
 assert.equal(r.range.matureUntil, '2026-08-01');
-assert.ok(/cek link/.test(a.reason), 'severe leak should redirect the reason: ' + a.reason);
 
 /* Same data, lag disabled: late days count and the streak fires */
 const r2 = E.analyze(data, { ppn:0, minSpend:0, minDays:1, lagDays:0, streakDays:3 });
 const a2 = r2.tags.find(x => x.tag === 'A');
 assert.ok(a2.streak >= 3, 'without lag the streak should fire, got ' + a2.streak);
+assert.ok(/cek link/.test(a2.reason), 'severe leak should redirect the STOP reason: ' + a2.reason);
 
 /* Ad-unit grain */
 assert.equal(r.adUnits.length, 1);
@@ -106,7 +107,7 @@ s2.id = 2; s2.saved = '2026-08-12 08:00:00';
 s2.range = { start:'2026-08-05', end:'2026-08-11' };
 s2.kpi.netEff = s1.kpi.netEff + 1000;
 s2.kpi.roasEff = 2.4;
-s2.tags[0].roasEff = 2.4; s2.tags[0].status = 'scale';
+s2.tags[0].roasEff = 2.4; s2.tags[0].status = 'pantau';
 
 const other = JSON.parse(JSON.stringify(s1));
 other.id = 3; other.account = 'akun-b';
@@ -116,7 +117,7 @@ assert.equal(tr.series.length, 2, 'other account must be excluded, got ' + tr.se
 assert.equal(tr.delta.netEff, 1000);
 assert.ok(tr.movers.length >= 1);
 assert.equal(tr.movers[0].changed, true, 'status change should be detected');
-assert.equal(tr.movers[0].toStatus, 'scale');
+assert.equal(tr.movers[0].toStatus, 'pantau');
 
 /* Re-saving the same period must not double-plot */
 const dupe = JSON.parse(JSON.stringify(s2));
@@ -141,7 +142,7 @@ assert.ok(r.actions.concentration, 'concentration must be computed when paid tag
 assert.equal(r.actions.concentration.topTag, 'A');
 assert.equal(Math.round(r.actions.concentration.topShare), 100);
 
-/* An organic tag should surface as an ad candidate with a max bid */
+/* An organic tag should surface with a cost-per-order ceiling */
 const withOrganic = JSON.parse(JSON.stringify(data));
 withOrganic.affiliate.push({
   'ID Pemesanan':'9', 'Status Pesanan':'Selesai', 'Waktu Pemesanan':'2026-08-01 11:00:00',
@@ -151,7 +152,7 @@ withOrganic.affiliate.push({
 const rOrg = E.analyze(withOrganic, { ppn:0, minSpend:0, minDays:1, targetROI:80 });
 const cand = rOrg.actions.organicCandidates.find(c => c.tag === 'ORG');
 assert.ok(cand, 'organic tag must become a candidate');
-assert.equal(Math.round(cand.maxCpc), 500); // 900 per order / 1.8
+assert.equal(Math.round(cand.maxCpa), 500); // 900 per order / 1.8
 
 /* ── Stability: which verdicts survive every plausible lag ──────────────── */
 const st = E.stability(data, { ppn:0, minSpend:0, minDays:1 }, [0, 3, 7]);

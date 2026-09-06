@@ -91,7 +91,7 @@ input[type=text]{padding:6px 10px;border:1px solid #ddd;border-radius:4px;font:i
   <div class="log" id="delLog"></div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="vendor/papaparse.min.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
 <script>
@@ -121,29 +121,31 @@ async function process(fileInput,kind,label){
   if(!SHOPEE_ACCT)return alert('Pilih akun Shopee dulu');
   const f=fileInput.files&&fileInput.files[0];
   if(!f)return alert('File belum dipilih');
+  const account=SHOPEE_ACCT;
   $('uploadLog').textContent=`Memproses ${label}...`;
   Papa.parse(f,{header:true,skipEmptyLines:true,complete:async r=>{
     try{
+      if(r.errors && r.errors.length) throw new Error('CSV tidak valid: '+r.errors[0].message);
       const rows=r.data||[];
       const fh=DailyAgg.hashRows(rows);
-      const seen=await STORE.seenFile(SHOPEE_ACCT.id,fh);
+      const seen=await STORE.seenFile(account.id,fh,kind);
       if(seen){
         $('uploadLog').textContent=`File ${label} ini sudah diunggah pada ${new Date(seen.uploaded_at).toLocaleString('id-ID')}`;
         $('uploadLog').className='log err';
         return;
       }
-      const known=await STORE.knownRowHashes(SHOPEE_ACCT.id,kind);
+      const known=await STORE.knownRowHashes(account.id,kind);
       const dup=DailyAgg.dedupe(rows,known);
       let agg,fname;
       if(kind==='affiliate'){agg=DailyAgg.aggregateAffiliate(dup.kept);fname='affiliate'}
       else if(kind==='ads'){agg=DailyAgg.aggregateAds(dup.kept);fname='ads'}
       else if(kind==='clicks'){agg=DailyAgg.aggregateClicks(dup.kept);fname='clicks'}
-      const keys=await STORE.existingKeys(SHOPEE_ACCT.id,fname);
+      const keys=await STORE.existingKeys(account.id,fname);
       const plan=DailyAgg.planIngest(agg,keys,fname==='ads'?['date','ad_unit']:['date','tag']);
       const dates=agg.map(r=>r.date).filter(DailyAgg.isDate).sort();
       const per=dates.length?{start:dates[0],end:dates[dates.length-1]}:null;
-      const res=await STORE.saveDaily(SHOPEE_ACCT.id,fname,agg,{
-        rowHashes:dup.hashes,fileHash:fh,fileName:f.name,sourceRows:rows.length,
+      const res=await STORE.saveDaily(account.id,fname,agg,{
+        rawRows:rows,fileHash:fh,fileName:f.name,sourceRows:rows.length,
         duplicates:dup.duplicates,period:per
       });
       $('uploadLog').innerHTML=`<b>${label} tersimpan</b><br>
@@ -154,7 +156,7 @@ async function process(fileInput,kind,label){
       $('uploadLog').textContent='Gagal: '+e.message;
       $('uploadLog').className='log err';
     }
-  }});
+  },error:e=>{ $('uploadLog').textContent='Gagal membaca CSV: '+e.message; $('uploadLog').className='log err'; }});
 }
 $('btnAff').onclick=()=>process($('fileAff'),'affiliate','Affiliate');
 $('btnAds2').onclick=()=>process($('fileAds'),'ads','Ads');

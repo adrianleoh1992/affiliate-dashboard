@@ -1,10 +1,14 @@
 {
   "name": "affiliate-dashboard",
   "version": "1.0.0",
-  "description": "",
-  "main": "browser.test.js",
+  "description": "Local Meta Ads and Shopee affiliate decision dashboard",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "node engine.test.js && node engine.regression.test.js && node daily.regression.test.js",
+    "test:browser": "node browser.regression.test.js",
+    "vendor": "node scripts/vendor.js",
+    "start": "node scripts/serve.js",
+    "build": "node scripts/build.js"
   },
   "repository": {
     "type": "git",
@@ -19,6 +23,12 @@
   },
   "homepage": "https://github.com/adrianleoh1992/affiliate-dashboard#readme",
   "devDependencies": {
-    "playwright": "^1.62.1"
-  }
+    "fake-indexeddb": "6.2.5",
+    "playwright": "1.63.0"
+  },
+  "dependencies": {
+    "chart.js": "4.5.1",
+    "papaparse": "5.7.0"
+  },
+  "private": true
 }

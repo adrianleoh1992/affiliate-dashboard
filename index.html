@@ -5,12 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23e0653a'/><text x='16' y='22' font-size='15' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>BD</text></svg>">
 <title>Affiliate Decision Dashboard · Berlima Digital</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="vendor/papaparse.min.js"></script>
+<script src="vendor/chart.umd.js"></script>
 </head>
 <body>
 
@@ -29,6 +26,7 @@
     </div>
     <button class="btn ghost" id="btnMap">Kelola Tag<span class="badge-dot hidden" id="mapAlert"></span></button>
     <button class="btn ghost" id="btnHist">Riwayat</button>
+    <button class="btn" id="btnStored">Data Tersimpan</button>
     <button class="btn ghost" id="btnSet">Setelan</button>
     <button class="btn ghost" id="btnTheme">Mode Gelap</button>
     <button class="btn" id="btnExport">Export CSV</button>
@@ -81,7 +79,7 @@
     <div id="ingestPlan" class="hidden">
       <div class="ingest-box">
         <div class="ingest-head"><b>Rencana simpan ke akun <span id="planAcct"></span></b>
-          <span class="sub">Baris baru ditambah, yang sudah ada diperbarui, duplikat dilewati.</span></div>
+          <span class="sub">Baris unik ditambahkan ke total harian; baris identik dilewati. Laporan koreksi memerlukan penggantian tanggal terdampak.</span></div>
         <div id="planRows"></div>
         <div class="ingest-actions">
           <button class="btn ghost" id="btnSkipSave">Jangan simpan</button>
@@ -101,7 +99,7 @@
   <div class="empty-state" id="emptyState">
     <div class="ic">📊</div>
     <h3>Belum ada data untuk akun ini</h3>
-    <p>Muat laporan komisi affiliate untuk mulai menganalisis, atau buka Riwayat untuk melihat snapshot tersimpan.</p>
+    <p>Muat laporan komisi affiliate untuk mulai menganalisis. Buka Data Tersimpan untuk data harian atau Riwayat untuk snapshot.</p>
   </div>
 
   <div id="main" class="hidden">
@@ -165,7 +163,7 @@
       <div class="card" data-print="peluang">
         <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
           <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
-        <p class="hint">Ini bukan jaminan hasil iklan. Maks CPC adalah batas awal konservatif berdasarkan komisi aktual per order dan target ROI Anda.</p>
+        <p class="hint">Maks Biaya/Order adalah batas biaya per pesanan berdasarkan komisi efektif dan target ROI. Batas CPC memerlukan data konversi klik menjadi pesanan.</p>
         <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-print="peluang">
@@ -469,7 +467,7 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="engine.js"></script>
 <script src="daily-agg.js"></script>

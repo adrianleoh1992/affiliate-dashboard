@@ -24,28 +24,80 @@ const DEFAULTS = {
 
 /* ── Utils ───────────────────────────────────────────────────────────────── */
 function num(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
   if (v == null) return 0;
-  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
-  return isFinite(n) ? n : 0;
+  const raw = String(v).trim();
+  // CSV exports normally contain machine decimals; avoid locale parsing for
+  // the common case while still rejecting partial numeric strings.
+  if (/^[+\-]?(?:\d+\.?\d*|\.\d+)(?:e[+\-]?\d+)?$/i.test(raw)) {
+    const plain = Number(raw);
+    return Number.isFinite(plain) ? plain : 0;
+  }
+  const negative = /^\(.*\)$/.test(raw);
+  let value = raw.replace(/[^0-9.,+\-]/g, '');
+  const comma = value.lastIndexOf(','), dot = value.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    const decimal = comma > dot ? ',' : '.';
+    const grouping = decimal === ',' ? /\./g : /,/g;
+    value = value.replace(grouping, '').replace(decimal, '.');
+  } else if (comma >= 0) {
+    value = /^[+\-]?\d{1,3}(,\d{3})+$/.test(value)
+      ? value.replace(/,/g, '') : value.replace(',', '.');
+  } else if (dot >= 0 && (value.indexOf('.') !== dot || /^rp\.?\s*\d/i.test(raw))) {
+    if (/^[+\-]?\d{1,3}(\.\d{3})+$/.test(value)) value = value.replace(/\./g, '');
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? (negative ? -Math.abs(n) : n) : 0;
 }
 function int(v) { return Math.round(num(v)); }
-function normalize(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function normalize(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function tokens(s) {
-  return (s || '').toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3);
+  return [...new Set(String(s == null ? '' : s).toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3))];
 }
-function dayOnly(s) { return (s || '').trim().split(' ')[0]; }
+function dayOnly(s) { return String(s == null ? '' : s).trim().split(/[ T]/)[0]; }
 function hourOf(s) {
-  const m = /\s(\d{2}):/.exec(s || '');
-  return m ? parseInt(m[1], 10) : null;
+  const m = /[ T](\d{2}):/.exec(String(s == null ? '' : s));
+  const h = m ? Number(m[1]) : -1;
+  return h >= 0 && h < 24 ? h : null;
 }
-function isDate(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s || ''); }
+const dateValidity = new Map();
+function isDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  if (dateValidity.has(s)) return dateValidity.get(s);
+  const d = new Date(s + 'T00:00:00Z');
+  const valid = Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  // Dates repeat thousands of times in an export. Bound the cache so repeated
+  // imports cannot accumulate an unbounded history in a long-lived tab.
+  if (dateValidity.size >= 1024) dateValidity.clear();
+  dateValidity.set(s, valid);
+  return valid;
+}
 function addDays(iso, n) {
+  if (!isDate(iso) || !Number.isFinite(Number(n))) return '';
   const d = new Date(iso + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
+  d.setUTCDate(d.getUTCDate() + Number(n));
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
 }
 function diffDays(a, b) {
+  if (!isDate(a) || !isDate(b)) return NaN;
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+}
+function dict() { return Object.create(null); }
+function normalizeOptions(options) {
+  const input = options || {}, out = Object.assign({}, DEFAULTS, input);
+  const bounds = {
+    ppn: [0, 100], thScale: [0, Infinity], thPantau: [0, Infinity],
+    minSpend: [0, Infinity], minDays: [0, Infinity], lagDays: [0, 365],
+    lagCoverage: [1, 100], streakDays: [1, Infinity], pendingFactor: [0, 1], targetROI: [0, Infinity],
+  };
+  Object.keys(bounds).forEach(k => {
+    const value = input[k];
+    const n = value == null || value === '' ? NaN : Number(value);
+    out[k] = Number.isFinite(n) ? Math.max(bounds[k][0], Math.min(bounds[k][1], n)) : DEFAULTS[k];
+  });
+  ['minDays', 'lagDays', 'streakDays'].forEach(k => { out[k] = Math.round(out[k]); });
+  out.thScale = Math.max(out.thScale, out.thPantau);
+  return out;
 }
 function escapeHtml(s) {
   return String(s == null ? '' : s)
@@ -65,7 +117,7 @@ const COL = {
     orderAt:  ['Waktu Pemesanan'],
     doneAt:   ['Waktu Terselesaikan'],
     clickAt:  ['Waktu Klik'],
-    comm:     ['Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)'],
+    comm:     ['Total Komisi per Produk(Rp)', 'Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)'],
     commNet:  ['Komisi Bersih Affiliate (Rp)'],
     gmv:      ['Nilai Pembelian(Rp)'],
     refund:   ['Jumlah Pengembalian Dana(Rp)'],
@@ -110,10 +162,11 @@ const COL = {
   },
 };
 function pick(row, keys) {
-  for (const k of keys) if (row[k] !== undefined) return row[k];
+  if (!row) return undefined;
+  for (const k of keys) if (Object.prototype.hasOwnProperty.call(row, k) && row[k] != null && String(row[k]).trim() !== '') return row[k];
   return undefined;
 }
-function cleanTag(t) { return String(t == null ? '' : t).replace(/-+$/, '').trim(); }
+function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '').trim(); }
 
 /* ── File type detection ─────────────────────────────────────────────────── */
 function detectFileType(headers) {
@@ -126,7 +179,7 @@ function detectFileType(headers) {
   if (exact('tag_link') || (has('klik id') && has('tag_link'))) return 'clicks';
   if (has('wilayah klik') || has('click_time')) return 'clicks';
 
-  if (has('id pemesanan') || has('total komisi per pesanan') || has('tag_link1')) return 'affiliate';
+  if (has('id pemesanan') || has('total komisi per pesanan') || has('total komisi per produk') || has('tag_link1')) return 'affiliate';
   if (has('waktu pemesanan') || has('status pesanan')) return 'affiliate';
 
   if (has('reporting starts') || has('amount spent')) return 'ads';
@@ -141,27 +194,25 @@ function detectFileType(headers) {
    carries a method + confidence so the UI can surface weak ones for review.
    ─────────────────────────────────────────────────────────────────────────── */
 function extractPipeTag(name) {
-  const p = (name || '').split('|').map(s => s.trim());
+  const p = String(name == null ? '' : name).split('|').map(s => s.trim());
   return p.length >= 3 ? p[2] : '';
 }
 
 function matchAdToTag(adName, affiliateTags, tagMap) {
-  const raw = adName || '';
+  const raw = String(adName == null ? '' : adName);
   const n = normalize(raw);
   if (!n) return { tag: raw, method: 'kosong', confidence: 0 };
+
+  // An explicit correction wins over an embedded pipe tag. Manual mappings
+  // apply to the full normalized ad name, never unrelated substring names.
+  const map = tagMap || {};
+  const manual = Object.keys(map).find(k => normalize(k) === n && String(map[k] || '').trim());
+  if (manual !== undefined) return { tag: cleanTag(map[manual]), method: 'Manual', confidence: 1 };
 
   const piped = extractPipeTag(raw);
   if (piped) {
     const hit = (affiliateTags || []).find(t => normalize(t) === normalize(piped));
-    return { tag: hit || piped, method: 'Pipe', confidence: hit ? 1 : 0.8 };
-  }
-
-  const map = tagMap || {};
-  if (map[n]) return { tag: map[n], method: 'Manual', confidence: 1 };
-  for (const k of Object.keys(map)) {
-    if (k && (n === k || n.includes(k) || k.includes(n))) {
-      return { tag: map[k], method: 'Manual', confidence: 1 };
-    }
+    return { tag: hit || cleanTag(piped), method: 'Pipe', confidence: hit ? 1 : 0.8 };
   }
 
   for (const t of affiliateTags || []) {
@@ -187,23 +238,33 @@ function matchAdToTag(adName, affiliateTags, tagMap) {
       if (!tt.length) continue;
       let shared = 0;
       for (const a of at) {
-        if (tt.some(b => b === a || (a.length >= 5 && b.includes(a)) || (b.length >= 5 && a.includes(b)))) shared++;
+        // A short fragment such as 'solid' inside 'HelmRsixSolid' is only
+        // partial evidence, never the equivalent of a full token match.
+        let overlap = 0;
+        for (const b of tt) {
+          if (b === a) overlap = 1;
+          else if ((a.length >= 5 && b.includes(a)) || (b.length >= 5 && a.includes(b))) {
+            overlap = Math.max(overlap, Math.min(a.length, b.length) / Math.max(a.length, b.length));
+          }
+        }
+        shared += overlap;
       }
       if (!shared) continue;
       const conf = shared / Math.max(at.length, tt.length);
       if (!tb || conf > tb.confidence) tb = { tag: t, method: 'Token', confidence: conf };
     }
     if (tb && tb.confidence >= 0.5) return tb;
-    if (tb && tb.confidence >= 0.3) return { tag: tb.tag, method: 'Lemah', confidence: tb.confidence };
+    if (tb && tb.confidence >= 0.3) return { tag: raw, candidateTag: tb.tag, method: 'Lemah', confidence: tb.confidence };
   }
 
-  if (best) return { tag: best.tag, method: 'Lemah', confidence: best.confidence };
+  if (best) return { tag: raw, candidateTag: best.tag, method: 'Lemah', confidence: best.confidence };
   return { tag: raw, method: 'Tidak cocok', confidence: 0 };
 }
 
 /* ── Main analysis ───────────────────────────────────────────────────────── */
 function analyze(data, options) {
-  const o = Object.assign({}, DEFAULTS, options || {});
+  const o = normalizeOptions(options);
+  data = data || {};
   const aff = data.affiliate || [];
   const ads = data.ads || [];
   const clk = data.clicks || [];
@@ -211,44 +272,46 @@ function analyze(data, options) {
   const ppnMult = 1 + o.ppn / 100;
 
   /* Date range: explicit, else auto from data */
-  let ds = o.dateStart, de = o.dateEnd;
+  let ds = isDate(o.dateStart) ? o.dateStart : '', de = isDate(o.dateEnd) ? o.dateEnd : '';
   if (!ds || !de) {
     const all = [];
     aff.forEach(r => { const d = dayOnly(pick(r, COL.aff.orderAt)); if (isDate(d)) all.push(d); });
     ads.forEach(r => { const d = dayOnly(pick(r, COL.ads.date)); if (isDate(d)) all.push(d); });
+    clk.forEach(r => { const d = dayOnly(pick(r, COL.clk.time)); if (isDate(d)) all.push(d); });
     all.sort();
     ds = ds || all[0] || '';
     de = de || all[all.length - 1] || '';
   }
-  const inRange = d => d && d >= ds && d <= de;
+  if (ds && de && ds > de) [ds, de] = [de, ds];
+  const inRange = d => isDate(d) && d >= ds && d <= de;
 
   /* ── Filter source rows ─────────────────────────────────────────────── */
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
   const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
-  const statusCount = {};
+  const statusCount = dict();
   /* Status per day, counted in ORDERS not product rows — one order carrying
      eight products is one pending order, not eight. Cancelled and unpaid rows
      are dropped from every other calculation, so this is the only place that
      sees them; how much is still hanging is exactly the question it answers. */
   const SKEY = { 'Selesai': 'done', 'Tertunda': 'pending', 'Belum Dibayar': 'unpaid', 'Dibatalkan': 'cancelled' };
-  const statusDay = {};
+  const statusDay = dict();
   aff.forEach(r => {
     const d = dayOnly(pick(r, COL.aff.orderAt));
     if (!inRange(d)) return;
-    const st = String(pick(r, COL.aff.status) || '');
+    const st = String(pick(r, COL.aff.status) || '').trim();
     statusCount[st] = (statusCount[st] || 0) + 1;
-    const key = SKEY[st] || 'lainnya';
+    const key = Object.prototype.hasOwnProperty.call(SKEY, st) ? SKEY[st] : 'lainnya';
     if (!statusDay[d]) statusDay[d] = {
       date: d, comm: 0, qty: 0,
       done: new Set(), pending: new Set(), unpaid: new Set(), cancelled: new Set(), lainnya: new Set(),
       commBy: { done: 0, pending: 0, unpaid: 0, cancelled: 0, lainnya: 0 },
     };
-    const sd = statusDay[d], id = String(pick(r, COL.aff.orderId) || '');
+    const sd = statusDay[d], id = String(pick(r, COL.aff.orderId) || '').trim();
     if (id) sd[key].add(id);
     const c = num(pick(r, COL.aff.comm));
     sd.commBy[key] += c;
     if (key !== 'cancelled') { sd.comm += c; sd.qty += num(pick(r, COL.aff.qty)); }
-    if (EXCLUDED[st]) {
+    if (Object.prototype.hasOwnProperty.call(EXCLUDED, st)) {
       if (st === 'Dibatalkan') { excluded.cancelled++; excluded.cancelledValue += num(pick(r, COL.aff.comm)); }
       else excluded.unpaid++;
       return;
@@ -267,22 +330,22 @@ function analyze(data, options) {
   }
 
   /* ── Buckets ────────────────────────────────────────────────────────── */
-  const T = {};
+  const T = dict();
   function bucket(t) {
     if (!T[t]) T[t] = {
       tag: t, comm: 0, commDone: 0, commPending: 0, gmv: 0, qty: 0, refund: 0,
       orders: new Set(), doneOrders: new Set(), pendingOrders: new Set(),
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
-      days: new Set(), daily: {}, shopeeClicks: 0, metaClicksWindow: 0,
-      adNames: {}, delivery: {}, quality: {}, platforms: {}, shops: {}, products: {},
+      days: new Set(), daily: dict(), shopeeClicks: 0, metaClicksWindow: 0, spendWindow: 0,
+      adNames: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
     };
     return T[t];
   }
 
-  const dailyAll = {};
-  const platform = {}, category = {}, category2 = {}, product = {}, shop = {};
-  const hourly = new Array(24).fill(0), hourlyOrders = new Array(24).fill(0);
-  const offerType = {}, contentType = {};
+  const dailyAll = dict();
+  const platform = dict(), category = dict(), category2 = dict(), product = dict(), shop = dict();
+  const hourly = new Array(24).fill(0), hourlyOrders = Array.from({ length: 24 }, () => new Set());
+  const offerType = dict(), contentType = dict();
 
   fAff.forEach(r => {
     const t = cleanTag(pick(r, COL.aff.tag)) || '(tanpa tag)';
@@ -292,24 +355,25 @@ function analyze(data, options) {
     const q = int(pick(r, COL.aff.qty));
     const rf = num(pick(r, COL.aff.refund));
     const d = dayOnly(pick(r, COL.aff.orderAt));
-    const st = String(pick(r, COL.aff.status) || '');
-    const id = pick(r, COL.aff.orderId);
+    const st = String(pick(r, COL.aff.status) || '').trim();
+    const id = String(pick(r, COL.aff.orderId) || '').trim();
 
     b.comm += c; b.gmv += g; b.qty += q; b.refund += rf;
-    b.orders.add(id);
-    if (st === 'Tertunda') { b.commPending += c; b.pendingOrders.add(id); }
-    else { b.commDone += c; b.doneOrders.add(id); }
+    if (id) b.orders.add(id);
+    if (st === 'Tertunda') { b.commPending += c; if (id) b.pendingOrders.add(id); }
+    else { b.commDone += c; if (id) b.doneOrders.add(id); }
 
     if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
     b.daily[d].comm += c; b.daily[d].gmv += g;
-    b.daily[d].orders.add(id);
+    b.daily[d].commEff = (b.daily[d].commEff || 0) + (st === 'Tertunda' ? c * o.pendingFactor : c);
+    if (id) b.daily[d].orders.add(id);
 
     if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
     dailyAll[d].comm += c; dailyAll[d].gmv += g;
-    dailyAll[d].orders.add(id);
+    if (id) dailyAll[d].orders.add(id);
 
     const h = hourOf(pick(r, COL.aff.orderAt));
-    if (h != null) { hourly[h] += c; hourlyOrders[h]++; }
+    if (h != null) { hourly[h] += c; if (id) hourlyOrders[h].add(id); }
 
     const pf = String(pick(r, COL.aff.platform) || 'Lainnya');
     platform[pf] = (platform[pf] || 0) + c;
@@ -332,7 +396,7 @@ function analyze(data, options) {
     if (pn) {
       if (!product[pn]) product[pn] = { name: pn, comm: 0, gmv: 0, qty: 0, orders: new Set(), tag: t };
       product[pn].comm += c; product[pn].gmv += g; product[pn].qty += q;
-      product[pn].orders.add(id);
+      if (id) product[pn].orders.add(id);
       b.products[pn] = (b.products[pn] || 0) + c;
     }
   });
@@ -340,10 +404,12 @@ function analyze(data, options) {
   const affiliateTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
 
   /* ── Ads aggregation + matching (also per ad unit) ──────────────────── */
-  const units = {};
+  const units = dict();
+  const matchCache = new Map();
   fAds.forEach(r => {
     const rawName = String(pick(r, COL.ads.name) || '');
-    const m = matchAdToTag(rawName, affiliateTags, tagMap);
+    if (!matchCache.has(rawName)) matchCache.set(rawName, matchAdToTag(rawName, affiliateTags, tagMap));
+    const m = matchCache.get(rawName);
     const t = m.tag || '(tanpa tag)';
     const b = bucket(t);
 
@@ -373,13 +439,13 @@ function analyze(data, options) {
     dailyAll[d].clicks += cl;
     dailyAll[d].impr += im;
 
-    if (clkStart && d >= clkStart && d <= clkEnd) b.metaClicksWindow += cl;
+    if (clkStart && d >= clkStart && d <= clkEnd) { b.metaClicksWindow += cl; b.spendWindow += spPPN; }
 
     // Per ad unit — the reference dashboard's primary grain
     if (!units[rawName]) units[rawName] = {
-      adName: rawName, tag: t, method: m.method, confidence: m.confidence,
+      adName: rawName, tag: t, candidateTag: m.candidateTag || '', method: m.method, confidence: m.confidence,
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, days: new Set(),
-      delivery: {}, quality: {}, daily: {},
+      delivery: dict(), quality: dict(), daily: dict(), latestDelivery: null,
     };
     const u = units[rawName];
     u.spend += spPPN; u.clicks += cl; u.impr += im; u.reach += rc; u.lpv += lp;
@@ -388,12 +454,15 @@ function analyze(data, options) {
       u.daily[d].spend += spPPN; u.daily[d].clicks += cl; u.daily[d].impr += im;
     }
     if (sp > 0 && isDate(d)) u.days.add(d);
-    if (dv) u.delivery[dv] = (u.delivery[dv] || 0) + 1;
+    if (dv) {
+      u.delivery[dv] = (u.delivery[dv] || 0) + 1;
+      if (!u.latestDelivery || d >= u.latestDelivery.date) u.latestDelivery = { date: d, name: dv };
+    }
     if (ql && ql !== '-') u.quality[ql] = (u.quality[ql] || 0) + 1;
   });
 
   /* ── Shopee click report ────────────────────────────────────────────── */
-  const clickSrc = {}, clickRegion = {}, clickDaily = {};
+  const clickSrc = dict(), clickRegion = dict(), clickDaily = dict();
   fClk.forEach(r => {
     const t = cleanTag(pick(r, COL.clk.tag));
     const d = dayOnly(pick(r, COL.clk.time));
@@ -411,21 +480,29 @@ function analyze(data, options) {
     clickSrc[s] = (clickSrc[s] || 0) + 1;
     const rg = String(pick(r, COL.clk.region) || '');
     if (rg) clickRegion[rg] = (clickRegion[rg] || 0) + 1;
-    if (isDate(d)) clickDaily[d] = (clickDaily[d] || 0) + 1;
+    if (isDate(d)) {
+      clickDaily[d] = (clickDaily[d] || 0) + 1;
+      if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
+    }
   });
 
   /* ── Attribution maturity ───────────────────────────────────────────── */
   const matureUntil = de ? addDays(de, -o.lagDays) : '';
   const isMature = d => !matureUntil || d <= matureUntil;
 
-  const lagHist = {};
+  const lagHist = dict(), lagOrders = new Set();
   let lagTotal = 0;
   fAff.forEach(r => {
     const ck = dayOnly(pick(r, COL.aff.clickAt));
     const od = dayOnly(pick(r, COL.aff.orderAt));
     if (!isDate(ck) || !isDate(od)) return;
     const g = diffDays(ck, od);
-    if (g >= 0 && g <= 30) { lagHist[g] = (lagHist[g] || 0) + 1; lagTotal++; }
+    if (g >= 0 && g <= 30) {
+      const id = String(pick(r, COL.aff.orderId) || '').trim();
+      if (!id || lagOrders.has(id)) return;
+      lagOrders.add(id);
+      lagHist[g] = (lagHist[g] || 0) + 1; lagTotal++;
+    }
   });
   const lagProfile = Object.keys(lagHist).map(Number).sort((a, b) => a - b)
     .map(d => ({ day: d, count: lagHist[d], pct: lagTotal ? lagHist[d] / lagTotal * 100 : 0 }));
@@ -437,66 +514,67 @@ function analyze(data, options) {
      day by which `lagCoverage`% of orders have landed; anything more recent is
      still filling in and must not drive a STOP. */
   const coverage = o.lagCoverage || 90;
-  let suggestedLag = 0;
-  for (const x of lagProfile) { if (x.cumulative >= coverage) { suggestedLag = x.day; break; } }
-  if (!suggestedLag && lagProfile.length) suggestedLag = lagProfile[lagProfile.length - 1].day;
+  const covered = lagProfile.find(x => x.cumulative + 1e-9 >= coverage);
+  const suggestedLag = covered ? covered.day : (lagProfile.length ? lagProfile[lagProfile.length - 1].day : 0);
   const lagCal = {
     suggested: suggestedLag,
     current: o.lagDays,
     coverage,
     matches: suggestedLag === o.lagDays,
-    sameDayPct: lagProfile.length ? lagProfile[0].cumulative : 0,
+    sameDayPct: lagHist[0] ? lagHist[0] / lagTotal * 100 : 0,
     fullPct: lagProfile.length ? lagProfile[lagProfile.length - 1].day : 0,
     sampleSize: lagTotal,
   };
 
   /* Settlement curve: how pending resolves as orders age */
-  const ageBuckets = {};
+  const ageBuckets = dict();
   fAff.forEach(r => {
     const od = dayOnly(pick(r, COL.aff.orderAt));
     if (!isDate(od) || !de) return;
     const age = diffDays(od, de);
     if (age < 0 || age > 30) return;
-    if (!ageBuckets[age]) ageBuckets[age] = { pending: 0, total: 0 };
-    ageBuckets[age].total++;
-    if (String(pick(r, COL.aff.status)) === 'Tertunda') ageBuckets[age].pending++;
+    const id = String(pick(r, COL.aff.orderId) || '').trim();
+    if (!id) return;
+    if (!ageBuckets[age]) ageBuckets[age] = { pending: new Set(), total: new Set() };
+    ageBuckets[age].total.add(id);
+    if (String(pick(r, COL.aff.status) || '').trim() === 'Tertunda') ageBuckets[age].pending.add(id);
   });
   const settlement = Object.keys(ageBuckets).map(Number).sort((a, b) => a - b).map(a => ({
-    age: a, pendingPct: ageBuckets[a].total ? ageBuckets[a].pending / ageBuckets[a].total * 100 : 0,
-    n: ageBuckets[a].total,
+    age: a, pendingPct: ageBuckets[a].total.size ? ageBuckets[a].pending.size / ageBuckets[a].total.size * 100 : 0,
+    n: ageBuckets[a].total.size,
   }));
 
   /* ── Per-tag verdicts ───────────────────────────────────────────────── */
   const targetMult = 1 + o.targetROI / 100;
 
-  function verdictFor(spend, commEff, daysProd, dailyRows, leak) {
+  function verdictFor(spend, commEff, daysProd, dailyRows, leak, hasPaidSpend) {
     let streak = 0;
     dailyRows.forEach(r => { if (r.roas < 1) streak++; else streak = 0; });
     const streakStop = streak >= o.streakDays;
     const roasEff = spend > 0 ? commEff / spend : (commEff > 0 ? Infinity : 0);
 
     let status = 'evaluasi', label = 'Belum cukup data', reason = '';
-    const qualified = spend >= o.minSpend && daysProd >= o.minDays;
+    const qualified = spend > 0 && spend >= o.minSpend && daysProd > 0 && daysProd >= o.minDays;
 
-    if (spend === 0 && commEff > 0) {
+    if (!hasPaidSpend && commEff > 0) {
       status = 'organik'; label = 'ORGANIK'; reason = 'Komisi tanpa biaya iklan';
     } else if (!qualified) {
       const need = [];
-      if (spend < o.minSpend) need.push('spend belum cukup');
-      if (daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi`);
+      if (spend <= 0 || spend < o.minSpend) need.push('spend matang belum cukup');
+      if (daysProd <= 0 || daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi matang`);
       reason = need.join(', ');
     } else if (streakStop) {
       status = 'stop'; label = 'STOP';
       reason = `ROAS di bawah 1 selama ${streak} hari produksi berturut`;
     } else if (roasEff >= o.thScale) {
       status = 'scale'; label = 'SCALE';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
+      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
     } else if (roasEff >= o.thPantau) {
       status = 'pantau'; label = 'PANTAU';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x, belum layak scale`;
+      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x, belum layak scale`;
     } else {
       status = 'stop'; label = 'STOP';
-      reason = `ROAS efektif ${roasEff.toFixed(2)}x di bawah titik impas`;
+      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di bawah titik impas`;
     }
     if (leak && leak.severity === 'bad' && status === 'stop') {
       reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
@@ -516,7 +594,7 @@ function analyze(data, options) {
     const net = b.comm - spend;
     const netEff = commEff - spend;
     const roi = spend > 0 ? (netEff / spend) * 100 : 0;
-    const margin = b.comm > 0 ? netEff / commEff * 100 : 0;
+    const margin = commEff > 0 ? netEff / commEff * 100 : 0;
 
     const cpc = b.clicks > 0 ? spend / b.clicks : 0;
     const cpm = b.impr > 0 ? spend / b.impr * 1000 : 0;
@@ -532,12 +610,13 @@ function analyze(data, options) {
     const avgOrder = orders > 0 ? b.gmv / orders : 0;
     const commRate = b.gmv > 0 ? b.comm / b.gmv * 100 : 0;
 
+    const winSpend = b.spendWindow, winClicks = b.metaClicksWindow;
     let leak = null;
     if (clkStart && b.metaClicksWindow > 0) {
       const shopee = b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
-      const wasted = (spend / Math.max(b.clicks, 1)) * failed;
+      const wasted = (winSpend / b.metaClicksWindow) * failed;
       leak = {
         metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
         severity: pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad',
@@ -549,26 +628,32 @@ function analyze(data, options) {
     const dailyRows = prodDays.map(d => {
       const dd = b.daily[d];
       return {
-        date: d, comm: dd.comm, spend: dd.spend, gmv: dd.gmv,
-        roas: dd.spend > 0 ? dd.comm / dd.spend : 0,
+        date: d, comm: dd.comm, commEff: dd.commEff || 0, spend: dd.spend, gmv: dd.gmv,
+        roas: dd.spend > 0 ? (dd.commEff || 0) / dd.spend : 0,
         orders: dd.orders.size, clicks: dd.clicks,
       };
     });
     /* dailyRows above is deliberately filtered to mature days that had spend,
        because that is what the STOP verdict may look at. Opening one date in
        the daily table needs the opposite: every day this tag did anything. */
-    const byDate = {};
+    const byDate = dict();
     Object.keys(b.daily).filter(isDate).forEach(d => {
       const dd = b.daily[d];
       const sh = dd.shopeeClicks || 0;
       if (!dd.spend && !dd.comm && !dd.clicks && !dd.orders.size && !sh) return;
       byDate[d] = {
-        date: d, comm: dd.comm, spend: dd.spend * ppnMult, gmv: dd.gmv,
+        date: d, comm: dd.comm, spend: dd.spend, gmv: dd.gmv,
         orders: dd.orders.size, clicks: dd.clicks, shopeeClicks: sh,
       };
     });
 
-    const v = verdictFor(spend, commEff, daysProd, dailyRows, leak);
+    const matureDaysProd = prodDays.length;
+    const matureSpend = dailyRows.reduce((sum, row) => sum + row.spend, 0);
+    const matureCommEff = Object.keys(b.daily).filter(isMature).reduce((sum, d) => sum + (b.daily[d].commEff || 0), 0);
+    const matureRoasEff = matureSpend > 0 ? matureCommEff / matureSpend : 0;
+    const v = spend > 0
+      ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, leak, true)
+      : verdictFor(spend, commEff, daysProd, dailyRows, leak, false);
 
     let bidHint = '';
     if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
@@ -578,14 +663,6 @@ function analyze(data, options) {
     /* The click report usually spans fewer days than the ads export. Dividing
        full-range spend by window-only Shopee clicks reads far too high, so the
        Shopee-side cost is matched to the click window on both sides. */
-    let winSpend = 0, winClicks = 0;
-    if (clkStart) {
-      Object.keys(b.daily).forEach(d => {
-        if (!isDate(d) || d < clkStart || d > clkEnd) return;
-        winSpend += b.daily[d].spend * ppnMult;
-        winClicks += b.daily[d].clicks;
-      });
-    }
     const shopeeClicks = b.shopeeClicks;
     const cpcShopee = shopeeClicks > 0 && winSpend > 0 ? winSpend / shopeeClicks : 0;
 
@@ -599,7 +676,7 @@ function analyze(data, options) {
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
       shopeeClicks, cpcShopee, winSpend, winClicks,
-      daysProd, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
+      daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
@@ -609,7 +686,7 @@ function analyze(data, options) {
     };
   }).sort((a, b) => b.spend - a.spend || b.comm - a.comm);
 
-  const tagIndex = {};
+  const tagIndex = dict();
   tags.forEach(t => { tagIndex[t.tag] = t; });
 
   /* ── Per ad unit rows (reference-style grain) ───────────────────────── */
@@ -630,7 +707,7 @@ function analyze(data, options) {
        on one tag cannot be told apart by anything in the data. */
     const shopeeClicks = parent ? Math.round((parent.shopeeClicks || 0) * share) : 0;
     const cpcShopee = parent ? parent.cpcShopee : 0;
-    const byDate = {};
+    const byDate = dict();
     Object.keys(u.daily).forEach(d => {
       const ud = u.daily[d], pd = parent && parent.byDate ? parent.byDate[d] : null;
       const dayShare = pd && pd.spend > 0 ? ud.spend / pd.spend : 0;
@@ -644,10 +721,10 @@ function analyze(data, options) {
       };
     });
     const roasEff = u.spend > 0 ? commEff / u.spend : 0;
-    const dv = topOf(u.delivery, 1)[0];
-    const active = dv ? /active|aktif/i.test(dv.name) : false;
+    const dv = u.latestDelivery || topOf(u.delivery, 1)[0];
+    const active = dv ? /^(active|aktif)$/i.test(dv.name.trim()) : false;
     return {
-      adName: k, tag: u.tag, method: u.method, confidence: u.confidence,
+      adName: k, tag: u.tag, candidateTag: u.candidateTag, method: u.method, confidence: u.confidence,
       spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
       shopeeClicks, cpcShopee, byDate,
       days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
@@ -664,7 +741,7 @@ function analyze(data, options) {
   }).sort((a, b) => b.spend - a.spend);
 
   const matchLog = adUnits.map(u => ({
-    adName: u.adName, tag: u.tag, method: u.method, confidence: u.confidence,
+    adName: u.adName, tag: u.tag, candidateTag: u.candidateTag, method: u.method, confidence: u.confidence,
     spend: u.spend, clicks: u.clicks,
   }));
 
@@ -676,12 +753,12 @@ function analyze(data, options) {
   const totalImpr = sum(t => t.impr);
   const totalClicks = sum(t => t.clicks);
   const allOrders = new Set();
-  fAff.forEach(r => allOrders.add(pick(r, COL.aff.orderId)));
+  fAff.forEach(r => { const id = String(pick(r, COL.aff.orderId) || '').trim(); if (id) allOrders.add(id); });
 
   const paid = tags.filter(t => t.spend > 0);
   const paidSpend = paid.reduce((s, t) => s + t.spend, 0);
   const paidComm = paid.reduce((s, t) => s + t.commEff, 0);
-  const organicComm = tags.filter(t => t.status === 'organik').reduce((s, t) => s + t.comm, 0);
+  const organicComm = tags.filter(t => t.status === 'organik').reduce((s, t) => s + t.commEff, 0);
 
   const kpi = {
     spend: totalSpend,
@@ -725,7 +802,6 @@ function analyze(data, options) {
 
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
-    const commEffDay = v.comm; // per-day status split is not tracked; raw comm is honest here
     return {
       date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
       shopeeClicks: clickDaily[d] || 0,
@@ -741,7 +817,7 @@ function analyze(data, options) {
   /* ── Actions: turn the verdicts into money, not just labels ─────────────
      The dashboard used to say "turunkan bid" six times without ever adding it
      up. These are the numbers that make the advice worth acting on. */
-  const overbid = tags.filter(t => t.spend > 0 && t.clicks > 0 && t.cpcGap < 0);
+  const overbid = tags.filter(t => t.status !== 'stop' && t.status !== 'evaluasi' && t.spend > 0 && t.clicks > 0 && t.cpcGap < 0);
   const bidSaving = overbid.reduce((s, t) => s + Math.abs(t.cpcGap) * t.clicks, 0);
   const stopTags = tags.filter(t => t.status === 'stop');
   const stopSpend = stopTags.reduce((s, t) => s + t.spend, 0);
@@ -755,9 +831,9 @@ function analyze(data, options) {
     .sort((a, b) => b.comm - a.comm).slice(0, 8)
     .map(t => ({
       tag: t.tag, comm: t.comm, orders: t.orders, gmv: t.gmv, avgComm: t.avgComm,
-      // What a click could cost and still clear the ROI target, using this
-      // tag's own commission-per-order as the yield estimate.
-      maxCpc: t.orders > 0 ? (t.comm / t.orders) / targetMult : 0,
+      // Organic orders supply a cost-per-order ceiling. A CPC ceiling would
+      // also require an observed paid click-to-order conversion rate.
+      maxCpa: t.orders > 0 ? (t.commEff / t.orders) / targetMult : 0,
       topPlatform: t.topPlatform ? t.topPlatform.name : '',
     }));
 
@@ -804,7 +880,7 @@ function analyze(data, options) {
       contentType: topOf(contentType).map(x => ({ name: x.name, comm: x.value })),
       clickSource: topOf(clickSrc).map(x => ({ name: x.name, count: x.value })),
       clickRegion: topOf(clickRegion, 8).map(x => ({ name: x.name, count: x.value })),
-      hourly: hourly.map((c, h) => ({ hour: h, comm: c, orders: hourlyOrders[h] })),
+      hourly: hourly.map((c, h) => ({ hour: h, comm: c, orders: hourlyOrders[h].size })),
       productByComm: Object.values(product).map(p => ({ ...p, orders: p.orders.size }))
         .sort((a, b) => b.comm - a.comm).slice(0, 15),
       productByQty: Object.values(product).map(p => ({ ...p, orders: p.orders.size }))
@@ -826,11 +902,11 @@ function stability(data, options, lags) {
     lag: l,
     result: analyze(data, Object.assign({}, options, { lagDays: l })),
   }));
-  const byTag = {};
+  const byTag = dict();
   runs.forEach(r => {
     r.result.tags.forEach(t => {
       if (t.spend <= 0) return;
-      if (!byTag[t.tag]) byTag[t.tag] = { tag: t.tag, seen: {}, order: [] };
+      if (!byTag[t.tag]) byTag[t.tag] = { tag: t.tag, seen: dict(), order: [] };
       byTag[t.tag].seen[t.status] = (byTag[t.tag].seen[t.status] || 0) + 1;
       byTag[t.tag].order.push({ lag: r.lag, status: t.status });
     });
@@ -879,21 +955,25 @@ function toSnapshot(result, meta) {
 }
 
 /* Build a comparable series from saved snapshots of ONE account.
-   Snapshots are deduped by period end so re-saving the same day does not
-   double-plot; the newest save for a period wins. */
+   Snapshots are deduped by account and full date range so distinct windows
+   ending on the same day are retained; the newest save for a period wins. */
 function buildTrend(snapshots, account) {
   const rows = (snapshots || [])
     .filter(s => !account || (s.account || 'default') === account)
     .slice()
     .sort((a, b) => String(a.saved).localeCompare(String(b.saved)));
 
-  const byPeriod = {};
-  rows.forEach(s => { byPeriod[s.range && s.range.end ? s.range.end : s.saved] = s; });
+  const byPeriod = dict();
+  rows.forEach(s => {
+    const range = s.range || {};
+    const key = JSON.stringify([range.end || s.saved, range.start || '', s.account || 'default']);
+    byPeriod[key] = s;
+  });
 
   const series = Object.keys(byPeriod).sort().map(k => {
     const s = byPeriod[k];
     return {
-      period: k, saved: s.saved,
+      period: s.range && s.range.end ? s.range.end : s.saved, saved: s.saved,
       start: s.range ? s.range.start : '', end: s.range ? s.range.end : '',
       spend: s.kpi.spend || 0,
       commEff: s.kpi.commEff || 0,
@@ -912,7 +992,7 @@ function buildTrend(snapshots, account) {
   });
 
   // Per-tag trajectory: how each tag's verdict and ROAS moved between saves
-  const tagTrend = {};
+  const tagTrend = dict();
   series.forEach((pt, i) => {
     (pt.tags || []).forEach(t => {
       if (!tagTrend[t.tag]) tagTrend[t.tag] = { tag: t.tag, points: [] };
@@ -926,7 +1006,7 @@ function buildTrend(snapshots, account) {
   const movers = Object.values(tagTrend).map(tt => {
     const p = tt.points;
     if (p.length < 2) return null;
-    const first = p[0], last = p[p.length - 1];
+    const first = p[p.length - 2], last = p[p.length - 1];
     return {
       tag: tt.tag, from: first.roasEff, to: last.roasEff,
       delta: (last.roasEff || 0) - (first.roasEff || 0),
@@ -951,7 +1031,7 @@ function buildTrend(snapshots, account) {
 }
 
 return {
-  DEFAULTS, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
+  DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
   cleanTag, COL, pick, topOf,
 };

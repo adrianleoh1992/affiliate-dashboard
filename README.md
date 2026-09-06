@@ -1,186 +1,137 @@
 # Affiliate Decision Dashboard
 
-Alat pengambilan keputusan iklan untuk affiliate Shopee yang beriklan di Meta Ads.
-Menggabungkan tiga laporan CSV menjadi satu vonis per tag: **Scale, Pantau, Stop, atau Organik** —
-lalu menyimpan riwayatnya per akun supaya perkembangan tiap akun kelihatan dari waktu ke waktu.
+Dashboard lokal untuk menggabungkan laporan komisi Shopee Affiliate, Meta Ads,
+dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, kebocoran klik,
+dan riwayat harian per akun. Semua pemrosesan dan penyimpanan berada di browser.
 
-Berjalan sepenuhnya di browser. Tidak ada server, tidak ada data yang dikirim ke mana pun.
+## Menjalankan
 
-## Cara pakai
-
-1. Buka `index.html` di browser.
-2. Pilih akun di pojok kanan atas, atau tekan **+** untuk membuat akun baru.
-3. Tarik ketiga file CSV ke area unggah:
-   - **Affiliate Commission Report** (Shopee) — wajib
-   - **Meta Ads Report** — untuk ROAS, CPM, CPC, CTR
-   - **Website Click Report** (Shopee) — untuk mendeteksi kebocoran klik
-4. Tekan **Simpan Snapshot** setiap selesai menganalisis. Setelah dua snapshot,
-   tab **Perkembangan** akan menampilkan tren akun tersebut.
-
-## Multi-akun
-
-Setiap akun punya penyimpanan sendiri:
-
-- mapping nama iklan ke tag
-- riwayat snapshot
-- tren perkembangan
-
-Berganti akun tidak mencampur data. Snapshot satu akun tidak pernah muncul di akun lain.
-
-## Yang membedakan dari sekadar laporan ROAS
-
-### ROAS berbayar dipisah dari ROAS gabungan
-
-Komisi organik bisa membuat ROAS gabungan terlihat sehat padahal iklan berbayarnya merugi.
-Pada data uji, ROAS gabungan 1,95x terlihat bagus — ROAS berbayarnya ternyata 0,92x,
-di bawah titik impas. Keduanya ditampilkan berdampingan.
-
-### CPC Ideal
-
-Dari target ROI yang Anda tetapkan, dihitung mundur: berapa CPC maksimal yang masih
-menguntungkan. "ROAS 0,86x" itu laporan; "Anda bayar Rp167, batas Anda Rp80" itu perintah.
-
-### Kebocoran klik
-
-Membandingkan klik yang dibayar di Meta dengan klik yang benar-benar tercatat di Shopee.
-Kalau sebuah tag hanya meneruskan 34% kliknya, masalahnya kemungkinan besar di **link atau
-redirect**, bukan di creative. Tanpa kolom ini Anda akan mematikan iklan dengan diagnosis salah.
-
-Persentase di atas 100% wajar — satu orang bisa klik berkali-kali dan trafik organik ikut terhitung.
-
-### Lag atribusi
-
-Pesanan tidak berhenti masuk di hari yang sama dengan kliknya. Pada data uji hanya 77%
-pesanan terjadi di H+0 sampai H+1; sisanya menyebar sampai H+6. Vonis STOP karena itu
-hanya dihitung sampai hari yang datanya sudah matang — tanpa perlindungan ini hampir
-semua iklan akan kena vonis STOP palsu.
-
-### Matching dengan tingkat keyakinan
-
-Tiap hasil pencocokan nama iklan ke tag diberi metode dan skor keyakinan. Yang lemah
-ditandai untuk diperiksa, bukan diam-diam dipakai.
-
-## Tab
-
-| Tab | Isi |
-|---|---|
-| **Keputusan** | Proyeksi dampak dalam rupiah, kalibrasi lag, vonis per tag, alasan, saran bid, ROAS, ROI, CPM, CPC ideal |
-| **Per Ad Unit** | Satu baris per iklan Meta: status, CPM, impresi, reach, CTR, CPC ideal |
-| **Kebocoran Klik** | Klik Meta vs Shopee, % masuk, biaya terbuang, sumber & wilayah klik |
-| **Harian** | Komisi vs biaya, ROAS harian, klik & konversi, tabel rincian per tanggal |
-| **Perkembangan** | Tren antar snapshot: laba, ROAS, komposisi keputusan, pergerakan tag |
-| **Peluang** | Kandidat iklan dari tag organik + peringatan konsentrasi anggaran |
-| **Rincian** | Platform, kategori, jam terbaik, jeda klik, produk, toko, kurva penyelesaian |
-| **Matching** | Nama iklan ke tag beserta metode dan keyakinan |
-
-## Dari vonis ke tindakan
-
-Label saja tidak menggerakkan uang. Tab Keputusan membuka dengan angka gabungan:
-
-- **Hemat dari turunkan bid** — total selisih CPC aktual dan CPC ideal dikali klik
-- **Biaya di tag STOP** — anggaran yang sedang mengalir ke tag yang seharusnya berhenti
-- **Hilang karena link** — klik yang dibayar tapi tidak sampai Shopee
-- **Total bisa dialihkan** — gabungan keduanya
-
-Ini menjawab "kalau saya turuti semua saran ini, berapa yang saya dapat?"
-
-## Kalibrasi lag otomatis
-
-Lag atribusi adalah setelan yang paling mengubah keputusan. Pada data uji, menggesernya
-dari 0 ke 7 hari mengubah jumlah vonis STOP dari 5 menjadi 6, dan PANTAU dari 1 menjadi 0.
-
-Karena itu dashboard **menghitung sendiri** lag yang sesuai: hari ketika 90% pesanan sudah
-masuk. Kalau setelan Anda berbeda dari yang disarankan data, muncul peringatan beserta
-tombol untuk menerapkannya.
-
-## Penanda vonis rapuh
-
-Tiap tag diuji ulang pada beberapa nilai lag. Tag yang vonisnya berubah-ubah diberi label
-**rapuh** — artinya keputusannya bergantung pada asumsi, bukan pada bukti yang kuat.
-Pada data uji, 3 dari 6 tag berbayar masuk kategori ini.
-
-Vonis yang bertahan di semua nilai lag jauh lebih aman untuk ditindaklanjuti.
-
-## Peluang dari organik
-
-Tag yang menghasilkan komisi **tanpa biaya iklan sama sekali** adalah bukti permintaan
-yang sudah teruji. Dashboard menghitung batas CPC awal untuk tiap kandidat berdasarkan
-komisi aktual per order dan target ROI Anda.
-
-Disertai peringatan konsentrasi: kalau satu tag menyerap lebih dari 35% anggaran, itu
-risiko yang perlu disadari meski ROAS-nya terlihat wajar.
-
-## Vonis
-
-| Status | Syarat |
-|---|---|
-| **Scale** | ROAS efektif ≥ ambang scale |
-| **Pantau** | ROAS efektif antara ambang pantau dan scale |
-| **Stop** | ROAS di bawah impas, atau ROAS < 1 selama N hari produksi berturut |
-| **Organik** | ada komisi, tanpa biaya iklan |
-| **Belum cukup data** | spend atau durasi belum memenuhi minimum |
-
-Sebuah tag baru divonis setelah memenuhi **spend minimum dan durasi minimum** — keduanya,
-bukan salah satu. Spend besar dalam satu hari bukan dasar yang cukup untuk mematikan iklan.
-
-Komisi berstatus Tertunda dihitung dengan bobot 0,95, karena sebagian akan batal.
-
-## Pengaturan
-
-Semua ambang bisa diubah dan tersimpan otomatis: PPN iklan, target ROI, ambang ROAS
-scale/pantau, spend minimum, hari minimum, lag atribusi, panjang streak stop, dan bobot
-komisi tertunda.
-
-## Di ponsel
-
-Layout berubah satu kolom di bawah 640px, dan semua target sentuh minimal 44×44px —
-termasuk tombol hapus file dan tombol Kosongkan. Diuji pada 390px dan 320px tanpa
-meluber horizontal.
-
-Unggah file memakai tombol **Pilih File** yang terlihat jelas; drag-and-drop tetap ada
-sebagai pelengkap di desktop, bukan satu-satunya cara.
-
-## Perlindungan data
-
-- Tombol Kosongkan meminta konfirmasi sebelum menghapus
-- Tiap file bisa dihapus satu per satu tanpa mengunggah ulang yang lain
-- Riwayat snapshot bisa **diekspor ke JSON dan diimpor kembali**, jadi tidak terkunci
-  di satu browser
-
-## Struktur
-
-```
-engine.js         mesin hitung murni, tanpa DOM — jalan di browser dan Node
-engine.test.js    uji unit mesin hitung
-index.html        struktur halaman
-styles.css        tema terang dan gelap
-app.js            render dan interaksi
-browser.test.js   uji end-to-end dengan CSV asli
-verify.js         verifikasi mesin terhadap CSV asli
-legacy-v1.html    versi lama, disimpan sebagai pembanding
-```
-
-Mesin hitung sengaja dipisah dari UI supaya angkanya bisa diuji, bukan sekadar
-terlihat benar di layar.
-
-## Menjalankan uji
+Buka `index.html` langsung, atau gunakan server lokal agar origin penyimpanan konsisten:
 
 ```bash
-node engine.test.js                     # uji mesin hitung
-python3 -m http.server 8899             # lalu di terminal lain:
-node browser.test.js                    # uji end-to-end
-node verify.js                          # cetak seluruh metrik dari CSV asli
+npm ci
+npm start
+# http://127.0.0.1:8899
 ```
 
-Uji browser memerlukan Playwright dan mengambil CSV dari `~/Downloads`.
+Pustaka PapaParse dan Chart.js tersedia di `vendor/`; halaman aplikasi tidak
+meminta skrip, font, atau data dari pihak ketiga. `index-daily.html` mengarah ke
+halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai
+arsip pembanding dan tidak disertakan dalam build produksi.
 
-## Privasi
+## Alur penggunaan
 
-Data transaksi tidak pernah meninggalkan browser. Tidak ada backend, tidak ada analytics,
-tidak ada pengiriman ke pihak ketiga. Snapshot disimpan di localStorage perangkat Anda.
+1. Pilih atau buat akun di bagian atas. CSV tidak menjamin identitas akun,
+   sehingga konteks akun harus dipilih dengan benar.
+2. Unggah CSV laporan komisi affiliate, laporan Meta Ads **per hari**, dan
+   laporan klik. Laporan affiliate diperlukan untuk analisis keputusan.
+3. Periksa rentang tanggal, kelengkapan laporan, PPN sesuai tagihan, dan mapping.
+   PPN awal di antarmuka adalah 0%; pilihan dan ambang disimpan per akun.
+4. Tinjau rencana simpan, lalu tekan **Simpan** untuk memasukkan agregat ke
+   riwayat harian. Unggahan saja belum menyimpan transaksi ke IndexedDB.
+5. Gunakan **Simpan Snapshot** untuk menyimpan hasil analisis periode terpilih.
+6. Setelah reload, buka **Data Tersimpan** untuk riwayat harian atau **Riwayat**
+   untuk snapshot. Tidak perlu mengunggah CSV kembali untuk membuka keduanya.
 
-File CSV di-ignore oleh git supaya data klien tidak ikut ter-commit.
+File identik yang berganti nama dan baris identik dari beberapa file disaring.
+File berbeda dengan nama dan ukuran sama tetap dapat dibaca. File CSV rusak
+atau tidak dikenali ditolak. Menghapus file dari layar menghitung ulang dari
+file yang tersisa; data harian yang telah disimpan dikelola terpisah.
 
----
+## Arti angka dan keputusan
 
-Adrian Leo Hadipradata · Berlima Digital
+- **Komisi efektif:** komisi selesai ditambah komisi tertunda dikalikan bobot
+  tertunda. Status dibatalkan dan belum dibayar dikecualikan. Kolom komisi per
+  produk didahulukan bila ada; kolom alternatif digunakan bila diperlukan.
+- **Biaya:** biaya Meta ditambah PPN satu kali. ROAS adalah komisi efektif
+  dibagi biaya; ROAS berbayar memisahkan komisi tag organik.
+- **Keputusan:** Scale, Pantau, Stop, Organik, atau Belum cukup data. Untuk tag
+  berbayar, keputusan menggunakan biaya, komisi, dan hari produksi yang sudah
+  matang menurut lag atribusi. Kolom utama tetap menunjukkan total periode;
+  alasan keputusan menyebut dasar yang matang.
+- **Lag dan order:** distribusi lag dan penyelesaian menghitung order unik,
+  bukan jumlah baris produk. Rekomendasi H+0 tetap dapat bernilai nol.
+- **Mapping:** mapping manual nama iklan yang dinormalisasi didahulukan.
+  Kecocokan lemah ditampilkan sebagai saran dan memerlukan mapping manual;
+  komisinya tidak otomatis digabung ke kandidat tersebut.
+- **Klik:** perbandingan Meta dan Shopee menggunakan cakupan tanggal laporan
+  klik. Data klik yang belum lengkap membatasi diagnosis kebocoran.
+- **Kandidat organik:** Maks Biaya/Order merupakan batas biaya per pesanan
+  berdasarkan komisi efektif dan target ROI. Angka ini bukan batas CPC;
+  CPC memerlukan estimasi konversi klik menjadi pesanan.
+- **Perkembangan:** periode dengan tanggal awal berbeda tetap terpisah,
+  meskipun tanggal akhirnya sama. Perubahan tag membandingkan dua snapshot
+  periode terbaru.
+
+## Data revisi dan pemulihan
+
+Deduplikasi memakai seluruh isi baris. Baris yang status, komisi, atau metriknya
+berubah bukan baris identik. Ekspor tidak selalu menyediakan ID unik per item,
+sehingga aplikasi tidak dapat memastikan apakah perubahan itu koreksi atau
+transaksi lain yang sah.
+
+Untuk laporan **koreksi**, hapus file lama dari analisis. Pada **Data Tersimpan**,
+hapus tanggal terdampak untuk jenis laporan yang bersangkutan, lalu unggah dan
+simpan kembali laporan lengkap yang benar untuk tanggal tersebut. Jangan
+menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
+penanda deduplikasi yang diperlukan agar unggah ulang dapat memulihkan hari itu.
+
+Database versi lama tetap dipertahankan. Agregat lama yang tidak memiliki
+identitas order untuk penggabungan aman akan menolak tambahan yang bertumpang
+tindih dan memberikan petunjuk hapus tanggal lalu impor ulang. Aplikasi tidak
+mencoba merekonstruksi angka lama yang mungkin sudah salah.
+
+Snapshot dapat diekspor dan diimpor dalam JSON. Impor divalidasi sebelum
+mengubah riwayat. Ekspor akun harian berisi agregat dan metadata deduplikasi;
+impor backup akun harian belum tersedia. Menghapus penyimpanan browser tetap
+menghapus data lokal, sehingga simpan CSV sumber dan ekspor cadangan Anda.
+
+## Pengujian
+
+Node.js 22 atau lebih baru disarankan untuk pengembangan.
+
+```bash
+npm ci
+npx playwright install chromium
+npm test
+npm run build
+npm audit
+```
+
+`npm test` menjalankan mesin hitung, regresi penyimpanan menggunakan
+fake-indexeddb, dan pengujian browser Chromium dengan server sementara.
+Semua fixture sintetis; tidak membaca folder Downloads atau data klien.
+Playwright memakai browser terpasangnya, atau Chrome lokal yang ditemukan.
+Gunakan `CHROME_PATH` untuk menentukan executable khusus.
+
+File uji lama (`browser.test.js`, `daily-agg.test.js`, `daily-store.test.js`,
+`daily-ui.test.js`, `daily-parity.test.js`) mengarah ke suite regresi portabel.
+Untuk memeriksa laporan Anda sendiri secara eksplisit:
+
+```bash
+node verify.js /path/affiliate.csv /path/ads.csv /path/clicks.csv
+```
+
+Pengujian sintetis membuktikan kasus yang dicakup; tidak menjamin semua variasi
+format ekspor dan kondisi browser telah tercakup.
+
+## Struktur dan deployment
+
+| File | Fungsi |
+|---|---|
+| `engine.js` | Mesin hitung murni untuk browser dan Node |
+| `app.js`, `index.html`, `styles.css` | Antarmuka, impor, snapshot, grafik, ekspor |
+| `daily-agg.js` | Deduplikasi dan agregasi harian |
+| `daily-store.js` | Transaksi IndexedDB dan migrasi |
+| `daily-layer.js` | Rencana simpan dan tampilan data harian |
+| `*.regression.test.js`, `engine.test.js` | Pengujian sintetis otomatis |
+| `scripts/build.js` | Menyalin aset aplikasi yang diizinkan ke `dist/` |
+| `scripts/vendor.js` | Memperbarui aset lokal dari dependensi terkunci |
+
+Build produksi hanya berisi aset aplikasi. Vercel menggunakan `npm run build`
+dan direktori `dist/`; pengujian dan berkas pengembangan tidak ikut dipublikasikan.
+Untuk memperbarui pustaka, ubah dependensi, jalankan `npm run vendor`, kemudian
+jalankan seluruh pengujian dan commit `package-lock.json` beserta aset vendor.
+
+CSV dan spreadsheet diabaikan Git. Tidak ada backend, analytics, pengiriman
+laporan, atau sinkronisasi cloud.
