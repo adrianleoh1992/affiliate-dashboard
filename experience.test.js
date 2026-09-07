@@ -62,6 +62,27 @@ async function main() {
     assert.match(JSON.stringify(analysis), /1 baris bermasalah dikecualikan/);
   });
 
+  test('native report blanks and completion markers load without discarding affiliate rows', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const report = [aff('done'), { ...aff('pending'), 'Status Pesanan': 'Tertunda' },
+      { ...aff('cancelled'), 'Status Pesanan': 'Dibatalkan' }].map(row => ({ ...row,
+        'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '--' }));
+    await upload(page, [{ name: 'affiliate-native-shape.csv', rows: report },
+      { name: 'ads-native-shape.csv', rows: [{ ...ad(), 'Landing page views': '', shop_clicks: '', Results: '' }] },
+      { name: 'clicks-native-shape.csv', rows: [click(), click('')] }]);
+    assert.equal(await page.locator('[data-accept-import]').count(), 0, 'Valid source blanks must not trigger partial acceptance');
+    assert.deepEqual(await page.evaluate(() => ({ rows: DATA.affiliate.length,
+      rejected: IMPORT_REPORTS.reduce((sum, r) => sum + r.parsed.stats.rejected, 0),
+      commission: RESULT.kpi.comm, orders: RESULT.kpi.orders, spend: RESULT.kpi.spend })),
+      { rows: 3, rejected: 0, commission: 400, orders: 2, spend: 100 });
+    await saveDaily(page);
+    assert.equal((await storedRows(page)).reduce((sum, row) => sum + row.comm, 0), 400);
+    await page.locator('#btnExport').click();
+    await page.selectOption('#exportFormat', 'json');
+    const analysis = JSON.parse(await readDownload(await download(page, '#btnDownloadData')));
+    assert.match(JSON.stringify(analysis), /Pengembalian Dana/);
+  });
+
   test('discarding a partial file preserves existing data and gives a durable reason', async page => {
     await upload(page, [{ name: 'existing.csv', rows: [aff()] }]);
     await upload(page, [{ name: 'review.csv', rows: [aff('2'), { ...aff('3'), 'Waktu Pemesanan': '2026-02-30' }] }]);

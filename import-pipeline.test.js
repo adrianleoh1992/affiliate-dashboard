@@ -214,6 +214,52 @@ test('missing optional counters are visible warnings', () => {
   assert.ok(hasIssue(r, 'empty_optional_number'));
 });
 
+test('Shopee optional blank refunds and double-dash completion markers keep valid orders readable', () => {
+  const rows = [
+    aff({ 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),
+    aff({ 'ID Pemesanan': '002', 'Status Pesanan': 'Tertunda', 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),
+    aff({ 'ID Pemesanan': '003', 'Status Pesanan': 'Dibatalkan', 'Waktu Terselesaikan': '--' }),
+    aff({ 'ID Pemesanan': '004', 'Status Pesanan': 'Belum Dibayar', 'Waktu Terselesaikan': '--', 'Jumlah Pengembalian Dana(Rp)': '--' }),
+  ];
+  const r = parse(rows);
+  assert.equal(r.ok, true);
+  assert.equal(r.stats.accepted, 4);
+  assert.equal(r.stats.rejected, 0);
+  assert.equal(r.rows[0]['Jumlah Pengembalian Dana(Rp)'], '', 'missing refunds remain unavailable, not invented amounts');
+  const result = E.analyze({ affiliate: r.rows, ads: [], clicks: [] });
+  assert.equal(result.kpi.orders, 2);
+  assert.equal(result.kpi.commEff, 1200.5 + 1200.5 * result.options.pendingFactor);
+  assert.equal(result.kpi.excluded.cancelled, 1);
+  assert.equal(result.kpi.excluded.unpaid, 1);
+  const daily = A.aggregateAffiliate(r.rows);
+  assert.equal(daily.reduce((sum, row) => sum + row.rows, 0), 4);
+  assert.equal(daily.reduce((sum, row) => sum + row.excluded, 0), 2);
+});
+
+test('optional missing markers do not permit missing required dates or commissions or malformed refund amounts', () => {
+  for (const changes of [
+    { 'Waktu Pemesanan': '--' }, { 'Total Komisi per Produk(Rp)': '--' },
+    { 'Jumlah Pengembalian Dana(Rp)': '12oops' }, { 'Jumlah Pengembalian Dana(Rp)': '-2' },
+  ]) assert.equal(parse([aff(changes)]).stats.accepted, 0);
+  assert.equal(parse([ads({ 'Amount spent (IDR)': '--' })]).stats.accepted, 0);
+});
+
+test('repeated warnings aggregate counts and examples while late errors remain visible', () => {
+  const rows = Array.from({ length: 250 }, (_, i) => aff({ 'ID Pemesanan': String(i + 1), 'Jumlah Pengembalian Dana(Rp)': '' }));
+  rows.push(aff({ 'ID Pemesanan': 'broken', 'Total Komisi per Produk(Rp)': '12oops' }));
+  const r = parse(rows);
+  assert.equal(r.stats.accepted, 250);
+  assert.equal(r.stats.rejected, 1);
+  assert.equal(r.stats.warnings, 250);
+  assert.equal(r.issues[0].code, 'invalid_number');
+  assert.equal(r.issues[0].row, 252);
+  const warning = r.issues.find(issue => issue.code === 'empty_optional_number');
+  assert.equal(warning.count, 250);
+  assert.deepEqual(warning.examples.map(example => example.row), [2, 3, 4]);
+  assert.match(warning.message, /250 catatan/);
+  assert.equal(hasIssue(r, 'issues_truncated'), false);
+});
+
 test('numeric validation rejects junk, infinity, unsafe and badly grouped values', () => {
   for (const input of ['12O00', 'NaN', 'Infinity', '1e999', '9007199254740992', '1,23,456', '1.2.3', '--2', '12 USD', 'Rp 12foo', '=100', '1 23']) assert.equal(I.strictNumber(input).valid, false, input);
 });

@@ -11,7 +11,7 @@
   // CSV fingerprints already stored by the prior reader.
   const SOURCE_ROW = Symbol.for('affiliate-dashboard.source-row');
   const TYPES = { affiliate: 'aff', ads: 'ads', clicks: 'clk' };
-  const EMPTY_MARKERS = /^(?:-|—|–|n\/?a|null)$/i;
+  const EMPTY_MARKERS = /^(?:-{1,2}|—|–|n\/?a|null)$/i;
   const STATUSES = new Map(['Selesai', 'Tertunda', 'Dibatalkan', 'Belum Dibayar'].map(x => [x.toLowerCase(), x]));
   const headerKey = value => String(value).normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g, '');
   const cleanHeader = value => String(value).replace(/^\uFEFF/, '').trim().replace(/\s+/g, ' ');
@@ -68,10 +68,21 @@
     options = options || {};
     const result = { ok: false, fatal: false, type: 'unknown', rows: [], fields: [], issues: [], stats: { total: 0, accepted: 0, rejected: 0 }, period: null, delimiter: '', fileName: options.fileName || '' };
     let issueCount = 0, errors = 0, warnings = 0;
+    const errorIssues = [], warningGroups = new Map();
     const issue = (severity, code, message, evidence) => {
       issueCount++;
-      if (severity === 'error') errors++; else warnings++;
-      if (result.issues.length < MAX_ISSUES) result.issues.push(Object.assign({ severity, code, message }, evidence || {}));
+      const entry = Object.assign({ severity, code, message }, evidence || {});
+      if (severity === 'error') {
+        errors++;
+        if (errorIssues.length < MAX_ISSUES) errorIssues.push(entry);
+      } else {
+        warnings++;
+        const key = JSON.stringify([code, entry.column || '']);
+        if (!warningGroups.has(key)) warningGroups.set(key, { ...entry, count: 0, examples: [] });
+        const group = warningGroups.get(key);
+        group.count++;
+        if (group.examples.length < 3) group.examples.push(entry);
+      }
     };
     function finish(fatal) {
       if (fatal) { result.fatal = true; result.rows = []; result.period = null; }
@@ -79,7 +90,18 @@
       result.stats.rejected = result.stats.total - result.stats.accepted;
       result.stats.errors = errors; result.stats.warnings = warnings;
       result.ok = !result.fatal && result.stats.accepted > 0;
-      if (issueCount > MAX_ISSUES) result.issues.push({ severity: 'warning', code: 'issues_truncated', message: `${issueCount - MAX_ISSUES} temuan tambahan tidak ditampilkan. Perbaiki sumber lalu impor ulang. Jumlah baris ditolak tetap lengkap.` });
+      const grouped = [...warningGroups.values()].map(group => {
+        if (group.count === 1) return group;
+        // Counts retain every occurrence; examples keep the summary useful
+        // without thousands of routine missing-value notices hiding errors.
+        const { row, value, ...summary } = group;
+        summary.message = `${group.count} catatan${group.column ? ' pada ' + group.column : ''}. Contoh: `
+          + group.examples.map(example => example.message).join(' ');
+        return summary;
+      });
+      result.issues = [...errorIssues, ...grouped].slice(0, MAX_ISSUES);
+      const represented = result.issues.reduce((sum, entry) => sum + (entry.count || 1), 0);
+      if (issueCount > represented) result.issues.push({ severity: 'warning', code: 'issues_truncated', message: `${issueCount - represented} temuan tambahan tidak ditampilkan. Perbaiki sumber lalu impor ulang. Jumlah baris ditolak tetap lengkap.` });
       return result;
     }
     const Papa = options.Papa || defaultPapa;
@@ -198,7 +220,7 @@
         const essential = key === 'spend' || key === 'comm' && field === col.comm.find(name => row[name] && !EMPTY_MARKERS.test(row[name]));
         if (number.empty) {
           if (essential && !excluded) rowIssue('error', 'missing_amount', `${field} kosong. Isi angka yang benar (0 jika benar-benar nol), lalu impor ulang.`, field, raw);
-          else if (!excluded && (key === 'gmv' || key === 'price' || key === 'refund')) rowIssue('error', 'missing_amount', `${field} kosong. Isi 0 jika nilainya nol agar nilai uang tidak diasumsikan.`, field, raw);
+          else if (!excluded && (key === 'gmv' || key === 'price')) rowIssue('error', 'missing_amount', `${field} kosong. Isi 0 jika nilainya nol agar nilai uang tidak diasumsikan.`, field, raw);
           else { row[field] = ''; rowIssue('warning', 'empty_optional_number', `${field} tidak tersedia${excluded ? '; pesanan tetap dicatat sebagai ' + row[col.status[0]] + ' dan dikecualikan dari ROI' : '; metrik terkait mungkin belum lengkap'}.`, field, raw); }
         } else if (!number.valid || countKeys.has(key) && (!Number.isInteger(number.value) || number.value < 0) || !['comm', 'commNet'].includes(key) && number.value < 0) {
           rowIssue('error', 'invalid_number', `${field} berisi angka tidak valid "${raw}". Perbaiki nilainya; baris ini tidak dimasukkan.`, field, raw);

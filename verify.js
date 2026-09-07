@@ -1,19 +1,22 @@
 // Verifikasi engine terhadap CSV asli.
 const fs = require('fs');
 const E = require('./engine.js');
-
-const Papa = require('papaparse');
+const I = require('./import-pipeline.js');
 const files = process.argv.slice(2);
 if (files.length !== 3) {
   console.error('Usage: node verify.js affiliate.csv ads.csv clicks.csv');
   process.exit(1);
 }
 function parseCSV(file) {
-  const result = Papa.parse(fs.readFileSync(file, 'utf8'), {
-    header: true, skipEmptyLines: 'greedy', transformHeader: h => h.replace(/^\uFEFF/, '').trim(),
-  });
-  if (result.errors.length) throw new Error(file + ': ' + result.errors[0].message);
-  return result.data;
+  const bytes = fs.readFileSync(file);
+  const encoding = bytes[0] === 255 && bytes[1] === 254 ? 'utf-16le'
+    : bytes[0] === 254 && bytes[1] === 255 ? 'utf-16be' : 'utf-8';
+  const result = I.parseText(new TextDecoder(encoding, { fatal: true }).decode(bytes), { fileName: file });
+  console.log(result.type, result.stats.accepted + '/' + result.stats.total + ' baris valid',
+    result.stats.warnings + ' catatan kualitas');
+  if (!result.ok || result.stats.rejected) throw new Error(file + ': ' + result.issues
+    .filter(issue => issue.severity === 'error').slice(0, 3).map(issue => issue.message).join(' '));
+  return result.rows;
 }
 const [aff, ads, clk] = files.map(parseCSV);
 

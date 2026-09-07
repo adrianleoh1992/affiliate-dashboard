@@ -48,6 +48,12 @@ hari dalam satu baris ditolak karena tidak dapat menghasilkan riwayat harian
 yang benar. Kesalahan angka, tanggal, atau kolom ditampilkan dengan rincian
 yang dapat diunduh. Tombol batal menghentikan batch yang sedang dibaca.
 
+Kolom pengembalian dana kosong dan penanda `--` pada waktu selesai opsional
+dikenali sebagai nilai yang belum tersedia pada ekspor Shopee; keduanya tidak
+menolak pesanan yang valid. Komisi wajib, biaya iklan, dan tanggal utama tetap
+harus valid. Catatan berulang diringkas per jenis/kolom dengan jumlah kejadian
+dan contoh baris, sementara kesalahan selalu ditampilkan lebih dahulu.
+
 Rentang tanggal pilihan sendiri dipertahankan saat menambah file; pilihan
 semua tanggal mengikuti cakupan data terbaru. Pencarian tag dan filter keputusan
 membantu mempersempit tabel. Tombol metrik menampilkan kolom tambahan.
@@ -158,6 +164,9 @@ Untuk memeriksa laporan Anda sendiri secara eksplisit:
 ```bash
 node verify.js /path/affiliate.csv /path/ads.csv /path/clicks.csv
 ```
+
+Verifikasi tersebut memakai pembaca CSV yang sama dengan dashboard dan berhenti
+jika ada baris ditolak, sehingga pemeriksaan mesin tidak melewati validasi impor.
 
 Pengujian sintetis membuktikan kasus yang dicakup; tidak menjamin semua variasi
 format ekspor dan kondisi browser telah tercakup.

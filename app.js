@@ -90,7 +90,7 @@ function renderImportReports(){
   $('importFeedbackRows').querySelectorAll('[data-discard-import]').forEach(b=>b.onclick=()=>{const r=IMPORT_REPORTS.find(x=>x.id===+b.dataset.discardImport);if(r){r.state='error';r.message='File diabaikan oleh pengguna';delete r.parsed.rows}renderImportReports()});
   $('importFeedbackRows').querySelectorAll('[data-issues]').forEach(b=>b.onclick=()=>{
     const r=IMPORT_REPORTS.find(x=>x.id===+b.dataset.issues);if(!r||!r.parsed)return;
-    const csv=Papa.unparse(r.parsed.issues.map(x=>({File:r.name,Baris:x.row||'',Tingkat:x.severity,Kolom:x.column||'',Catatan:x.message})),{escapeFormulae:true,newline:'\r\n'});
+    const csv=Papa.unparse(r.parsed.issues.map(x=>({File:r.name,Baris:x.row||'',Jumlah:x.count||1,Tingkat:x.severity,Kolom:x.column||'',Catatan:x.message})),{escapeFormulae:true,newline:'\r\n'});
     downloadBlob(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}),'pemeriksaan-'+DashboardExport.filenamePart(r.name)+'.csv');
   });
 }
