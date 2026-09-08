@@ -89,6 +89,20 @@ async function main() {
         return value;
       }
       freeze(result);
+      const labels = [], cards = [], OriginalPDF = window.jspdf.jsPDF;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), drawText = doc.text, drawCard = doc.roundedRect;
+        doc.text = function (value, x, y, ...rest) {
+          labels.push({ value: String(value), page: doc.getCurrentPageInfo().pageNumber });
+          return drawText.call(this, value, x, y, ...rest);
+        };
+        doc.roundedRect = function (x, y, width, height, ...rest) {
+          cards.push({ x, y, width, height, page: doc.getCurrentPageInfo().pageNumber });
+          return drawCard.call(this, x, y, width, height, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
       const bounds = [], chartCalls = [], api = window.jspdf.jsPDF.API, autoTable = api.autoTable;
       const makeCharts = DashboardPDFCharts.create;
       DashboardPDFCharts = { ...DashboardPDFCharts, create(doc, options) {
@@ -111,11 +125,13 @@ async function main() {
       for (const mode of ['ringkas', 'standar', 'lengkap']) {
         const start = bounds.length;
         const chartStart = chartCalls.length;
+        const labelStart = labels.length, cardStart = cards.length;
         const doc = window.DashboardPDF.create(result, { mode, account: 'QA Café Indonesia',
           title: 'Laporan kinerja affiliate - data sintetis', generatedAt: '2026-09-06T05:00:00Z',
           quality: ['DATA SINTETIS UNTUK PENGUJIAN - bukan data akun sebenarnya.'] });
         reports[mode] = { pages: doc.getNumberOfPages(), bytes: doc.output('datauristring').split(',')[1],
-          bounds: bounds.slice(start), charts: chartCalls.slice(chartStart), font: doc.getFont().fontName };
+          bounds: bounds.slice(start), charts: chartCalls.slice(chartStart), font: doc.getFont().fontName,
+          labels: labels.slice(labelStart), cards: cards.slice(cardStart) };
       }
       const invalid = [];
       for (const [data, options] of [[null, {}], [result, { mode: '__proto__' }], [result, { mode: 'constructor' }],
@@ -139,7 +155,15 @@ async function main() {
       for (const { box } of report.charts) {
         assert.ok(box.x >= 14 && box.x + box.width <= 196 && box.y >= 18 && box.y + box.height <= 279, 'Charts must fit page bounds');
       }
-      assert.equal(report.charts[0].page, 1, 'Report must lead with a chart, not pages of prose');
+      assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
+      const front = report.labels.filter(label => label.page === 1).map(label => label.value);
+      for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
+        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
+        assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
+      }
+      assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      for (const card of report.cards) assert.ok(card.x >= 14 && card.x + card.width <= 196.01 && card.y >= 18 && card.y + card.height <= 279,
+        'Dashboard cards must remain within page bounds');
       const trend = report.charts[0].box.rows;
       assert.ok(trend.some(row => row.comm != null));
       assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) - result.kpi.commEff) < 0.0001,
@@ -170,6 +194,41 @@ async function main() {
     }, Engine.analyze({ affiliate: [], ads: [], clicks: [] }, {}));
     assert.ok(empty.pages > 0 && empty.bytes > 1000);
     console.log('PASS PDF missing inputs, mode validation, Unicode labels, source immutability, empty report');
+    const clickSource = {
+      affiliate: ['A', 'B'].map(tag => ({ 'ID Pemesanan': tag, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-01 10:00:00', 'Tag_link1': tag, 'Total Komisi per Produk(Rp)': '100' })),
+      ads: [1, 2].flatMap(day => ['A', 'B'].map((tag, index) => ({ 'Ad name': tag,
+        'Amount spent (IDR)': '50', 'Reporting starts': '2026-09-0' + day, 'Reporting ends': '2026-09-0' + day,
+        'Link clicks': String((index + 1) * (day === 1 ? 10 : 1000)) }))),
+      clicks: ['A', 'B'].flatMap((tag, index) => Array.from({ length: index === 0 ? 5 : 25 }, () => ({
+        'Waktu Klik': '2026-09-01 09:00:00', 'Tag_link': tag }))), tagMap: { A: 'A', B: 'B' },
+    };
+    const clickReports = await page.evaluate(results => {
+      const OriginalPDF = window.jspdf.jsPDF;
+      let labels;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 1) labels.push(String(value));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try {
+        return results.map(result => {
+          labels = [];
+          DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' });
+          return ['Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
+        });
+      } finally { window.jspdf.jsPDF = OriginalPDF; }
+    }, [clickSource, { ...clickSource, clicks: [] }, { ...clickSource, ads: [] }]
+      .map(source => Engine.analyze(source, { ppn: 0, lagDays: 0 })));
+    assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%'],
+      'Dashboard compares matched tags in the click window; gains on one tag must not offset lost clicks on another');
+    assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
+    assert.deepEqual(clickReports[2], ['-', '-', '-', '-'], 'Without ads, a click comparison must remain unavailable');
+    console.log('PASS PDF dashboard click scope, per-tag losses and unavailable comparisons');
     const partialSources = Engine.analyze({
       affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',
         'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Tag_link1': 'Coverage',
@@ -250,7 +309,7 @@ async function main() {
           quality: ['DATA SINTETIS - contoh laporan untuk demonstrasi fitur PDF. Seluruh akun, produk, dan angka pada laporan ini adalah data buatan.'] });
         return { pages: doc.getNumberOfPages(), bytes: doc.output('datauristring').split(',')[1] };
       }, result);
-      assert.ok(demo.pages >= 2 && demo.pages <= 6, 'Visual pages and full tables must remain readable and compact');
+      assert.ok(demo.pages >= 2 && demo.pages <= 8, 'Dashboard, visual pages and full tables must remain readable and compact');
       fs.writeFileSync(path.join(qaDir, 'demo-report.pdf'), Buffer.from(demo.bytes, 'base64'));
       console.log('PASS PDF demo: ' + demo.pages + ' pages, 3 tags, 14 days, synthetic data only');
     }

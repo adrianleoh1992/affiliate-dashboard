@@ -65,7 +65,7 @@
       }).join('');
     }
     const M = 14, WIDTH = 182, TOP = 24, BOTTOM = 279;
-    const r = result.range, k = result.kpi, o = result.options || {}, b = result.breakdown || {};
+    const r = result.range, k = result.kpi, o = result.options || {}, b = result.breakdown || {}, a = result.actions || {};
     // Keep real commission even when a zero pending weight makes its effective
     // value zero. Only omit tags whose cost and both commission values are zero.
     const omittedTags = new Set(result.tags.filter(t => t.spend === 0 && t.comm === 0 && t.commEff === 0).map(t => t.tag));
@@ -130,16 +130,59 @@
       });
       y = doc.lastAutoTable.finalY + 6;
     }
+    function fitLine(value, width, size) {
+      doc.setFontSize(size);
+      let line = text(value);
+      if (doc.getTextWidth(line) <= width) return line;
+      const chars = Array.from(line);
+      while (chars.length && doc.getTextWidth(chars.join('') + '...') > width) chars.pop();
+      return chars.join('') + '...';
+    }
     function summaryMetric(label, value, note, x, top, width, negative) {
       doc.setFillColor(...COLORS.pale); doc.roundedRect(x, top, width, 24, 1.4, 1.4, 'F');
       doc.setFont(font, 'normal'); doc.setFontSize(8); doc.setTextColor(...COLORS.muted);
-      doc.text(text(label), x + 4, top + 6);
+      doc.text(fitLine(label, width - 8, 8), x + 4, top + 6);
       doc.setFont(font, 'bold'); doc.setTextColor(...(negative ? COLORS.danger : COLORS.ink));
       let size = 13; doc.setFontSize(size);
       while (doc.getTextWidth(text(value)) > width - 8 && size > 7) { size -= 0.25; doc.setFontSize(size); }
       doc.text(text(value), x + 4, top + 14);
       doc.setFont(font, 'normal'); doc.setFontSize(7); doc.setTextColor(...COLORS.muted);
-      doc.text(text(note), x + 4, top + 21);
+      doc.text(fitLine(note, width - 8, 7), x + 4, top + 21);
+    }
+    function metricGrid(metrics, columns) {
+      const width = (WIDTH - (columns - 1) * 4) / columns;
+      for (let index = 0; index < metrics.length; index += columns) {
+        ensure(24);
+        metrics.slice(index, index + columns).forEach((metric, column) =>
+          summaryMetric(metric[0], metric[1], metric[2], M + column * (width + 4), y, width, metric[3]));
+        y += 27;
+      }
+    }
+    function decisionBoard() {
+      const statuses = ['scale', 'pantau', 'stop', 'organik'], width = (WIDTH - 4) / 2;
+      statuses.forEach((status, index) => {
+        if (index % 2 === 0) ensure(27);
+        const x = M + (index % 2) * (width + 4), top = y;
+        const group = tags.filter(t => t.status === status).sort((l, r) => status === 'organik'
+          ? amount(r.comm) - amount(l.comm) : status === 'scale' ? amount(r.roasEff) - amount(l.roasEff) : amount(l.roasEff) - amount(r.roasEff));
+        doc.setFillColor(...COLORS.pale); doc.roundedRect(x, top, width, 27, 1.4, 1.4, 'F');
+        doc.setFillColor(...statusColors[status]); doc.rect(x, top, 1, 27, 'F');
+        doc.setFont(font, 'bold'); doc.setFontSize(8); doc.setTextColor(...statusColors[status]);
+        doc.text(statusNames[status] + ' (' + integer(group.length) + ')', x + 4, top + 5.5);
+        doc.setFont(font, 'normal'); doc.setTextColor(...COLORS.ink);
+        if (!group.length) { doc.setFontSize(7); doc.text('Belum ada tag', x + 4, top + 13); }
+        group.slice(0, 3).forEach((t, row) => {
+          const value = status === 'organik' ? money(t.comm) : ratio(t.roasEff, amount(t.spend) > 0);
+          doc.setFontSize(7);
+          const valueWidth = doc.getTextWidth(text(value));
+          doc.text(fitLine(t.tag, width - valueWidth - 12, 7), x + 4, top + 10.5 + row * 4);
+          doc.text(text(value), x + width - 4, top + 10.5 + row * 4, { align: 'right' });
+        });
+        doc.setTextColor(...COLORS.muted); doc.setFontSize(6.5);
+        const basis = status === 'organik' ? 'Komisi laporan' : 'ROAS periode';
+        doc.text(basis + (group.length > 3 ? ' | +' + integer(group.length - 3) + ' tag di tabel' : ''), x + 4, top + 24);
+        if (index % 2 === 1) y += 30;
+      });
     }
 
     function moneyFlow() {
@@ -162,27 +205,51 @@
 
     doc.setFillColor(...COLORS.accent); doc.rect(M, y - 2, 8, 2, 'F'); y += 7;
     paragraph('AFFILIATE DASHBOARD / ' + MODES[mode].toUpperCase(), { size: 9, color: COLORS.accent, bold: true });
-    paragraph(title, { size: 23, color: COLORS.ink, bold: true, gap: 4 });
+    paragraph(title, { size: 21, color: COLORS.ink, bold: true, gap: 3 });
     paragraph(account, { size: 11, color: COLORS.ink, bold: true, gap: 1 });
-    paragraph('Periode ' + period + '  |  Dibuat ' + made, { size: 8, gap: 6 });
-    ensure(54);
-    const metrics = [
-      ['Biaya iklan termasuk PPN', money(k.spend), 'PPN ' + decimal(amount(o.ppn)) + '%'],
-      ['Komisi efektif', money(k.commEff), 'Termasuk komisi organik'],
-      ['Laba efektif', money(k.netEff), 'Komisi efektif dikurangi biaya', amount(k.netEff) < 0],
-      ['ROAS iklan berbayar', ratio(k.paidRoas, amount(k.paidSpend) > 0), 'Komisi tag berbayar / biaya iklan'],
-      ['Pesanan unik', integer(k.orders), 'Tidak termasuk batal / belum dibayar'],
-      ['Komisi tertunda', money(k.commPending), percent(k.pendingPct) + ' dari komisi laporan'],
-    ];
-    metrics.forEach((metric, index) => summaryMetric(metric[0], metric[1], metric[2],
-      M + (index % 3) * 62, y + Math.floor(index / 3) * 27, 58, metric[3]));
-    y += 58;
+    paragraph('Periode ' + period + '  |  Dibuat ' + made, { size: 8, gap: 3 });
+    section('Dashboard utama');
+    metricGrid([
+      ['Komisi Total', money(k.commEff), integer(k.orders) + ' pesanan | ' + integer(k.qty) + ' produk'],
+      ['Spend Iklan', money(k.spend), 'Termasuk PPN ' + decimal(amount(o.ppn)) + '%'],
+      ['Laba Bersih', money(k.netEff), 'Komisi efektif dikurangi biaya iklan', amount(k.netEff) < 0],
+      ['ROAS Total', ratio(k.roasEff, amount(k.spend) > 0), 'Iklan berbayar ' + ratio(k.paidRoas, amount(k.paidSpend) > 0)],
+    ], 2);
+    // Use the same matched tag/window totals as the main dashboard, rather
+    // than comparing all Meta clicks with all Shopee clicks across different dates.
+    const clickTags = result.tags.filter(t => t.leak && finite(t.leak.pct));
+    const metaClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.metaClicks), 0);
+    const shopeeClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.shopeeClicks), 0);
+    const lostClicks = clickTags.reduce((sum, t) => sum + Math.max(0, amount(t.leak.metaClicks) - amount(t.leak.shopeeClicks)), 0);
+    const hasClickComparison = clickTags.length > 0;
+    const hasAds = amount(result.counts && result.counts.ads) > 0;
+    section('Klik Meta dan Shopee');
+    metricGrid([
+      ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
+      ['Klik Shopee', hasClickComparison ? integer(shopeeClicks) : '-', 'Jendela dan tag sama'],
+      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', 'Selisih turun per tag', lostClicks > 0],
+      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Shopee / Meta'],
+    ], 4);
+    section('Prioritas anggaran');
+    metricGrid([
+      ['Hemat dari Turunkan Bid', money(a.bidSaving), integer(a.overbidCount) + ' tag di atas CPC ideal'],
+      ['Biaya di Tag STOP', money(a.stopSpend), integer(tags.filter(t => t.status === 'stop').length) + ' tag pada periode ini'],
+      ['Total bisa dialihkan', money(a.reclaimable), 'Estimasi dari biaya historis'],
+    ], 3);
+    section('Keputusan utama');
+    decisionBoard();
+    y += 2;
     const coverage = [
       [daily.filter(d => d.hasAffiliate === false).length, 'affiliate'],
       [daily.filter(d => d.hasAds === false).length, 'iklan'],
     ].filter(([count]) => count > 0).map(([count, source]) => integer(count) + ' hari tanpa baris ' + source);
     if (coverage.length) paragraph('Cakupan: ' + coverage.join('; ') + '. Laba memakai data yang tersedia.',
-      { size: 8, color: COLORS.ink, bold: true, gap: 2 });
+      { size: 7, color: COLORS.ink, bold: true, gap: 1 });
+    paragraph('Keputusan sampai ' + (r.matureUntil || '-') + '. '
+      + (tags.some(t => t.status === 'evaluasi') ? integer(tags.filter(t => t.status === 'evaluasi').length) + ' tag perlu evaluasi; lihat tabel. ' : '')
+      + 'Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'belum tersedia') + '.', { size: 7, gap: 0 });
+
+    nextPage();
     section('Tren biaya dan komisi');
     ensure(76);
     charts.trend({ x: M, y, width: WIDTH, height: 76, matureUntil: r.matureUntil,
@@ -197,9 +264,14 @@
         count: tags.filter(t => t.status === status).length, color: statusColors[status] })) });
     y += 38;
 
-    nextPage();
     section('Bagaimana laba terbentuk');
     moneyFlow();
+    metricGrid([
+      ['Komisi organik efektif', money(k.organicComm), 'Termasuk dalam Komisi Total'],
+      ['Komisi tertunda', money(k.commPending), percent(k.pendingPct) + ' dari komisi laporan'],
+    ], 2);
+
+    nextPage();
     const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);
     section('Biaya dan komisi per tag', integer(topTags.length) + ' dari ' + integer(tags.length) + ' tag, diurutkan dari biaya terbesar. Tabel memuat semua tag dengan biaya atau komisi.');
     ensure(93);
@@ -211,7 +283,6 @@
       t.tag, statusNames[t.status] || t.label, money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
     ]), [45, 25, 30, 30, 30, 22], { numeric: [2, 3, 4, 5], statuses: tags.map(t => t.status) });
 
-    const a = result.actions || {};
     section('Prioritas tindakan');
     table(['Periksa', 'Tag', 'Nilai terkait'], [
       ['Tag berstatus Stop', integer(tags.filter(t => t.status === 'stop').length), money(a.stopSpend) + ' biaya periode ini'],
@@ -219,6 +290,20 @@
       ['Selisih klik berat', integer(tags.filter(t => t.leak && t.leak.severity === 'bad').length), money(a.leakWaste) + ' estimasi biaya terkait'],
     ], [74, 20, 88], { numeric: [1] });
     paragraph('Nilai tindakan memakai biaya historis, bukan jaminan penghematan.', { size: 7 });
+
+    section('Kandidat iklan dari organik', 'Maksimal 8 kandidat seperti pada dashboard. Komisi laporan sebelum bobot tertunda; batas biaya per pesanan memakai komisi efektif dan target ROI.');
+    table(['Tag', 'Komisi laporan', 'Pesanan', 'Maks biaya / pesanan', 'Kanal utama'], array(a.organicCandidates).filter(c => !omittedTags.has(c.tag)).map(c => [
+      c.tag, money(c.comm), integer(c.orders), amount(c.orders) > 0 ? money(c.maxCpa) : '-', c.topPlatform || '-',
+    ]), [46, 36, 20, 40, 40], { numeric: [1, 2, 3], empty: 'Belum ada kandidat organik dengan komisi.' });
+    if (a.concentration) {
+      section('Risiko konsentrasi anggaran');
+      metricGrid([
+        ['Porsi tag terbesar', percent(a.concentration.topShare), a.concentration.topTag],
+        ['Porsi dua tag terbesar', percent(a.concentration.top2Share), 'Dari ' + integer(a.concentration.count) + ' tag berbayar'],
+      ], 2);
+      y += 2;
+      paragraph('Tag terbesar: ' + a.concentration.topTag + ' | ROAS periode ' + ratio(a.concentration.topRoas) + '.', { size: 8 });
+    }
 
     if (mode !== 'ringkas') {
       section('Efisiensi tag', 'CPC Shopee memakai biaya pada jendela laporan klik. Pesanan dapat muncul pada lebih dari satu tag; gunakan pesanan unik portofolio untuk total.');

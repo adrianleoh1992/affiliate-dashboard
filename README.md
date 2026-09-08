@@ -70,8 +70,14 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
   format `affiliate-analysis` versi 1. JSON analisis bukan backup yang dapat
   dipulihkan ke penyimpanan harian.
 - **PDF:** klik **PDF**, isi judul, lalu unduh Ringkas, Standar, atau Lengkap.
-  Semua mode dimulai dengan angka utama, grafik tren biaya/komisi, peta keputusan,
-  diagram pembentukan laba, dan perbandingan enam tag dengan biaya terbesar.
+  Semua mode dimulai dengan halaman **Dashboard utama**: Komisi Total, Spend
+  Iklan, Laba Bersih, ROAS Total, metrik klik, prioritas anggaran, serta kartu
+  Scale/Pantau/Stop/Organik. Klik memakai tag dan jendela pembanding yang sama
+  dengan dashboard; sumber yang tidak tersedia ditandai `-`.
+  Halaman berikutnya berisi grafik tren, peta keputusan, diagram laba, dan
+  perbandingan enam tag dengan biaya terbesar. Peluang organik serta konsentrasi
+  anggaran dari dashboard juga disertakan. Ini tata letak PDF dengan teks dan
+  grafik vektor, bukan tangkapan layar yang memotong dashboard panjang.
   Tag dengan biaya dan komisi sama-sama nol tidak disertakan dalam grafik,
   tabel, rincian iklan, maupun jumlah tag. Tag organik, tag dengan biaya tanpa
   komisi, dan komisi negatif tetap disertakan. Komisi tertunda yang bobotnya nol
