@@ -6,7 +6,7 @@
   'use strict';
 
   const MODES = Object.freeze({ ringkas: 'Ringkas', standar: 'Standar', lengkap: 'Lengkap' });
-  const COLORS = { ink: [27, 42, 52], muted: [88, 105, 113], accent: [16, 111, 107],
+  const COLORS = { ink: [27, 42, 52], muted: [88, 105, 113], accent: [16, 111, 107], cost: [210, 112, 64],
     line: [218, 227, 230], pale: [241, 247, 247], white: [255, 255, 255], danger: [169, 50, 53] };
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const amount = value => finite(value) ? value : 0;
@@ -67,6 +67,11 @@
     const M = 14, WIDTH = 182, TOP = 24, BOTTOM = 279;
     const r = result.range, k = result.kpi, o = result.options || {}, b = result.breakdown || {};
     const tags = result.tags, units = array(result.adUnits), daily = array(result.daily);
+    if (!root.DashboardPDFCharts) throw new Error('Pustaka grafik PDF belum siap. Muat ulang lalu coba lagi.');
+    const charts = root.DashboardPDFCharts.create(doc, { font, text, colors: COLORS });
+    const statusColors = { scale: COLORS.accent, pantau: [142, 97, 13], stop: COLORS.danger,
+      organik: [77, 113, 157], evaluasi: [85, 104, 115] };
+    const statusNames = { scale: 'Scale', pantau: 'Pantau', stop: 'Stop', organik: 'Organik', evaluasi: 'Evaluasi' };
     const account = text(settings.account || 'Akun aktif');
     const title = text(settings.title || 'Laporan kinerja affiliate');
     const generated = settings.generatedAt == null ? new Date() : new Date(settings.generatedAt);
@@ -112,19 +117,43 @@
           textColor: COLORS.ink, lineColor: COLORS.line, lineWidth: { bottom: 0.15 } },
         headStyles: { fillColor: COLORS.accent, textColor: COLORS.white, fontStyle: 'bold', fontSize: 8 },
         alternateRowStyles: { fillColor: COLORS.pale }, columnStyles,
+        didParseCell: data => {
+          if (options.statuses && data.section === 'body' && data.column.index === 1) {
+            data.cell.styles.textColor = statusColors[options.statuses[data.row.index]] || COLORS.muted;
+            data.cell.styles.fontStyle = 'bold';
+          }
+        },
       });
       y = doc.lastAutoTable.finalY + 6;
     }
     function summaryMetric(label, value, note, x, top, width, negative) {
-      doc.setFillColor(...COLORS.pale); doc.roundedRect(x, top, width, 29, 1.4, 1.4, 'F');
+      doc.setFillColor(...COLORS.pale); doc.roundedRect(x, top, width, 24, 1.4, 1.4, 'F');
       doc.setFont(font, 'normal'); doc.setFontSize(8); doc.setTextColor(...COLORS.muted);
       doc.text(text(label), x + 4, top + 6);
       doc.setFont(font, 'bold'); doc.setTextColor(...(negative ? COLORS.danger : COLORS.ink));
       let size = 13; doc.setFontSize(size);
       while (doc.getTextWidth(text(value)) > width - 8 && size > 7) { size -= 0.25; doc.setFontSize(size); }
-      doc.text(text(value), x + 4, top + 15);
+      doc.text(text(value), x + 4, top + 14);
       doc.setFont(font, 'normal'); doc.setFontSize(7); doc.setTextColor(...COLORS.muted);
-      doc.text(text(note), x + 4, top + 23);
+      doc.text(text(note), x + 4, top + 21);
+    }
+
+    function moneyFlow() {
+      ensure(33);
+      const values = [['Komisi efektif', k.commEff, COLORS.accent], ['Biaya + PPN', k.spend, COLORS.cost],
+        ['Laba efektif', k.netEff, amount(k.netEff) < 0 ? COLORS.danger : COLORS.ink]];
+      values.forEach(([label, value, color], i) => {
+        const x = M + i * 63;
+        doc.setFillColor(...COLORS.pale); doc.roundedRect(x, y, 56, 28, 1, 1, 'F');
+        doc.setFillColor(...color); doc.rect(x, y, 56, 1.1, 'F');
+        doc.setFont(font, 'normal'); doc.setFontSize(8); doc.setTextColor(...COLORS.muted);
+        doc.text(label, x + 3, y + 8);
+        let size = 11; doc.setFont(font, 'bold'); doc.setFontSize(size);
+        while (doc.getTextWidth(money(value)) > 50 && size > 7) { size -= 0.25; doc.setFontSize(size); }
+        doc.setTextColor(...(i === 1 ? [153, 68, 29] : color)); doc.text(money(value), x + 3, y + 19);
+        if (i < 2) { doc.setTextColor(...COLORS.muted); doc.setFontSize(13); doc.text(i === 0 ? '-' : '=', x + 59.5, y + 16, { align: 'center' }); }
+      });
+      y += 34;
     }
 
     doc.setFillColor(...COLORS.accent); doc.rect(M, y - 2, 8, 2, 'F'); y += 7;
@@ -132,54 +161,60 @@
     paragraph(title, { size: 23, color: COLORS.ink, bold: true, gap: 4 });
     paragraph(account, { size: 11, color: COLORS.ink, bold: true, gap: 1 });
     paragraph('Periode ' + period + '  |  Dibuat ' + made, { size: 8, gap: 6 });
-    ensure(95);
+    ensure(54);
     const metrics = [
       ['Biaya iklan termasuk PPN', money(k.spend), 'PPN ' + decimal(amount(o.ppn)) + '%'],
-      ['Komisi efektif', money(k.commEff), 'Setelah bobot komisi tertunda'],
+      ['Komisi efektif', money(k.commEff), 'Termasuk komisi organik'],
       ['Laba efektif', money(k.netEff), 'Komisi efektif dikurangi biaya', amount(k.netEff) < 0],
       ['ROAS iklan berbayar', ratio(k.paidRoas, amount(k.paidSpend) > 0), 'Komisi tag berbayar / biaya iklan'],
       ['Pesanan unik', integer(k.orders), 'Tidak termasuk batal / belum dibayar'],
       ['Komisi tertunda', money(k.commPending), percent(k.pendingPct) + ' dari komisi laporan'],
     ];
     metrics.forEach((metric, index) => summaryMetric(metric[0], metric[1], metric[2],
-      M + (index % 2) * 94, y + Math.floor(index / 2) * 32, 88, metric[3]));
-    y += 101;
-    paragraph('Angka ringkasan mencakup seluruh periode. Keputusan tag memakai hari matang sampai '
-      + (r.matureUntil || '-') + ', dengan lag ' + integer(o.lagDays) + ' hari. Data hari yang belum matang masih dapat berubah.', { size: 8 });
+      M + (index % 3) * 62, y + Math.floor(index / 3) * 27, 58, metric[3]));
+    y += 58;
+    const coverage = [
+      [daily.filter(d => d.hasAffiliate === false).length, 'affiliate'],
+      [daily.filter(d => d.hasAds === false).length, 'iklan'],
+    ].filter(([count]) => count > 0).map(([count, source]) => integer(count) + ' hari tanpa baris ' + source);
+    if (coverage.length) paragraph('Cakupan: ' + coverage.join('; ') + '. Laba memakai data yang tersedia.',
+      { size: 8, color: COLORS.ink, bold: true, gap: 2 });
+    section('Tren biaya dan komisi');
+    ensure(76);
+    charts.trend({ x: M, y, width: WIDTH, height: 76, matureUntil: r.matureUntil,
+      rows: daily.map(d => ({ date: d.date, spend: d.hasAds === false ? null : d.spend,
+        comm: d.hasAffiliate === false || !finite(d.commEff) ? null : d.commEff })) });
+    y += 78;
+    paragraph('Komisi memakai bobot efektif. Garis terputus berarti tidak ada baris sumber; bukan bukti nilai nol.', { size: 7, gap: 1 });
+    section('Peta keputusan', integer(tags.length) + ' tag pada periode ini. Keputusan memakai hari matang sampai ' + (r.matureUntil || '-') + '.');
+    ensure(35);
+    charts.decisions({ x: M, y, width: WIDTH, height: 35,
+      items: Object.keys(statusNames).map(status => ({ label: statusNames[status],
+        count: tags.filter(t => t.status === status).length, color: statusColors[status] })) });
+    y += 38;
 
-    section('Dasar pembacaan data');
-    const counts = result.counts || {}, excluded = k.excluded || {};
-    table(['Keterangan', 'Nilai / cakupan'], [
-      ['Cakupan laporan', integer(tags.length) + ' tag; ' + integer(units.length) + ' iklan; ' + integer(daily.length) + ' hari tersedia. Ekspor mencakup semua tag pada hasil analisis.'],
-      ['Baris sumber dalam periode', 'Affiliate ' + integer(counts.affiliate) + '; Meta Ads ' + integer(counts.ads) + '; klik Shopee ' + integer(counts.clicks) + '. Jumlah baris tidak sama dengan jumlah pesanan.'],
-      ['Komisi laporan / efektif', money(k.comm) + ' / ' + money(k.commEff) + '. Komisi tertunda diberi bobot ' + percent(amount(o.pendingFactor) * 100) + '.'],
-      ['ROAS portofolio / ROI efektif', ratio(k.roasEff, amount(k.spend) > 0) + ' / ' + percent(k.roi, amount(k.spend) > 0) + '. ROAS portofolio juga mencakup komisi organik.'],
-      ['Komisi organik', money(k.organicComm) + ' (tanpa biaya iklan yang tercatat).'],
-      ['Data yang dikecualikan', integer(excluded.cancelled) + ' baris dibatalkan; ' + integer(excluded.unpaid) + ' baris belum dibayar.'],
-      ['Jendela klik Shopee', r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd + '. Perbandingan klik memakai jendela yang sama.' : 'Laporan klik belum tersedia pada periode ini.'],
-      ['Ambang keputusan', 'SCALE >= ' + decimal(amount(o.thScale)) + 'x; PANTAU >= ' + decimal(amount(o.thPantau)) + 'x. Minimum biaya ' + money(o.minSpend) + '; ' + integer(o.minDays) + ' hari produksi matang; streak rugi ' + integer(o.streakDays) + ' hari.'],
-    ], [52, 130]);
-    const quality = settings.quality == null ? [] : Array.isArray(settings.quality) ? settings.quality : [settings.quality];
-    if (quality.length) table(['Catatan kualitas data'], quality.map(item => [typeof item === 'string' ? item :
-      [item.label, item.message, item.detail].filter(Boolean).join(' - ')]).filter(row => row[0]), [WIDTH]);
-
-    section('Keputusan setiap tag', 'Komisi dan laba berikut memakai bobot efektif. ROAS matang adalah dasar evaluasi; tanda "-" berarti biaya pembagi tidak tersedia.');
-    table(['Tag / keputusan', 'Kinerja periode', 'Data matang', 'Alasan / langkah berikutnya'], tags.map(t => [
-      t.tag + '\n' + (t.label || t.status || 'Belum cukup data'),
-      'Biaya ' + money(t.spend) + '\nKomisi ' + money(t.commEff) + '\nLaba ' + money(t.netEff),
-      ratio(t.matureRoasEff, amount(t.matureSpend) > 0) + '\n' + integer(t.matureDaysProd) + ' hari produksi\nBiaya ' + money(t.matureSpend),
-      [t.reason, t.bidHint].filter(Boolean).join('\n') || 'Belum ada rekomendasi.',
-    ]), [40, 47, 38, 57]);
+    nextPage();
+    section('Bagaimana laba terbentuk');
+    moneyFlow();
+    const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);
+    section('Biaya dan komisi per tag', integer(topTags.length) + ' dari ' + integer(tags.length) + ' tag, diurutkan dari biaya terbesar. Tabel berikut memuat semua tag.');
+    ensure(93);
+    charts.pairedBars({ x: M, y, width: WIDTH, height: 93, leftLabel: 'Biaya + PPN', rightLabel: 'Komisi efektif',
+      rows: topTags.map(t => ({ label: t.tag, left: t.spend, right: t.commEff })) });
+    y += 99;
+    section('Keputusan setiap tag', 'ROAS matang = dasar keputusan. Tanda "-" berarti biaya pembagi tidak tersedia.');
+    table(['Tag', 'Keputusan', 'Biaya + PPN', 'Komisi efektif', 'Laba efektif', 'ROAS matang'], tags.map(t => [
+      t.tag, statusNames[t.status] || t.label, money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
+    ]), [45, 25, 30, 30, 30, 22], { numeric: [2, 3, 4, 5], statuses: tags.map(t => t.status) });
 
     const a = result.actions || {};
-    section('Prioritas tindakan', 'Nilai di bawah memakai biaya historis periode ini, bukan proyeksi atau jaminan penghematan di masa depan.');
-    table(['Tindakan', 'Dasar periode ini'], [
-      ['Tinjau ' + integer(a.stopCount) + ' tag STOP', 'Biaya pada tag tersebut ' + money(a.stopSpend) + '; total rugi efektif pada tag yang rugi ' + money(a.stopLoss) + '.'],
-      ['Tinjau bid ' + integer(a.overbidCount) + ' tag', 'Selisih biaya terhadap CPC ideal ' + money(a.bidSaving) + '. Target ROI ' + percent(amount(o.targetROI)) + '.'],
-      ['Periksa tautan dan atribusi', 'Estimasi biaya terkait selisih klik berat ' + money(a.leakWaste) + '. Perbedaan definisi dan waktu pencatatan juga dapat memengaruhi selisih.'],
-    ], [65, 117]);
-    if (a.concentration) paragraph('Konsentrasi biaya: tag ' + a.concentration.topTag + ' menyerap '
-      + percent(a.concentration.topShare) + ' dari biaya berbayar. ROAS efektif tag ' + ratio(a.concentration.topRoas) + '.', { size: 8 });
+    section('Prioritas tindakan');
+    table(['Periksa', 'Tag', 'Nilai terkait'], [
+      ['Tag berstatus Stop', integer(a.stopCount), money(a.stopSpend) + ' biaya periode ini'],
+      ['Bid di atas target', integer(a.overbidCount), money(a.bidSaving) + ' selisih terhadap CPC ideal'],
+      ['Selisih klik berat', integer(k.leakTags), money(a.leakWaste) + ' estimasi biaya terkait'],
+    ], [74, 20, 88], { numeric: [1] });
+    paragraph('Nilai tindakan memakai biaya historis, bukan jaminan penghematan.', { size: 7 });
 
     if (mode !== 'ringkas') {
       section('Efisiensi tag', 'CPC Shopee memakai biaya pada jendela laporan klik. Pesanan dapat muncul pada lebih dari satu tag; gunakan pesanan unik portofolio untuk total.');
@@ -196,13 +231,20 @@
         money(u.spend), money(u.commEff) + '\n' + money(u.netEff), integer(u.clicks) + '\n' + (amount(u.clicks) > 0 ? money(u.cpc) : '-'),
       ]), [51, 31, 31, 38, 31], { numeric: [2, 3, 4], empty: 'Tidak ada iklan pada hasil analisis periode ini.' });
 
-      section('Kinerja harian', 'Tabel harian menggunakan komisi laporan sebelum bobot tertunda. Karena definisinya berbeda, laba dan ROAS harian tidak sama dengan KPI efektif.');
-      table(['Tanggal / kematangan', 'Biaya + PPN', 'Komisi laporan', 'Laba laporan', 'ROAS', 'Pesanan'], daily.map(d => [
-        d.date + '\n' + (d.mature ? 'Matang' : 'Belum matang'), money(d.spend), money(d.comm), money(d.net), ratio(d.roas, amount(d.spend) > 0), integer(d.orders),
-      ]), [36, 35, 35, 35, 21, 20], { numeric: [1, 2, 3, 4, 5] });
+      section('Kinerja harian', 'Angka memakai bobot efektif seperti ringkasan. Tanda "-" berarti tidak ada baris sumber atau pembagi; bukan bukti nilai nol. Laba dan ROAS harian memerlukan baris iklan serta affiliate.');
+      table(['Tanggal / kematangan', 'Biaya + PPN', 'Komisi efektif', 'Laba efektif', 'ROAS efektif', 'Pesanan'], daily.map(d => {
+        const hasAds = d.hasAds !== false, hasAffiliate = d.hasAffiliate !== false;
+        return [d.date + '\n' + (d.mature ? 'Matang' : 'Belum matang'), hasAds ? money(d.spend) : '-',
+          hasAffiliate && finite(d.commEff) ? money(d.commEff) : '-',
+          hasAds && hasAffiliate && finite(d.netEff) ? money(d.netEff) : '-',
+          ratio(d.roasEff, hasAds && hasAffiliate && amount(d.spend) > 0), hasAffiliate ? integer(d.orders) : '-'];
+      }), [36, 35, 35, 35, 21, 20], { numeric: [1, 2, 3, 4, 5] });
     }
 
     if (mode === 'lengkap') {
+      section('Alasan keputusan', 'Rincian penjelasan untuk penelusuran setiap tag.');
+      table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, statusNames[t.status] || t.label,
+        [t.reason, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
       table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).map(m => [
         m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + m.candidateTag : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
@@ -239,6 +281,28 @@
       table(['Dimensi', 'Nama', 'Klik'], [['Perujuk', b.clickSource], ['Wilayah (top 8)', b.clickRegion]]
         .flatMap(([label, rows]) => array(rows).map(row => [label, row.name || '(tanpa nama)', integer(row.count)])), [43, 109, 30], { numeric: [2] });
     }
+
+    section('Parameter dan cakupan');
+    const counts = result.counts || {}, excluded = k.excluded || {};
+    table(['Parameter', 'Nilai', 'Parameter', 'Nilai'], [
+      ['PPN', percent(amount(o.ppn)), 'Bobot tertunda', percent(amount(o.pendingFactor) * 100)],
+      ['Lag atribusi', integer(o.lagDays) + ' hari', 'Target ROI', percent(amount(o.targetROI))],
+      ['Ambang Scale', decimal(amount(o.thScale)) + 'x', 'Ambang Pantau', decimal(amount(o.thPantau)) + 'x'],
+      ['Minimum biaya', money(o.minSpend), 'Minimum produksi', integer(o.minDays) + ' hari matang'],
+      ['Streak rugi', integer(o.streakDays) + ' hari', 'Komisi organik', money(k.organicComm)],
+    ], [44, 47, 44, 47]);
+    paragraph(integer(tags.length) + ' tag / ' + integer(units.length) + ' iklan / ' + integer(daily.length) + ' hari. '
+      + 'Baris aktif: affiliate ' + integer(counts.affiliate) + ', iklan ' + integer(counts.ads) + ', klik ' + integer(counts.clicks) + '. '
+      + 'Dikecualikan: ' + integer(excluded.cancelled) + ' baris batal dan ' + integer(excluded.unpaid) + ' belum dibayar.', { size: 8 });
+    paragraph('Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'tidak tersedia') + '.', { size: 8 });
+    const quality = settings.quality == null ? [] : Array.isArray(settings.quality) ? settings.quality : [settings.quality];
+    const qualityRows = quality.map(item => {
+      let value = typeof item === 'string' ? item : [item.label, item.message, item.detail].filter(Boolean).join(' - ');
+      value = value.replace(/\s+Contoh:\s*/, ' ').replace(/Baris \d+:\s*/, '');
+      const repeat = value.search(/\s+Baris \d+:/);
+      return [repeat >= 0 ? value.slice(0, repeat) : value];
+    }).filter(row => row[0]);
+    if (qualityRows.length) table(['Catatan kualitas data'], qualityRows, [WIDTH]);
 
     if (unsupported.size) {
       section('Karakter khusus dalam nama');

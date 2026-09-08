@@ -76,7 +76,7 @@ async function main() {
   page.on('pageerror', error => errors.push(error.message));
   try {
     await page.setContent('<!doctype html><html><body><h1>PDF regression fixture</h1></body></html>');
-    for (const script of ['vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js', 'vendor/pdf-font.js', 'pdf-export.js']) {
+    for (const script of ['vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js', 'vendor/pdf-font.js', 'pdf-charts.js', 'pdf-export.js']) {
       await page.addScriptTag({ path: path.join(__dirname, script) });
     }
     const result = fixture();
@@ -89,7 +89,15 @@ async function main() {
         return value;
       }
       freeze(result);
-      const bounds = [], api = window.jspdf.jsPDF.API, autoTable = api.autoTable;
+      const bounds = [], chartCalls = [], api = window.jspdf.jsPDF.API, autoTable = api.autoTable;
+      const makeCharts = DashboardPDFCharts.create;
+      DashboardPDFCharts = { ...DashboardPDFCharts, create(doc, options) {
+        const charts = makeCharts(doc, options);
+        return Object.fromEntries(Object.entries(charts).map(([name, draw]) => [name, box => {
+          chartCalls.push({ name, box, page: doc.getCurrentPageInfo().pageNumber });
+          return draw(box);
+        }]));
+      } };
       api.autoTable = function (options) {
         const draw = options.didDrawCell;
         options.didDrawCell = data => {
@@ -102,11 +110,12 @@ async function main() {
       const reports = {};
       for (const mode of ['ringkas', 'standar', 'lengkap']) {
         const start = bounds.length;
+        const chartStart = chartCalls.length;
         const doc = window.DashboardPDF.create(result, { mode, account: 'QA Café Indonesia',
           title: 'Laporan kinerja affiliate - data sintetis', generatedAt: '2026-09-06T05:00:00Z',
           quality: ['DATA SINTETIS UNTUK PENGUJIAN - bukan data akun sebenarnya.'] });
         reports[mode] = { pages: doc.getNumberOfPages(), bytes: doc.output('datauristring').split(',')[1],
-          bounds: bounds.slice(start), font: doc.getFont().fontName };
+          bounds: bounds.slice(start), charts: chartCalls.slice(chartStart), font: doc.getFont().fontName };
       }
       const invalid = [];
       for (const [data, options] of [[null, {}], [result, { mode: '__proto__' }], [result, { mode: 'constructor' }],
@@ -126,6 +135,16 @@ async function main() {
       assert.ok(report.pages > 2, 'Large fixture must paginate');
       const bytes = Buffer.from(report.bytes, 'base64');
       assert.equal(bytes.subarray(0, 5).toString(), '%PDF-', 'Download must contain a real PDF');
+      assert.deepEqual(report.charts.map(chart => chart.name), ['trend', 'decisions', 'pairedBars']);
+      for (const { box } of report.charts) {
+        assert.ok(box.x >= 14 && box.x + box.width <= 196 && box.y >= 18 && box.y + box.height <= 279, 'Charts must fit page bounds');
+      }
+      assert.equal(report.charts[0].page, 1, 'Report must lead with a chart, not pages of prose');
+      const trend = report.charts[0].box.rows;
+      assert.ok(trend.some(row => row.comm != null));
+      assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) - result.kpi.commEff) < 0.0001,
+        'Trend must use effective commission matching the summary');
+      assert.equal(report.charts[1].box.items.reduce((sum, item) => sum + item.count, 0), result.tags.length);
       for (const cell of report.bounds) {
         assert.ok(cell.x >= 13.99 && cell.x + cell.width <= 196.01, 'Table cell must stay inside horizontal page bounds');
         assert.ok(cell.y >= 17.99 && cell.y + cell.height <= 279.02,
@@ -151,6 +170,29 @@ async function main() {
     }, Engine.analyze({ affiliate: [], ads: [], clicks: [] }, {}));
     assert.ok(empty.pages > 0 && empty.bytes > 1000);
     console.log('PASS PDF missing inputs, mode validation, Unicode labels, source immutability, empty report');
+    const partialSources = Engine.analyze({
+      affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Tag_link1': 'Coverage',
+        'Total Komisi per Produk(Rp)': day === 4 ? '0' : '100' })),
+      ads: [1, 2, 4].map(day => ({ 'Ad name': 'Coverage', 'Amount spent (IDR)': day === 4 ? '0' : '50',
+        'Reporting starts': '2026-09-0' + day, 'Reporting ends': '2026-09-0' + day })), clicks: [],
+    }, { ppn: 0, lagDays: 0 });
+    const coverageRows = await page.evaluate(result => {
+      const api = window.jspdf.jsPDF.API, original = api.autoTable;
+      let dailyRows;
+      api.autoTable = function (options) {
+        if (options.head[0][0] === 'Tanggal / kematangan') dailyRows = options.body;
+        return original.call(this, options);
+      };
+      try { window.DashboardPDF.create(result, { mode: 'standar', generatedAt: '2026-09-06' }); }
+      finally { api.autoTable = original; }
+      return dailyRows;
+    }, partialSources);
+    assert.equal(coverageRows.length, 4);
+    assert.deepEqual(coverageRows[1].slice(1), ['Rp 50,00', '-', '-', '-', '-'], 'Ad-only day must not claim zero affiliate sales or a confirmed loss');
+    assert.deepEqual(coverageRows[2].slice(1), ['-', 'Rp 100,00', '-', '-', '1'], 'Affiliate-only day must not imply zero ad spend');
+    assert.deepEqual(coverageRows[3].slice(1), ['Rp 0,00', 'Rp 0,00', 'Rp 0,00', '-', '1'], 'Source rows containing zero must retain their real zero values');
+    console.log('PASS PDF daily table distinguishes missing sources from real zero values');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);
@@ -161,7 +203,7 @@ async function main() {
           quality: ['DATA SINTETIS - contoh laporan untuk demonstrasi fitur PDF. Seluruh akun, produk, dan angka pada laporan ini adalah data buatan.'] });
         return { pages: doc.getNumberOfPages(), bytes: doc.output('datauristring').split(',')[1] };
       }, result);
-      assert.ok(demo.pages >= 2 && demo.pages <= 4, 'Small standard report must remain readable and compact');
+      assert.ok(demo.pages >= 2 && demo.pages <= 6, 'Visual pages and full tables must remain readable and compact');
       fs.writeFileSync(path.join(qaDir, 'demo-report.pdf'), Buffer.from(demo.bytes, 'base64'));
       console.log('PASS PDF demo: ' + demo.pages + ' pages, 3 tags, 14 days, synthetic data only');
     }

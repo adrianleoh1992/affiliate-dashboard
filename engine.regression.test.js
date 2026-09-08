@@ -57,6 +57,54 @@ near(taxTag.cpcShopee, 111);
 near(taxTag.leak.wasted, 99.9); // 9 lost clicks at the window's Rp11.10 CPC
 near(taxed.adUnits[0].byDate['2026-08-01'].comm, 100);
 near(taxed.daily.reduce((sum, day) => sum + day.spend, 0), taxed.kpi.spend);
+near(taxed.daily[1].commEff, 0);
+near(taxed.daily[1].netEff, -999);
+near(taxed.daily[1].roasEff, 0);
+assert.equal(taxed.daily[1].hasAffiliate, false);
+assert.equal(taxed.daily[1].hasAds, true);
+
+// Chart series must use the same pending discount and tax as portfolio KPIs,
+// while preserving the original gross daily fields for existing consumers.
+const dailyEffectiveData = {
+  affiliate: [
+    aff('done', 120.25),
+    aff('pending', 80.5, { 'Status Pesanan': 'Tertunda' }),
+    aff('adjustment', -12.75, { 'Tag_link1': 'B', 'Waktu Pemesanan': '2026-08-02 10:00:00' }),
+    aff('pending-adjustment', -20, { 'Status Pesanan': 'Tertunda', 'Waktu Pemesanan': '2026-08-02 10:00:00' }),
+    aff('cancelled', 999, { 'Status Pesanan': 'Dibatalkan', 'Waktu Pemesanan': '2026-08-03 10:00:00' }),
+    aff('unpaid', 888, { 'Status Pesanan': 'Belum Dibayar', 'Waktu Pemesanan': '2026-08-03 10:00:00' }),
+    aff('excluded-only', 777, { 'Status Pesanan': 'Dibatalkan', 'Waktu Pemesanan': '2026-08-06 10:00:00' }),
+  ],
+  ads: [ad('2026-08-01', 100), ad('2026-08-03', 50), ad('2026-08-04', 0)],
+  clicks: [click('2026-08-05')],
+};
+const effectiveDaily = analyze(dailyEffectiveData, { pendingFactor: 0.25, ppn: 11 });
+const dailyByDate = Object.fromEntries(effectiveDaily.daily.map(day => [day.date, day]));
+near(dailyByDate['2026-08-01'].comm, 200.75);
+near(dailyByDate['2026-08-01'].commEff, 140.375);
+near(dailyByDate['2026-08-01'].spend, 111);
+near(dailyByDate['2026-08-01'].net, 89.75);
+near(dailyByDate['2026-08-01'].netEff, 29.375);
+near(dailyByDate['2026-08-01'].roasEff, 140.375 / 111);
+near(dailyByDate['2026-08-02'].commEff, -17.75);
+near(dailyByDate['2026-08-02'].netEff, -17.75);
+assert.equal(dailyByDate['2026-08-02'].roasEff, 0);
+near(dailyByDate['2026-08-03'].commEff, 0);
+near(dailyByDate['2026-08-03'].netEff, -55.5);
+assert.deepEqual(effectiveDaily.daily.map(day => [day.hasAffiliate, day.hasAds]), [
+  [true, true], [true, false], [true, true], [false, true], [false, false],
+]);
+assert.equal(dailyByDate['2026-08-06'], undefined); // Excluded-only dates do not extend the existing daily series.
+for (const factor of [0, 0.25, 1]) {
+  const result = analyze(dailyEffectiveData, { pendingFactor: factor, ppn: 11 });
+  for (const field of ['comm', 'commEff', 'spend', 'net', 'netEff']) {
+    near(result.daily.reduce((sum, day) => sum + day[field], 0), result.kpi[field]);
+  }
+  near(result.daily[0].commEff, 120.25 + 80.5 * factor);
+  for (const day of result.daily) {
+    near(day.roasEff, day.spend > 0 ? day.commEff / day.spend : 0);
+  }
+}
 
 // Per-product commission has precedence over the repeated per-order total.
 const lineItems = analyze({ affiliate: [aff('same', 40), aff('same', 60), aff('pending', 100, { 'Status Pesanan': ' Tertunda ' })] });

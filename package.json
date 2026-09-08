@@ -9,7 +9,7 @@
     "vendor": "node scripts/vendor.js",
     "start": "node scripts/serve.js",
     "build": "node scripts/build.js",
-    "test:pdf": "node pdf-export.test.js"
+    "test:pdf": "node pdf-charts.test.js && node pdf-export.test.js"
   },
   "repository": {
     "type": "git",

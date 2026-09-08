@@ -70,12 +70,22 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
   format `affiliate-analysis` versi 1. JSON analisis bukan backup yang dapat
   dipulihkan ke penyimpanan harian.
 - **PDF:** klik **PDF**, isi judul, lalu unduh Ringkas, Standar, atau Lengkap.
-  Semua mode menyertakan seluruh tag pada periode analisis; filter tabel tidak
-  mengurangi PDF. Standar menambahkan metrik tag, iklan, dan harian. Lengkap
-  menambahkan pencocokan, status, dan rincian lain yang tersedia pada hasil.
+  Semua mode dimulai dengan angka utama, grafik tren biaya/komisi, peta keputusan,
+  diagram pembentukan laba, dan perbandingan enam tag dengan biaya terbesar.
+  Tabel keputusan tetap menyertakan seluruh tag pada periode analisis; filter
+  dashboard tidak mengurangi PDF. Standar menambahkan metrik tag, iklan, dan
+  harian. Lengkap menambahkan alasan keputusan, pencocokan, status, produk,
+  dan rincian lain yang tersedia pada hasil.
 
-PDF berupa teks yang dapat dipilih, memakai A4, header tabel berulang dan nomor
-halaman. Nilai Rupiah ditampilkan hingga dua desimal. Banyak halaman mengikuti
+Grafik dan tabel harian memakai komisi efektif yang sama dengan ringkasan.
+Tanggal tanpa baris sumber menjadi celah grafik dan tanda `-` pada tabel;
+nilainya tidak diasumsikan nol. Catatan cakupan menjelaskan bahwa laba total
+memakai seluruh data yang tersedia saat rentang sumber berbeda.
+
+PDF dibuat lokal dengan grafik vektor yang tetap tajam saat diperbesar dan teks
+yang dapat dipilih. Format A4 memakai header tabel berulang dan nomor halaman.
+Tabel menampilkan nilai Rupiah hingga dua desimal; grafik memakai skala ribu/juta
+sesuai nilai dan mencantumkan satuannya. Banyak halaman mengikuti
 jumlah data. Produk/toko yang sudah dibatasi mesin analisis diberi keterangan
 cakupan ringkasan. Font Noto Sans Latin disertakan lokal; karakter di luar
 cakupannya, misalnya emoji atau sebagian aksara Asia, ditulis sebagai `[U+XXXX]`
@@ -178,7 +188,8 @@ format ekspor dan kondisi browser telah tercakup.
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
 | `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
 | `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
-| `pdf-export.js` | Pembuatan PDF dengan teks dan tabel multi halaman |
+| `pdf-export.js` | Susunan laporan visual PDF dan tabel multi halaman |
+| `pdf-charts.js` | Grafik tren, perbandingan tag, dan peta keputusan vektor |
 | `app.js`, `index.html`, `styles.css` | Antarmuka, impor, snapshot, grafik, ekspor |
 | `daily-agg.js` | Deduplikasi dan agregasi harian |
 | `daily-store.js` | Transaksi IndexedDB dan migrasi |

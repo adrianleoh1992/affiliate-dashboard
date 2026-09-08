@@ -370,6 +370,7 @@ function analyze(data, options) {
 
     if (!dailyAll[d]) dailyAll[d] = { date: d, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
     dailyAll[d].comm += c; dailyAll[d].gmv += g;
+    dailyAll[d].commEff = (dailyAll[d].commEff || 0) + (st === 'Tertunda' ? c * o.pendingFactor : c);
     if (id) dailyAll[d].orders.add(id);
 
     const h = hourOf(pick(r, COL.aff.orderAt));
@@ -438,6 +439,7 @@ function analyze(data, options) {
     dailyAll[d].spend += spPPN;
     dailyAll[d].clicks += cl;
     dailyAll[d].impr += im;
+    dailyAll[d].hasAds = true;
 
     if (clkStart && d >= clkStart && d <= clkEnd) { b.metaClicksWindow += cl; b.spendWindow += spPPN; }
 
@@ -802,8 +804,14 @@ function analyze(data, options) {
 
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
+    const commEff = v.commEff || 0;
     return {
       date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
+      commEff, netEff: commEff - v.spend,
+      roasEff: v.spend > 0 ? commEff / v.spend : 0,
+      // A source row was observed on this date; these flags do not establish
+      // whole-day report completeness. statusDay also includes excluded orders.
+      hasAffiliate: Object.prototype.hasOwnProperty.call(statusDay, d), hasAds: !!v.hasAds,
       shopeeClicks: clickDaily[d] || 0,
       orders: v.orders.size, net: v.comm - v.spend,
       roas: v.spend > 0 ? v.comm / v.spend : 0,

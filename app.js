@@ -1186,7 +1186,7 @@ function openPdfModal(){if(!RESULT)return toast('Muat data untuk membuat PDF');$
 $('btnExportPdf').onclick=openPdfModal;
 let PDF_LIBRARIES;
 function loadPdfLibraries(){
-  if(!PDF_LIBRARIES)PDF_LIBRARIES=(async()=>{for(const src of ['vendor/jspdf.umd.min.js','vendor/jspdf.plugin.autotable.min.js','vendor/pdf-font.js','pdf-export.js'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>{script.remove();reject(new Error('Pustaka PDF tidak dapat dimuat. Periksa kelengkapan folder aplikasi.'))};document.head.append(script)})})().catch(e=>{PDF_LIBRARIES=null;throw e});
+  if(!PDF_LIBRARIES)PDF_LIBRARIES=(async()=>{for(const src of ['vendor/jspdf.umd.min.js','vendor/jspdf.plugin.autotable.min.js','vendor/pdf-font.js','pdf-charts.js','pdf-export.js'])await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>{script.remove();reject(new Error('Pustaka PDF tidak dapat dimuat. Periksa kelengkapan folder aplikasi.'))};document.head.append(script)})})().catch(e=>{PDF_LIBRARIES=null;throw e});
   return PDF_LIBRARIES;
 }
 async function downloadPdf(mode){
