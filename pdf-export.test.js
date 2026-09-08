@@ -193,6 +193,53 @@ async function main() {
     assert.deepEqual(coverageRows[2].slice(1), ['-', 'Rp 100,00', '-', '-', '1'], 'Affiliate-only day must not imply zero ad spend');
     assert.deepEqual(coverageRows[3].slice(1), ['Rp 0,00', 'Rp 0,00', 'Rp 0,00', '-', '1'], 'Source rows containing zero must retain their real zero values');
     console.log('PASS PDF daily table distinguishes missing sources from real zero values');
+    const activity = Engine.analyze({
+      affiliate: [['Organik tetap', 100, 'Selesai'], ['Refund tetap', -10, 'Selesai'], ['Pending tetap', 50, 'Tertunda']]
+        .map(([tag, commission, status], index) => ({ 'ID Pemesanan': 'activity-' + index,
+          'Status Pesanan': status, 'Waktu Pemesanan': '2026-09-01 10:00:00',
+          'Tag_link1': tag, 'Total Komisi per Produk(Rp)': String(commission) })),
+      ads: [['Tanpa aktivitas', 0], ['Biaya tetap', 50]].map(([tag, spend]) => ({
+        'Ad name': tag, 'Amount spent (IDR)': String(spend),
+        'Reporting starts': '2026-09-01', 'Reporting ends': '2026-09-01',
+      })),
+      clicks: [{ 'Waktu Klik': '2026-09-01 09:00:00', 'Tag_link': 'Klik saja' }],
+      tagMap: { 'Tanpa aktivitas': 'Tanpa aktivitas', 'Biaya tetap': 'Biaya tetap' },
+    }, { ppn: 0, pendingFactor: 0, lagDays: 0 });
+    const activityReports = await page.evaluate(result => {
+      const originalResult = JSON.stringify(result), api = window.jspdf.jsPDF.API;
+      const originalTable = api.autoTable, originalCharts = DashboardPDFCharts.create;
+      let tables, charts;
+      api.autoTable = function (options) { tables.push(options.body); return originalTable.call(this, options); };
+      DashboardPDFCharts.create = function (doc, options) {
+        return Object.fromEntries(Object.entries(originalCharts(doc, options)).map(([name, draw]) => [name, box => {
+          charts[name] = box; return draw(box);
+        }]));
+      };
+      try {
+        const reports = ['ringkas', 'standar', 'lengkap'].map(mode => {
+          tables = []; charts = {};
+          DashboardPDF.create(result, { mode, generatedAt: '2026-09-06' });
+          return { mode, tables, charts };
+        });
+        // The report remains valid if all tags have zero monetary activity.
+        const allZero = { ...result, tags: result.tags.filter(t => ['Tanpa aktivitas', 'Klik saja'].includes(t.tag)) };
+        tables = []; charts = {};
+        DashboardPDF.create(allZero, { mode: 'lengkap', generatedAt: '2026-09-06' });
+        return { reports, emptyCount: charts.decisions.items.reduce((sum, item) => sum + item.count, 0),
+          emptyBars: charts.pairedBars.rows.length, unchanged: originalResult === JSON.stringify(result) };
+      } finally { api.autoTable = originalTable; DashboardPDFCharts.create = originalCharts; }
+    }, activity);
+    assert.equal(activityReports.unchanged, true, 'Report filtering must preserve the analysis and source data');
+    assert.equal(activityReports.emptyCount, 0);
+    assert.equal(activityReports.emptyBars, 0);
+    for (const report of activityReports.reports) {
+      const contents = JSON.stringify(report.tables);
+      for (const tag of ['Tanpa aktivitas', 'Klik saja']) assert.ok(!contents.includes(tag), report.mode + ': omit zero tags from every table, including ad/matching detail');
+      for (const tag of ['Organik tetap', 'Refund tetap', 'Pending tetap', 'Biaya tetap']) assert.ok(contents.includes(tag), report.mode + ': keep nonzero cost or real commission for ' + tag);
+      assert.equal(report.charts.decisions.items.reduce((sum, item) => sum + item.count, 0), 4);
+      assert.deepEqual(report.charts.pairedBars.rows.map(row => row.label).sort(), ['Biaya tetap', 'Organik tetap', 'Pending tetap', 'Refund tetap']);
+    }
+    console.log('PASS PDF all modes omit zero-activity tags consistently while retaining organic, loss, refund and pending commission');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);

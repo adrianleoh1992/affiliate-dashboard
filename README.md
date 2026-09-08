@@ -72,8 +72,11 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
 - **PDF:** klik **PDF**, isi judul, lalu unduh Ringkas, Standar, atau Lengkap.
   Semua mode dimulai dengan angka utama, grafik tren biaya/komisi, peta keputusan,
   diagram pembentukan laba, dan perbandingan enam tag dengan biaya terbesar.
-  Tabel keputusan tetap menyertakan seluruh tag pada periode analisis; filter
-  dashboard tidak mengurangi PDF. Standar menambahkan metrik tag, iklan, dan
+  Tag dengan biaya dan komisi sama-sama nol tidak disertakan dalam grafik,
+  tabel, rincian iklan, maupun jumlah tag. Tag organik, tag dengan biaya tanpa
+  komisi, dan komisi negatif tetap disertakan. Komisi tertunda yang bobotnya nol
+  tetap dianggap komisi. Filter pencarian dashboard tidak mengurangi PDF.
+  Standar menambahkan metrik tag, iklan, dan
   harian. Lengkap menambahkan alasan keputusan, pencocokan, status, produk,
   dan rincian lain yang tersedia pada hasil.
 

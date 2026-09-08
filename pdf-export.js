@@ -66,7 +66,11 @@
     }
     const M = 14, WIDTH = 182, TOP = 24, BOTTOM = 279;
     const r = result.range, k = result.kpi, o = result.options || {}, b = result.breakdown || {};
-    const tags = result.tags, units = array(result.adUnits), daily = array(result.daily);
+    // Keep real commission even when a zero pending weight makes its effective
+    // value zero. Only omit tags whose cost and both commission values are zero.
+    const omittedTags = new Set(result.tags.filter(t => t.spend === 0 && t.comm === 0 && t.commEff === 0).map(t => t.tag));
+    const tags = result.tags.filter(t => !omittedTags.has(t.tag));
+    const units = array(result.adUnits).filter(u => !omittedTags.has(u.tag)), daily = array(result.daily);
     if (!root.DashboardPDFCharts) throw new Error('Pustaka grafik PDF belum siap. Muat ulang lalu coba lagi.');
     const charts = root.DashboardPDFCharts.create(doc, { font, text, colors: COLORS });
     const statusColors = { scale: COLORS.accent, pantau: [142, 97, 13], stop: COLORS.danger,
@@ -197,7 +201,7 @@
     section('Bagaimana laba terbentuk');
     moneyFlow();
     const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);
-    section('Biaya dan komisi per tag', integer(topTags.length) + ' dari ' + integer(tags.length) + ' tag, diurutkan dari biaya terbesar. Tabel berikut memuat semua tag.');
+    section('Biaya dan komisi per tag', integer(topTags.length) + ' dari ' + integer(tags.length) + ' tag, diurutkan dari biaya terbesar. Tabel memuat semua tag dengan biaya atau komisi.');
     ensure(93);
     charts.pairedBars({ x: M, y, width: WIDTH, height: 93, leftLabel: 'Biaya + PPN', rightLabel: 'Komisi efektif',
       rows: topTags.map(t => ({ label: t.tag, left: t.spend, right: t.commEff })) });
@@ -210,9 +214,9 @@
     const a = result.actions || {};
     section('Prioritas tindakan');
     table(['Periksa', 'Tag', 'Nilai terkait'], [
-      ['Tag berstatus Stop', integer(a.stopCount), money(a.stopSpend) + ' biaya periode ini'],
+      ['Tag berstatus Stop', integer(tags.filter(t => t.status === 'stop').length), money(a.stopSpend) + ' biaya periode ini'],
       ['Bid di atas target', integer(a.overbidCount), money(a.bidSaving) + ' selisih terhadap CPC ideal'],
-      ['Selisih klik berat', integer(k.leakTags), money(a.leakWaste) + ' estimasi biaya terkait'],
+      ['Selisih klik berat', integer(tags.filter(t => t.leak && t.leak.severity === 'bad').length), money(a.leakWaste) + ' estimasi biaya terkait'],
     ], [74, 20, 88], { numeric: [1] });
     paragraph('Nilai tindakan memakai biaya historis, bukan jaminan penghematan.', { size: 7 });
 
@@ -246,7 +250,7 @@
       table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, statusNames[t.status] || t.label,
         [t.reason, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
-      table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).map(m => [
+      table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).filter(m => !omittedTags.has(m.tag)).map(m => [
         m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + m.candidateTag : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
       ]), [57, 52, 37, 36], { numeric: [3] });
 
@@ -294,6 +298,7 @@
     paragraph(integer(tags.length) + ' tag / ' + integer(units.length) + ' iklan / ' + integer(daily.length) + ' hari. '
       + 'Baris aktif: affiliate ' + integer(counts.affiliate) + ', iklan ' + integer(counts.ads) + ', klik ' + integer(counts.clicks) + '. '
       + 'Dikecualikan: ' + integer(excluded.cancelled) + ' baris batal dan ' + integer(excluded.unpaid) + ' belum dibayar.', { size: 8 });
+    if (omittedTags.size) paragraph(integer(omittedTags.size) + ' tag dengan biaya dan komisi sama-sama nol tidak ditampilkan pada laporan ini.', { size: 8 });
     paragraph('Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'tidak tersedia') + '.', { size: 8 });
     const quality = settings.quality == null ? [] : Array.isArray(settings.quality) ? settings.quality : [settings.quality];
     const qualityRows = quality.map(item => {
