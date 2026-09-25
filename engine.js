@@ -281,12 +281,22 @@ function forgivingMatch(raw, affiliateTags) {
   }
   if (!ranked.length) return null;
   ranked.sort((a, b) => b.s.score - a.s.score);
-  const [top, next] = ranked;
+  const top = ranked[0];
   const confidence = Math.min(0.9, top.s.score);
-  if (next && top.s.score - next.s.score < 0.05) {
-    return { tag: raw, candidateTag: top.tag, method: 'Lemah', confidence: Math.min(confidence, 0.45) };
-  }
+  const tied = ranked.filter(r => top.s.score - r.s.score < 0.05);
+  if (tied.length > 1) return ambiguous(raw, tied.map(r => ({ tag: r.tag, confidence: r.s.score })));
   return { tag: top.tag, method: 'Mirip', confidence };
+}
+
+/* A name that fits several tags equally well — "Atasan" against AtasanViolet,
+   AtasanRebecca and AtasanFadfad — says nothing about which one it is. Taking
+   whichever tag happened to come first put that ad's spend, and its verdict,
+   on a product it may not be. Offer every fitting tag instead; the Matching
+   tab turns each into a one-click mapping, so asking costs one click. */
+function ambiguous(raw, ranked) {
+  const list = ranked.slice().sort((a, b) => b.confidence - a.confidence);
+  return { tag: raw, candidateTag: list[0].tag, candidates: list.slice(0, 5).map(x => x.tag),
+           method: 'Ambigu', confidence: Math.min(0.45, list[0].confidence) };
 }
 
 function extractPipeTag(name) {
@@ -325,6 +335,7 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
        guess, and the Matching table should say so. */
     const guess = { tag: cleanTag(piped), method: 'Pipe tanpa tag', confidence: 0.4 };
     if (deep.candidateTag) guess.candidateTag = deep.candidateTag;
+    if (deep.candidates) guess.candidates = deep.candidates;
     return guess;
   }
 
@@ -333,6 +344,7 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   }
 
   let best = null;
+  const holders = [];   // tags that contain the whole ad name
   for (const t of affiliateTags || []) {
     const nt = normalize(t);
     if (nt.length < 4) continue;
@@ -340,19 +352,24 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
     if (n.includes(nt) || nt.includes(n)) {
       const conf = Math.min(nt.length, n.length) / Math.max(nt.length, n.length);
       if (!best || conf > best.confidence) best = { tag: t, method: 'Contains', confidence: conf };
+      if (nt.includes(n)) holders.push({ tag: t, confidence: conf });
     }
   }
-  if (best && best.confidence >= 0.55) return best;
+  // A tag inside the ad name is specific; the ad name inside several tags is not.
+  if (best && best.confidence >= 0.55) {
+    return holders.length > 1 && holders.some(h => h.tag === best.tag) ? ambiguous(raw, holders) : best;
+  }
 
   const near = forgivingMatch(raw, affiliateTags);
   const at = tokens(raw);
   if (at.length) {
     let tb = null;
+    const scored = [];
     for (const t of affiliateTags || []) {
       if (variantClash(raw, t)) continue;
       const tt = tokens(t);
       if (!tt.length) continue;
-      let shared = 0;
+      let shared = 0, sig = '';
       for (const a of at) {
         // A short fragment such as 'solid' inside 'HelmRsixSolid' is only
         // partial evidence, never the equivalent of a full token match.
@@ -364,13 +381,21 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
           }
         }
         shared += overlap;
+        sig += overlap ? '1' : '0';
       }
       if (!shared) continue;
       const conf = shared / Math.max(at.length, tt.length);
-      if (!tb || conf > tb.confidence) tb = { tag: t, method: 'Token', confidence: conf };
+      scored.push({ tag: t, confidence: conf, sig });
+      if (!tb || conf > tb.confidence) tb = { tag: t, method: 'Token', confidence: conf, sig };
     }
-    if (tb && tb.confidence >= 0.5) return tb;
-    if (near && !near.candidateTag) return near;
+    if (tb && tb.confidence >= 0.5) {
+      // Rivals rest on exactly the same words of the ad name: nothing in the
+      // name tells them apart, only how long each tag happens to be.
+      const rivals = scored.filter(x => x.sig === tb.sig && x.confidence >= 0.3);
+      if (rivals.length > 1) return ambiguous(raw, rivals);
+      return { tag: tb.tag, method: 'Token', confidence: tb.confidence };
+    }
+    if (near) return near;
     if (tb && tb.confidence >= 0.3) return { tag: raw, candidateTag: tb.tag, method: 'Lemah', confidence: tb.confidence };
   }
 
@@ -563,7 +588,7 @@ function analyze(data, options) {
 
     // Per ad unit — the reference dashboard's primary grain
     if (!units[rawName]) units[rawName] = {
-      adName: rawName, tag: t, candidateTag: m.candidateTag || '', method: m.method, confidence: m.confidence,
+      adName: rawName, tag: t, candidateTag: m.candidateTag || '', candidates: m.candidates || [], method: m.method, confidence: m.confidence,
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, days: new Set(),
       delivery: dict(), quality: dict(), daily: dict(), latestDelivery: null,
     };
@@ -848,7 +873,7 @@ function analyze(data, options) {
     const dv = u.latestDelivery || topOf(u.delivery, 1)[0];
     const active = dv ? /^(active|aktif)$/i.test(dv.name.trim()) : false;
     return {
-      adName: k, tag: u.tag, candidateTag: u.candidateTag, method: u.method, confidence: u.confidence,
+      adName: k, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
       spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
       shopeeClicks, cpcShopee, byDate,
       days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
@@ -865,7 +890,7 @@ function analyze(data, options) {
   }).sort((a, b) => b.spend - a.spend);
 
   const matchLog = adUnits.map(u => ({
-    adName: u.adName, tag: u.tag, candidateTag: u.candidateTag, method: u.method, confidence: u.confidence,
+    adName: u.adName, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
     spend: u.spend, clicks: u.clicks,
   }));
 

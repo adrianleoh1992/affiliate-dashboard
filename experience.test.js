@@ -42,6 +42,23 @@ async function main() {
   const harness = await createHarness(), cases = [];
   const test = (name, fn) => cases.push({ name, fn });
 
+  test('an ambiguous ad name is connected with one click and survives Simpan', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'AtasanViolet'), aff('2', 'AtasanRebecca')] },
+      { name: 'ads.csv', rows: [ad('Atasan', 300)] }]);
+    const spendOf = tag => page.evaluate(t => (RESULT.tags.find(x => x.tag === t) || { spend: 0 }).spend, tag);
+    assert.equal(await spendOf('AtasanViolet'), 0, 'no tag is guessed for an ambiguous name');
+    await page.locator('#btnMap').click();
+    const choices = page.locator('#tblMatch [data-accept-tag]');
+    assert.deepEqual((await choices.allInnerTexts()).map(s => s.trim()).sort(), ['AtasanRebecca', 'AtasanViolet']);
+    await page.locator('#tblMatch [data-accept-tag="AtasanRebecca"]').click();
+    assert.equal(await spendOf('AtasanRebecca'), 300);
+    assert.equal(await page.locator('#tblMatch [data-accept-tag]').count(), 0, 'the question is gone once answered');
+    await page.locator('#btnSaveMap').click();
+    assert.equal(await spendOf('AtasanRebecca'), 300, 'Simpan must keep the mapping accepted by click');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default')).atasan), 'AtasanRebecca');
+  });
+
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {
     await upload(page, [{ name: 'existing.csv', rows: [aff('1')] }]);
     await upload(page, [{ name: 'mixed.csv', rows: [aff('2'), { ...aff('3'), 'Total Komisi per Pesanan(Rp)': 'Rp oops' }] }]);

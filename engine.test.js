@@ -268,10 +268,33 @@ for (const n of ['solid', 'video', 'Blender video']) {
 }
 // Two tags equally close is a question for the user, not a coin toss.
 const tie = near('Kaffa Outer', ['OuterKaffaA', 'OuterKaffaB']);
-assert.equal(tie.method, 'Lemah');
-assert.ok(tie.candidateTag, 'a tie still offers a suggestion');
+assert.equal(tie.method, 'Ambigu');
+assert.deepEqual(tie.candidates.slice().sort(), ['OuterKaffaA', 'OuterKaffaB'], 'a tie offers every tied tag');
 // Each creative number goes to its own tag.
 const trio = ['TelesinGripvideo1', 'TelesinGripvideo2', 'TelesinGripvideo3'];
 for (const k of ['1', '2', '3']) assert.equal(near('Telesin Video ' + k, trio).tag, 'TelesinGripvideo' + k);
+
+/* ── A name that fits several tags is a question, not a pick ─────────────
+   "Atasan" said nothing about which Atasan; the first tag in the list took
+   its spend. Every fitting tag is offered instead, and specific names still
+   connect straight away. */
+const FAMILY = ['AtasanViolet', 'AtasanRebecca', 'AtasanFadfad', 'AtasanGreyKorea',
+  'JogMotorAnak', 'JogMotorAnakTest'];
+const atasan = E.matchAdToTag('Atasan', FAMILY, {});
+assert.equal(atasan.method, 'Ambigu');
+assert.equal(atasan.tag, 'Atasan', 'spend stays on the ad name until the user picks');
+assert.deepEqual(atasan.candidates.slice().sort(), ['AtasanFadfad', 'AtasanGreyKorea', 'AtasanRebecca', 'AtasanViolet']);
+assert.ok(atasan.confidence < 0.5, 'ambiguous names are counted as needing review');
+assert.deepEqual(E.matchAdToTag('JogMotor', FAMILY, {}).candidates, ['JogMotorAnak', 'JogMotorAnakTest']);
+assert.equal(E.matchAdToTag('Atasan Violett', FAMILY, {}).tag, 'AtasanViolet', 'a specific name still connects');
+assert.equal(E.matchAdToTag('Jog Motor Anak', FAMILY, {}).tag, 'JogMotorAnak');
+// Picking one is a manual mapping, and that wins outright.
+assert.equal(E.matchAdToTag('Atasan', FAMILY, { Atasan: 'AtasanRebecca' }).tag, 'AtasanRebecca');
+// The match log hands the choices to the UI and exports.
+const amb = E.analyze({ affiliate: [{ 'ID Pemesanan': 'o1', 'Tag_link1': 'AtasanViolet', 'Waktu Pemesanan': '2026-08-01 10:00:00', 'Komisi Bersih Affiliate (Rp)': '100' },
+                                    { 'ID Pemesanan': 'o2', 'Tag_link1': 'AtasanRebecca', 'Waktu Pemesanan': '2026-08-01 10:00:00', 'Komisi Bersih Affiliate (Rp)': '100' }],
+                        ads: [{ 'Reporting starts': '2026-08-01', 'Ad name': 'Atasan', 'Amount spent (IDR)': '50' }], tagMap: {} }, { ppn: 0 });
+assert.deepEqual(amb.matchLog[0].candidates.slice().sort(), ['AtasanRebecca', 'AtasanViolet']);
+assert.equal(amb.tags.find(t => t.tag === 'AtasanViolet').spend, 0, 'no guessed tag receives the spend');
 
 console.log('engine tests: PASS');

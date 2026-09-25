@@ -900,12 +900,23 @@ document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('[data-cal]').forEach(x=>x.classList.toggle('active',x===b));
   renderCalendar();
 });
+/* A suggestion used to mean opening Kelola Tag and typing the mapping by hand
+   — the setup people choose this tool to avoid. Each suggested tag is now a
+   button that saves that one mapping and recalculates. */
+function suggestHtml(m){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
+  const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
+  return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[E.normalize(b.dataset.acceptAd)]=b.dataset.acceptTag;
+  try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
+  // Keep the rows below in step: Simpan rebuilds the map from them, and would
+  // otherwise drop the mapping just accepted.
+  $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()});
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>a.confidence-b.confidence).map(m=>{
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
     return `<tr><td><b>${esc(m.adName)}</b></td><td><span class="pill">${esc(m.tag)}</span></td>
-      <td>${esc(m.method)}${m.candidateTag?'<div class="hint">Saran: '+esc(m.candidateTag)+' · perlu mapping manual</div>':''}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+      <td>${esc(m.method)}${suggestHtml(m)}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
   // The mapping table now lives behind one button, so that button has to say

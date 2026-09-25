@@ -336,7 +336,7 @@
         [t.reason, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
       table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).filter(m => !omittedTags.has(m.tag)).map(m => [
-        m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + m.candidateTag : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
+        m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + ((m.candidates && m.candidates.length) ? m.candidates.join(' / ') : m.candidateTag) : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
       ]), [57, 52, 37, 36], { numeric: [3] });
 
       section('Perbandingan klik Meta dan Shopee', r.clickStart ? 'Jendela ' + r.clickStart + ' s/d ' + r.clickEnd + '. Selisih positif dapat mencakup klik tambahan di luar iklan; selisih negatif perlu diperiksa.' : 'Tidak tersedia laporan klik pada periode ini.');
