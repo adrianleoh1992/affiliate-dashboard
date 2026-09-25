@@ -231,6 +231,64 @@ function variantClash(a, b) {
   return !!va && !!vb && va !== vb;
 }
 
+/* Forgiving match for names typed a little differently from the tag —
+   "Lemari Olympic" for OlymplastLemari, "Telesin video 2" for
+   TelesinGripvideo2. This is what lets people skip setup, so it has to stay,
+   but a single shared fragment must never be enough: "solid" alone may not
+   take HelmRsixSolid's spend. So the overlap is measured from BOTH sides —
+   most of the ad name has to be found in the tag, and most of the tag has to
+   be accounted for by the ad name — and two near-equal tags is a tie, not a
+   pick. Letters only; the trailing number is judged by variantClash. */
+function wordsOf(s) {
+  return [...new Set(String(s == null ? '' : s).replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 3))];
+}
+function longestCommon(a, b) {
+  let best = 0;
+  const prev = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = 0;
+    for (let j = 1; j <= b.length; j++) {
+      const up = prev[j];
+      prev[j] = a[i - 1] === b[j - 1] ? diag + 1 : 0;
+      if (prev[j] > best) best = prev[j];
+      diag = up;
+    }
+  }
+  return best;
+}
+function overlapScore(raw, tag) {
+  const words = wordsOf(raw), nt = normalize(tag).replace(/\d+/g, '');
+  if (!words.length || !nt) return null;
+  let found = 0, total = 0, hits = 0;
+  for (const w of words) {
+    total += w.length;
+    const common = longestCommon(w, nt);
+    // A fragment only counts when it is most of the word: "vid" of "vidio"
+    // is a typo of "video", the "car" of "carpet" is not a car.
+    if (common >= 3 && common / w.length >= 0.6) { found += common; hits++; }
+  }
+  if (!hits) return null;
+  const nameCov = found / total, tagCov = Math.min(1, found / nt.length);
+  return { nameCov, tagCov, hits, score: Math.min(nameCov, tagCov) };
+}
+function forgivingMatch(raw, affiliateTags) {
+  const ranked = [];
+  for (const t of affiliateTags || []) {
+    if (variantClash(raw, t)) continue;
+    const s = overlapScore(raw, t);
+    if (s && s.nameCov >= 0.75 && s.tagCov >= 0.6 && (s.hits >= 2 || s.tagCov >= 0.8)) ranked.push({ tag: t, s });
+  }
+  if (!ranked.length) return null;
+  ranked.sort((a, b) => b.s.score - a.s.score);
+  const [top, next] = ranked;
+  const confidence = Math.min(0.9, top.s.score);
+  if (next && top.s.score - next.s.score < 0.05) {
+    return { tag: raw, candidateTag: top.tag, method: 'Lemah', confidence: Math.min(confidence, 0.45) };
+  }
+  return { tag: top.tag, method: 'Mirip', confidence };
+}
+
 function extractPipeTag(name) {
   const p = String(name == null ? '' : name).split('|').map(s => s.trim());
   return p.length >= 3 ? p[2] : '';
@@ -286,6 +344,7 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   }
   if (best && best.confidence >= 0.55) return best;
 
+  const near = forgivingMatch(raw, affiliateTags);
   const at = tokens(raw);
   if (at.length) {
     let tb = null;
@@ -311,9 +370,11 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
       if (!tb || conf > tb.confidence) tb = { tag: t, method: 'Token', confidence: conf };
     }
     if (tb && tb.confidence >= 0.5) return tb;
+    if (near && !near.candidateTag) return near;
     if (tb && tb.confidence >= 0.3) return { tag: raw, candidateTag: tb.tag, method: 'Lemah', confidence: tb.confidence };
   }
 
+  if (near) return near;
   if (best) return { tag: raw, candidateTag: best.tag, method: 'Lemah', confidence: best.confidence };
   return { tag: raw, method: 'Tidak cocok', confidence: 0 };
 }
@@ -1102,6 +1163,6 @@ function buildTrend(snapshots, account) {
 return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
-  cleanTag, resolveClickTag, COL, pick, topOf, variantOf, variantClash,
+  cleanTag, resolveClickTag, COL, pick, topOf, variantOf, variantClash, overlapScore,
 };
 });

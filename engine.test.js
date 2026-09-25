@@ -173,11 +173,9 @@ assert.equal(st.counts.length, 3);
 const TAGS = ['TelesinGripvideo2', 'OlymplastLemari', 'HelmRsixSolid',
   'Spinningreelokuma', 'minilayarportable', 'seeouokacamatapolarized'];
 
-// 'video' inside the compound tag is only partial evidence, so video 2 is a
-// candidate for review rather than a certainty — but the number must not block it.
 const v2 = E.matchAdToTag('Telesin video 2', TAGS, {});
-assert.equal(v2.tag === 'TelesinGripvideo2' || v2.candidateTag === 'TelesinGripvideo2', true,
-  'matching number still finds its tag');
+assert.equal(v2.tag, 'TelesinGripvideo2', 'matching number still connects');
+assert.ok(v2.confidence < 1, 'a forgiving match is shown as such, never as certain');
 for (const n of ['Telesin Video 1', 'Telesin Video 3']) {
   const m = E.matchAdToTag(n, TAGS, {});
   assert.notEqual(m.tag, 'TelesinGripvideo2', n + ' must not land on video 2');
@@ -256,5 +254,24 @@ const rTwo = E.analyze(twoSlot, { ppn:0, minSpend:0, minDays:1 });
 const tagA = rTwo.tags.find(t => t.tag === 'TAGA');
 assert.equal(tagA.shopeeClicks, 2, 'kedua klik menyatu ke tag yang sama');
 assert.ok(!rTwo.tags.some(t => /^TAGA-/.test(t.tag)), 'tidak ada tag hantu');
+
+/* ── Forgiving match: names typed a little differently still connect ──────
+   Skipping setup is the point of the matcher, so near names must land without
+   a manual mapping — while one shared fragment still never takes a tag. */
+const near = (n, tags) => E.matchAdToTag(n, tags || TAGS, {});
+assert.equal(near('Lemari Olympic').tag, 'OlymplastLemari', 'words reordered and shortened');
+assert.equal(near('Telesin vidio 2').tag, 'TelesinGripvideo2', 'a typo in one word');
+assert.equal(near('Lemari Olympic').method, 'Mirip');
+for (const n of ['solid', 'video', 'Blender video']) {
+  assert.notEqual(near(n).tag, 'HelmRsixSolid', n + ' must not take HelmRsixSolid');
+  assert.notEqual(near(n).tag, 'TelesinGripvideo2', n + ' must not take TelesinGripvideo2');
+}
+// Two tags equally close is a question for the user, not a coin toss.
+const tie = near('Kaffa Outer', ['OuterKaffaA', 'OuterKaffaB']);
+assert.equal(tie.method, 'Lemah');
+assert.ok(tie.candidateTag, 'a tie still offers a suggestion');
+// Each creative number goes to its own tag.
+const trio = ['TelesinGripvideo1', 'TelesinGripvideo2', 'TelesinGripvideo3'];
+for (const k of ['1', '2', '3']) assert.equal(near('Telesin Video ' + k, trio).tag, 'TelesinGripvideo' + k);
 
 console.log('engine tests: PASS');
