@@ -6,7 +6,7 @@
 
    Grain:
      affiliate → (date, tag)      from (order, product) transaction rows
-     ads       → (date, ad_unit)  already daily in Meta's export
+     ads       → (date, ad_key)   already daily in Meta's export
      clicks    → (date, tag)      from individual click rows
 
    Dedup key is a hash of the WHOLE row. A composite key like
@@ -154,18 +154,28 @@ const DailyAgg = (() => {
     })).sort((a, b) => a.date.localeCompare(b.date) || a.tag.localeCompare(b.tag));
   }
 
-  /* Meta ads export → one record per (date, ad_unit).
+  function adIdentity(row) {
+    const engine = typeof Engine !== 'undefined' ? Engine : (typeof require === 'function' ? require('./engine') : null);
+    if (engine && engine.adIdentity) return engine.adIdentity(row);
+    const adName = String(pick(row, ['Ad name', 'Campaign name', 'Ad set name'])).trim() || '(tanpa nama)';
+    const adId = String(pick(row, ['Ad ID', 'Ad id', 'ad_id'])).trim();
+    const createdAt = String(pick(row, ['Creation date', 'Ad creation date', 'Date created', 'Created time', 'created_at'])).trim();
+    const adKey = adId ? 'id:' + adId : createdAt ? 'created:' + JSON.stringify([adName, createdAt]) : 'name:' + adName;
+    return { adKey, mapKey: '@' + adKey, adId, adName, createdAt };
+  }
+
+  /* Meta ads export → one record per (date, ad_key).
      Already daily, but the same ad can appear on several rows per day. */
   function aggregateAds(rows) {
     const by = new Map();
     for (const r of rows) {
       const date = day(r['Reporting starts']);
       if (!isDate(date)) continue;
-      const unit = String(pick(r, ['Ad name', 'Campaign name', 'Ad set name'])).trim() || '(tanpa nama)';
-      const key = date + '|' + unit;
+      const identity = adIdentity(r), unit = identity.adName;
+      const key = JSON.stringify([date, identity.adKey]);
       let b = by.get(key);
       if (!b) {
-        b = { date, ad_unit: unit, spend: 0, impressions: 0, reach: 0, clicks: 0,
+        b = { date, ad_unit: unit, ad_key: identity.adKey, ad_id: identity.adId, created_at: identity.createdAt, spend: 0, impressions: 0, reach: 0, clicks: 0,
               shop_clicks: 0, lpv: 0, results: 0, delivery: '', rows: 0 };
         by.set(key, b);
       }
@@ -262,7 +272,7 @@ const DailyAgg = (() => {
   return {
     hashRow, hashRows, dedupe,
     aggregateAffiliate, aggregateAds, aggregateClicks,
-    planIngest, num, day, isDate, rowDate, aggregate, mergeDaily,
+    planIngest, num, day, isDate, rowDate, aggregate, mergeDaily, adIdentity,
   };
 })();
 

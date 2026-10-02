@@ -9,6 +9,9 @@
     daily:{label:'Rincian per tanggal',key:'daily',columns:[['Tanggal','date'],['Komisi','comm'],['Biaya + PPN','spend'],['Laba','net'],['ROAS','roas'],['Order','orders'],['Klik Meta','clicks'],['Klik Shopee','shopeeClicks'],['Data matang','mature']]},
     matching:{label:'Pencocokan iklan dan tag',key:'matchLog',columns:[['Nama iklan','adName'],['Tag','tag'],['Kandidat tag','candidateTag'],['Metode','method'],['Keyakinan (0-1)','confidence'],['Biaya + PPN','spend'],['Klik','clicks']]},
   };
+  const DECISION_COLUMNS=[['Siap diputuskan','decisionReady'],['Dasar keputusan','basis'],['Penghambat keputusan','blockers']];
+  for(const key of ['tags','units'])DATASETS[key].columns.push(...DECISION_COLUMNS);
+  for(const key of ['units','matching'])DATASETS[key].columns.push(['Identitas iklan','adKey'],['ID iklan','adId'],['Tanggal dibuat','createdAt'],['Lingkup pasangan','mappingScope']);
   function filenamePart(value){return String(value||'akun').normalize('NFKC').replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g,'-').replace(/\s+/g,'-').replace(/^\.+|\.+$/g,'').slice(0,90)||'akun'}
   function cell(value){
     if(value==null||typeof value==='number'&&!Number.isFinite(value))value='';
@@ -20,14 +23,17 @@
     const config=DATASETS[options.dataset||'tags'];
     if(!config)throw new Error('Jenis data ekspor tidak dikenali');
     const source=options.rows||result[config.key]||[];
-    const rows=[['Akun','Periode awal','Periode akhir',...config.columns.map(c=>c[0])]];
-    source.forEach(row=>rows.push([options.account||'default',result.range.start,result.range.end,...config.columns.map(([,key])=>row[key])]));
+    const rows=[['Akun','Periode awal','Periode akhir','Biaya diketahui','Catatan kesiapan data',...config.columns.map(c=>c[0])]];
+    const readiness=result.readiness||{};
+    const explain=value=>Array.isArray(value)?value.map(item=>typeof item==='string'?item:item&& (item.message||item.label||item.code)||'').filter(Boolean).join('; '):value;
+    source.forEach(row=>rows.push([options.account||'default',result.range.start,result.range.end,
+      readiness.costsKnown,explain(readiness.reasons),...config.columns.map(([,key])=>explain(key==='basis'?row.basis||readiness.basis:row[key]))]));
     return '\uFEFF'+rows.map(row=>row.map(cell).join(',')).join('\r\n')+'\r\n';
   }
   function json(result,options={}){
     return JSON.stringify({format:'affiliate-analysis',version:1,account:options.account||'default',
       exportedAt:options.generatedAt||new Date().toISOString(),quality:options.quality||[],
-      note:'Angka rasio yang tidak dapat dihitung disimpan sebagai null. Ini adalah analisis, bukan backup untuk pemulihan akun.',
+      note:'Nilai yang belum diketahui atau tidak dapat dihitung disimpan sebagai null, bukan nol. Kesiapan data dan dasar keputusan terdapat pada readiness. Ini adalah analisis, bukan backup untuk pemulihan akun.',
       analysis:result},(_,value)=>typeof value==='number'&&!Number.isFinite(value)?null:value,2);
   }
   return {DATASETS,filenamePart,csv,json};

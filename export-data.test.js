@@ -43,3 +43,23 @@ test('download filenames preserve names while removing filesystem controls',()=>
   assert.equal(X.filenamePart('../Akun: satu/dua?'),'-Akun--satu-dua-');
   assert.equal(X.filenamePart('Café 日本'),'Café-日本');assert(X.filenamePart('x'.repeat(200)).length<=90);
 });
+test('exports preserve unknown costs and explain decision readiness and identity',()=>{
+  const unknown={...result,readiness:{costsKnown:false,decisionReady:false,basis:'click-cohort',reasons:['Menunggu laporan Meta']},
+    tags:[{tag:'Alpha',status:'evaluasi',label:'Menunggu laporan Meta',reason:'Laporan Meta belum tersedia',
+      spend:null,commEff:250,netEff:null,roasEff:null,decisionReady:false,blockers:['meta_missing'],basis:'click-cohort'}],
+    adUnits:[{adName:'Nama sama',adKey:'id:123',adId:'123',createdAt:'2026-08-01',tag:'Alpha',
+      spend:50,label:'Perlu pasangan tag',decisionReady:false,blockers:['matching'],basis:'click-cohort'}]};
+  const row=Papa.parse(X.csv(unknown),{header:true,skipEmptyLines:true}).data[0];
+  assert.equal(row['Biaya + PPN'],'');assert.equal(row['Laba efektif'],'');
+  assert.equal(row['Komisi efektif'],'250');
+  assert.equal(row['Siap diputuskan'],'Tidak');
+  assert.equal(row['Dasar keputusan'],'click-cohort');
+  assert.equal(row['Penghambat keputusan'],'meta_missing');
+  assert.equal(row['Biaya diketahui'],'Tidak');
+  const unit=Papa.parse(X.csv(unknown,{dataset:'units'}),{header:true,skipEmptyLines:true}).data[0];
+  assert.equal(unit['ID iklan'],'123');assert.equal(unit['Identitas iklan'],'id:123');
+  const parsed=JSON.parse(X.json(unknown));
+  assert.equal(parsed.analysis.tags[0].spend,null);
+  assert.equal(parsed.analysis.tags[0].netEff,null);
+  assert.equal(parsed.analysis.readiness.costsKnown,false);
+});

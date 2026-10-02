@@ -170,6 +170,7 @@ async function main() {
       const feedback = page.locator('#importFeedbackRows .import-result').first();
       assert.match(await feedback.innerText(), /Siap dianalisis/);
       assert.match(await feedback.innerText(), /2 baris valid/);
+      await feedback.locator('.import-notes summary').click();
       assert.match(await feedback.innerText(), /Baris 2.*Nama Barang/);
       assert.equal(await feedback.locator('[data-accept-import]').count(), 0,
         'a descriptive label warning must not require accepting partial data');
