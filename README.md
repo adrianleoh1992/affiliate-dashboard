@@ -4,6 +4,50 @@ Dashboard lokal untuk menggabungkan laporan komisi Shopee Affiliate, Meta Ads,
 dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, kebocoran klik,
 dan riwayat harian per akun. Semua pemrosesan dan penyimpanan berada di browser.
 
+## Pilih repo sesuai pekerjaan
+
+Gunakan repo ini untuk analisis lokal, pemeriksaan CSV, laporan CSV/JSON/PDF,
+serta riwayat harian dengan backup dan pemulihan per akun. Gunakan
+[affiliate-harian](https://github.com/adrianleoh1992/affiliate-harian) bila
+pekerjaan memerlukan workspace tim dan sinkronisasi Supabase opsional.
+Keduanya memiliki penyimpanan harian dan deduplikasi; keberadaan fitur harian
+bukan pembeda antarrepo.
+
+Perbandingan berikut diperiksa pada `main` tanggal **2 Oktober 2026**:
+
+| Kebutuhan | Repo ini: `affiliate-dashboard` | `affiliate-harian` |
+|---|---|---|
+| Impor Shopee Affiliate, Meta Ads, dan klik | Ada; validasi dan rincian baris bermasalah | Ada; agregasi harian dan analisis |
+| Riwayat harian per akun | IndexedDB; fingerprint baris/file dan log unggahan | IndexedDB; fingerprint baris/file dan log unggahan |
+| Cadangan harian | JSON lengkap dengan fingerprint, pratinjau, dan pemulihan akun | Ekspor JSON agregat/log; belum ada antarmuka pemulihan harian |
+| Hasil analisis | CSV, JSON analisis, PDF, dan snapshot | CSV dan snapshot; analisis dari data tersimpan |
+| Kolaborasi tim | Tidak ada backend atau sinkronisasi cloud | Workspace Supabase; push/pull manual, peran owner/editor/viewer |
+| Dependensi saat halaman dibuka | Skrip dan font tersedia lokal di `vendor/` | Google Fonts, PapaParse, Chart.js dari CDN; SDK Supabase saat fitur cloud dipakai atau sesi dipulihkan |
+
+Sumber perbandingan:
+[dashboard `caa7be4`](https://github.com/adrianleoh1992/affiliate-dashboard/tree/caa7be44f27c332e37c6544063a1077041f4a110)
+dan [harian `f0a6104`](https://github.com/adrianleoh1992/affiliate-harian/tree/f0a6104065ee963923abd1f3b7932228d4155e2b).
+Keduanya tetap mempunyai tujuan berbeda. Format database dan JSON bukan kontrak
+migrasi antarrepo; periksa sumber dan buat backup sebelum memindahkan data.
+
+## Status `main` dan sumber utama
+
+Sumber aplikasi ini adalah
+[adrianleoh1992/affiliate-dashboard](https://github.com/adrianleoh1992/affiliate-dashboard),
+dengan [`index.html`](index.html) sebagai titik masuk. Panduan ini berangkat dari
+`main` pada commit `caa7be4`. Fitur harian, deduplikasi, snapshot, dan pemulihan
+backup sudah ada pada commit tersebut.
+
+[Draft PR #5](https://github.com/adrianleoh1992/affiliate-dashboard/pull/5)
+masih merupakan usulan terpisah pada pemeriksaan 2 Oktober 2026
+(`0bd9698`): antrean pencocokan iklan, pembacaan kesiapan keputusan, dan
+penggantian periode harian. Panduan `main` ini tidak mengasumsikan usulan itu
+sudah digabung.
+
+Lanjutkan ke [cara menjalankan](#menjalankan), [contoh tugas](#contoh-tugas),
+[hasil ekspor](#ekspor-analisis-dan-pdf), [pemulihan dan batas data](#data-revisi-dan-pemulihan),
+atau [pengujian](#pengujian). Panduan kontributor ada di [AGENTS.md](AGENTS.md).
+
 ## Menjalankan
 
 Buka `index.html` langsung, atau gunakan server lokal agar origin penyimpanan konsisten:
@@ -19,6 +63,20 @@ meminta skrip, font, atau data dari pihak ketiga. `index-daily.html` mengarah ke
 halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai
 arsip pembanding dan tidak disertakan dalam build produksi. Pustaka dan font PDF
 baru dimuat saat membuat PDF agar pembukaan dashboard tetap ringan.
+
+## Contoh tugas
+
+- "Bantu analisis CSV affiliate, Meta Ads per hari, dan klik untuk akun ini.
+  Periksa penolakan baris, periode, PPN, serta mapping sebelum menilai tag."
+- "Simpan riwayat harian, buka kembali setelah reload, lalu buat backup akun.
+  Jelaskan perbedaan backup harian, snapshot, dan JSON analisis."
+- "Buat PDF ringkas serta CSV keputusan dari periode pilihan. Jelaskan
+  cakupan sumber dan tanggal yang tidak mempunyai data."
+- "Periksa regresi deduplikasi dengan fixture sintetis melalui
+  `npm run test:unit`; jangan gunakan laporan pelanggan."
+
+Tugas yang meminta workspace bersama, schema Supabase, atau sinkronisasi tim
+dimulai di [affiliate-harian](https://github.com/adrianleoh1992/affiliate-harian).
 
 ## Alur penggunaan
 
