@@ -117,6 +117,11 @@ async function main() {
     await page.locator('[data-tab="harian"]').click();await page.locator('#tblDaily tbody tr[data-day]').click();
     assert.equal(await page.locator('#tblDaily .daytbl tbody tr td').nth(3).innerText(),'—');
   });
+  test('deferred modal focus does not steal focus from an entered control or a closed dialog',async page=>{
+    await prepare(page);
+    const focused=await page.evaluate(()=>{const raf=window.requestAnimationFrame,queue=[];window.requestAnimationFrame=fn=>(queue.push(fn),0);try{openMap();const summary=document.querySelector('.saved-mappings summary');summary.focus();queue.splice(0).forEach(fn=>fn());const retained=document.activeElement===summary;closeModal(document.getElementById('mapModal'));openMap();closeModal(document.getElementById('mapModal'));document.getElementById('btnMap').focus();queue.splice(0).forEach(fn=>fn());return{retained,closed:document.activeElement.id==='btnMap'}}finally{window.requestAnimationFrame=raf}});
+    assert.deepEqual(focused,{retained:true,closed:true});
+  });
   test('keyboard users can expand mapping backup controls and reach export',async page=>{
     await prepare(page);await page.locator('#btnMap').click();await page.locator('.saved-mappings summary').focus();await page.keyboard.press('Space');await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(()=>document.activeElement.id),'btnExportMap');
