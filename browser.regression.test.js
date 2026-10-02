@@ -155,6 +155,47 @@ async function main() {
     assert.equal(await page.evaluate(() => RESULT), null);
   });
 
+  for (const encoding of ['UTF-8 BOM', 'UTF-16 LE', 'UTF-16 BE']) {
+    test(`${encoding} upload preserves a replacement character in a product label without losing orders`, async page => {
+      const rows = [{ ...aff('1'), 'Nama Barang': 'Synthetic Product \uFFFD label' }, aff('2')];
+      const text = '\uFEFF' + csv(rows);
+      const content = Buffer.from(text, encoding === 'UTF-8 BOM' ? 'utf8' : 'utf16le');
+      if (encoding === 'UTF-16 BE') content.swap16();
+      await upload(page, [{ name: 'product-label.csv', content }]);
+
+      assert.equal(await page.locator('#main').isVisible(), true, 'valid label text must not block the report');
+      assert.deepEqual(await page.evaluate(() => ({ files: FILES.length, orders: RESULT.kpi.orders,
+        comm: RESULT.kpi.comm, products: DATA.affiliate.map(row => row['Nama Barang']) })),
+      { files: 1, orders: 2, comm: 400, products: ['Synthetic Product \uFFFD label', 'Synthetic Product 2'] });
+      const feedback = page.locator('#importFeedbackRows .import-result').first();
+      assert.match(await feedback.innerText(), /Siap dianalisis/);
+      assert.match(await feedback.innerText(), /2 baris valid/);
+      await feedback.locator('.import-notes summary').click();
+      assert.match(await feedback.innerText(), /Baris 2.*Nama Barang/);
+      assert.equal(await feedback.locator('[data-accept-import]').count(), 0,
+        'a descriptive label warning must not require accepting partial data');
+      assert.equal(await page.evaluate(() => IMPORT_REPORTS[0].parsed.issues.some(issue =>
+        issue.severity === 'warning' && issue.row === 2 && issue.column === 'Nama Barang')), true);
+    });
+  }
+
+  test('invalid UTF-8 bytes reject the upload and preserve previously imported orders', async page => {
+    await upload(page, [{ name: 'valid.csv', rows: [aff('1')] }]);
+    const [prefix, suffix] = csv([{ ...aff('2'), 'Nama Barang': 'BROKEN_LABEL' }]).split('BROKEN_LABEL');
+    const content = Buffer.concat([Buffer.from(prefix), Buffer.from([0xc3, 0x28]), Buffer.from(suffix)]);
+    await upload(page, [{ name: 'invalid-utf8.csv', content }]);
+
+    assert.deepEqual(await page.evaluate(() => ({ files: FILES.map(file => file.name),
+      ids: DATA.affiliate.map(row => row['ID Pemesanan']), orders: RESULT.kpi.orders, comm: RESULT.kpi.comm })),
+    { files: ['valid.csv'], ids: ['1'], orders: 1, comm: 200 });
+    const feedback = page.locator('#importFeedbackRows .import-result').first();
+    assert.match(await feedback.innerText(), /invalid-utf8\.csv/);
+    assert.match(await feedback.innerText(), /Tidak dimuat/);
+    assert.match(await feedback.innerText(), /UTF-8\/UTF-16/);
+    assert.equal(await feedback.locator('[data-accept-import]').count(), 0);
+    assert.equal(await page.locator('#main').isVisible(), true);
+  });
+
   test('removing the last affiliate report clears results and date controls', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff()] }]);
     await page.locator('[data-zchips="affiliate"] [data-rm]').click();

@@ -1,7 +1,7 @@
 # Affiliate Decision Dashboard
 
 Dashboard lokal untuk menggabungkan laporan komisi Shopee Affiliate, Meta Ads,
-dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, kebocoran klik,
+dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, perbandingan klik,
 dan riwayat harian per akun. Semua pemrosesan dan penyimpanan berada di browser.
 
 ## Menjalankan
@@ -28,12 +28,17 @@ baru dimuat saat membuat PDF agar pembukaan dashboard tetap ringan.
    laporan klik. Baca hasil pemeriksaan per file. Jika hanya sebagian baris valid,
    perbaiki CSV atau pilih **Muat baris valid saja** secara eksplisit. Laporan
    affiliate diperlukan untuk analisis keputusan.
-3. Periksa rentang tanggal, kelengkapan laporan, PPN sesuai tagihan, dan mapping.
-   PPN awal di antarmuka adalah 0%; pilihan dan ambang disimpan per akun.
-4. Tinjau rencana simpan, lalu tekan **Simpan** untuk memasukkan agregat ke
+3. Periksa rentang tanggal, kesiapan sumber, dan PPN sesuai tagihan. PPN awal
+   di antarmuka adalah 0%; pilihan dan ambang disimpan per akun. Tanggal kosong
+   dapat dikonfirmasi lengkap jika laporan sumber memang sudah lengkap.
+4. Buka **Hubungkan iklan ke tag**, pilih iklan yang belum terhubung, cari tag
+   dari laporan komisi/klik, lalu **Simpan pasangan**. Daftar mendahulukan biaya
+   terbesar. Pasangan dapat diubah, dihapus, serta diekspor/impor sebagai JSON;
+   setiap perubahan disimpan untuk akun aktif.
+5. Tinjau rencana simpan, lalu tekan **Simpan** untuk memasukkan agregat ke
    riwayat harian. Unggahan saja belum menyimpan transaksi ke IndexedDB.
-5. Gunakan **Simpan Snapshot** untuk menyimpan hasil analisis periode terpilih.
-6. Setelah reload, buka **Data Tersimpan** untuk riwayat harian atau **Snapshot**
+6. Gunakan **Simpan Snapshot** untuk menyimpan hasil analisis periode terpilih.
+7. Setelah reload, buka **Data Tersimpan** untuk riwayat harian atau **Snapshot**
    untuk snapshot. Tidak perlu mengunggah CSV kembali untuk membuka keduanya.
 
 File identik yang berganti nama dan baris identik dari beberapa file disaring.
@@ -72,10 +77,10 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
 - **PDF:** klik **PDF**, isi judul, lalu unduh Ringkas, Standar, atau Lengkap.
   Semua mode dimulai dengan halaman **Dashboard utama**: Komisi Total, Spend
   Iklan, Laba Bersih, ROAS Total, metrik klik, prioritas anggaran, serta kartu
-  Scale/Pantau/Stop/Organik. Klik memakai tag dan jendela pembanding yang sama
+  Scale/Pantau/Stop/Tanpa biaya Meta. Klik memakai tag dan jendela pembanding yang sama
   dengan dashboard; sumber yang tidak tersedia ditandai `-`.
   Halaman berikutnya berisi grafik tren, peta keputusan, diagram laba, dan
-  perbandingan enam tag dengan biaya terbesar. Peluang organik serta konsentrasi
+  perbandingan enam tag dengan biaya terbesar. Kandidat uji iklan serta konsentrasi
   anggaran dari dashboard juga disertakan. Ini tata letak PDF dengan teks dan
   grafik vektor, bukan tangkapan layar yang memotong dashboard panjang.
   Tag dengan biaya dan komisi sama-sama nol tidak disertakan dalam grafik,
@@ -88,8 +93,9 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
 
 Grafik dan tabel harian memakai komisi efektif yang sama dengan ringkasan.
 Tanggal tanpa baris sumber menjadi celah grafik dan tanda `-` pada tabel;
-nilainya tidak diasumsikan nol. Catatan cakupan menjelaskan bahwa laba total
-memakai seluruh data yang tersedia saat rentang sumber berbeda.
+nilainya tidak diasumsikan nol. Biaya yang belum lengkap membuat laba dan rasio biaya tidak tersedia;
+`null` pada JSON atau tanda `-` pada PDF bukan biaya nol. Laporan menyertakan
+alasan penghambat dan dasar keputusan.
 
 PDF dibuat lokal dengan grafik vektor yang tetap tajam saat diperbesar dan teks
 yang dapat dipilih. Format A4 memakai header tabel berulang dan nomor halaman.
@@ -106,22 +112,28 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
 - **Komisi efektif:** komisi selesai ditambah komisi tertunda dikalikan bobot
   tertunda. Status dibatalkan dan belum dibayar dikecualikan. Kolom komisi per
   produk didahulukan bila ada; kolom alternatif digunakan bila diperlukan.
-- **Biaya:** biaya Meta ditambah PPN satu kali. ROAS adalah komisi efektif
-  dibagi biaya; ROAS berbayar memisahkan komisi tag organik.
-- **Keputusan:** Scale, Pantau, Stop, Organik, atau Belum cukup data. Untuk tag
-  berbayar, keputusan menggunakan biaya, komisi, dan hari produksi yang sudah
-  matang menurut lag atribusi. Kolom utama tetap menunjukkan total periode;
-  alasan keputusan menyebut dasar yang matang.
+- **Biaya:** biaya Meta ditambah PPN satu kali. Meta yang belum dimuat atau
+  parsial menghasilkan biaya/laba/ROAS yang belum tersedia. Pernyataan eksplisit
+  **Tidak menjalankan Meta di periode ini** menetapkan biaya nol hanya untuk
+  akun dan periode tersebut. Unggahan biaya yang nyata tetap diperhitungkan.
+- **Keputusan:** Scale, Pantau, Stop, Tanpa biaya Meta, atau Perlu diperiksa.
+  Keuangan mengikuti tanggal pesanan. Keputusan iklan memakai komisi yang
+  dikelompokkan menurut tanggal klik dan hari produksi yang sudah matang.
+  **Pesanan diamati sampai** dapat memperpanjang pengamatan dengan laporan
+  pesanan berikutnya; tanpa cakupan sumber yang cukup, keputusan tetap ditahan.
+  Waktu klik pesanan yang hilang tidak diganti dengan waktu pesanannya.
 - **Lag dan order:** distribusi lag dan penyelesaian menghitung order unik,
   bukan jumlah baris produk. Rekomendasi H+0 tetap dapat bernilai nol.
-- **Mapping:** mapping manual nama iklan yang dinormalisasi didahulukan.
-  Kecocokan lemah ditampilkan sebagai saran dan memerlukan mapping manual;
-  komisinya tidak otomatis digabung ke kandidat tersebut.
-- **Klik:** perbandingan Meta dan Shopee menggunakan cakupan tanggal laporan
-  klik. Data klik yang belum lengkap membatasi diagnosis kebocoran.
-- **Kandidat organik:** Maks Biaya/Order merupakan batas biaya per pesanan
-  berdasarkan komisi efektif dan target ROI. Angka ini bukan batas CPC;
-  CPC memerlukan estimasi konversi klik menjadi pesanan.
+- **Mapping:** identitas memakai Ad ID, lalu nama + tanggal dibuat, lalu nama
+  persis. Pasangan manual per identitas didahulukan dari aturan lama berdasarkan
+  nama. Lingkupnya ditampilkan di antarmuka. Iklan yang belum jelas pasangannya
+  tidak langsung menerima rekomendasi STOP/SCALE. Tag dari laporan klik tetap
+  dapat dipilih walaupun belum menghasilkan komisi.
+- **Klik:** selisih Meta dan Shopee memakai jendela pembanding yang sama.
+  Perbedaan hitungan platform tidak membuktikan klik hilang atau biaya terbuang.
+- **Tanpa biaya Meta:** ini bukan bukti organik; trafik juga bisa berasal dari
+  promosi Shopee atau sumber lain. Kandidat uji iklan baru ditampilkan setelah
+  kesiapan sumber dan pencocokan terpenuhi. Maks Biaya/Order bukan batas CPC.
 - **Perkembangan:** periode dengan tanggal awal berbeda tetap terpisah,
   meskipun tanggal akhirnya sama. Perubahan tag membandingkan dua snapshot
   periode terbaru.
@@ -133,11 +145,13 @@ berubah bukan baris identik. Ekspor tidak selalu menyediakan ID unik per item,
 sehingga aplikasi tidak dapat memastikan apakah perubahan itu koreksi atau
 transaksi lain yang sah.
 
-Untuk laporan **koreksi**, hapus file lama dari analisis. Pada **Data Tersimpan**,
-hapus tanggal terdampak untuk jenis laporan yang bersangkutan, lalu unggah dan
-simpan kembali laporan lengkap yang benar untuk tanggal tersebut. Jangan
-menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
-penanda deduplikasi yang diperlukan agar unggah ulang dapat memulihkan hari itu.
+Untuk laporan **koreksi**, hapus file lama dari analisis lalu unggah versi
+lengkap yang benar. Pada rencana simpan, pilih **Ganti periode lengkap**, jenis
+laporan, dan rentang tanggal. Periksa akun serta total lama → baru pada
+pratinjau, lalu konfirmasikan penggantian. Data lama dalam rentang terpilih,
+termasuk tag/tanggal yang tidak ada di laporan revisi, diganti secara atomik.
+Tanggal di luar rentang dan akun lain tetap utuh. Kegagalan penulisan membatalkan
+seluruh penggantian. Mode simpan biasa tetap menambah dan menyaring duplikat.
 
 Database versi lama tetap dipertahankan. Agregat lama yang tidak memiliki
 identitas order untuk penggabungan aman akan menolak tambahan yang bertumpang
@@ -150,7 +164,8 @@ di-hash, dan log unggahan. **Pulihkan backup** memvalidasi isi dan menampilkan
 akun asal, tujuan, serta cakupan sebelum tombol penggantian dapat dijalankan.
 Pemulihan mengganti seluruh riwayat harian akun aktif dalam satu transaksi;
 akun lain tidak berubah. Parameter backup hanya referensi, bukan pengganti
-pengaturan analisis saat ini. Snapshot dan mapping mempunyai penyimpanan terpisah.
+pengaturan analisis saat ini. Snapshot dan mapping mempunyai ekspor/impor terpisah. Konfirmasi cakupan
+tersimpan di browser per akun/periode; backup harian tidak memindahkannya.
 
 Backup baru memakai `affiliate-daily-backup` versi 1, maksimum 50 MiB. Backup
 lama yang tidak lengkap ditolak dengan penjelasan, bukan dipulihkan sebagian.

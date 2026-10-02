@@ -113,7 +113,7 @@
       issue('error', 'empty_file', 'File kosong. Ekspor laporan yang berisi header dan data.');
       return finish(true);
     }
-    if (input.includes('\0') || input.includes('\uFFFD')) {
+    if (input.includes('\0')) {
       issue('error', 'invalid_encoding', 'Teks file tidak terbaca utuh. Ekspor ulang sebagai CSV UTF-8, bukan file Excel yang hanya diganti ekstensi.');
       return finish(true);
     }
@@ -137,6 +137,10 @@
     if ((parsed.errors || []).length) return finish(true);
     if (!records.length) { issue('error', 'empty_file', 'Tidak ada header atau data dalam file.'); return finish(true); }
     const headerCells = records.shift();
+    if (headerCells.some(value => String(value).includes('\uFFFD'))) {
+      issue('error', 'invalid_encoding', 'Nama kolom mengandung karakter pengganti (�). Ekspor ulang dengan header asli agar kolom terbaca dengan benar.', { row: 1 });
+      return finish(true);
+    }
     const sourceFields = headerCells.map(value => String(value).replace(/^\uFEFF/, '').trim());
     const rawFields = headerCells.map(cleanHeader);
     result.fields = rawFields.map(field => aliases.get(headerKey(field)) || field);
@@ -178,6 +182,10 @@
     const numeric = new Map();
     numericKeys.forEach(key => col[key].filter(name => fields.includes(name)).forEach(name => numeric.set(name, key)));
     const countKeys = new Set(['qty', 'clicks', 'impr', 'reach', 'lpv', 'results', 'shopClicks', 'allClicks']);
+    // parseFile validates the original bytes with a fatal TextDecoder. A literal
+    // U+FFFD can still be present in valid UTF-8/UTF-16 product/shop labels.
+    // Preserve those labels with a warning; never accept damaged keys or values.
+    const descriptiveFields = new Set(result.type === 'affiliate' ? [...col.product, ...col.shop] : []);
     let start = '', end = '', nonDaily = false;
     records.forEach((cells, index) => {
       const rowNumber = index + 2;
@@ -185,6 +193,11 @@
       const before = errors;
       const evidence = (column, value) => ({ row: rowNumber, column, value: String(value).slice(0, 160) });
       const rowIssue = (severity, code, message, column, value) => issue(severity, code, `Baris ${rowNumber}: ${message}`, evidence(column, value));
+      for (const field of fields) if (row[field].includes('\uFFFD')) {
+        const descriptive = descriptiveFields.has(field);
+        rowIssue(descriptive ? 'warning' : 'error', 'replacement_character',
+          `${field} mengandung karakter pengganti (�). ${descriptive ? 'Teks sumber dipertahankan; periksa nama pada laporan asli.' : 'Perbaiki nilai pada laporan asli; baris ini tidak dimasukkan.'}`, field, row[field]);
+      }
       let excluded = false;
       if (result.type === 'affiliate') {
         const status = E.pick(row, col.status) || '';

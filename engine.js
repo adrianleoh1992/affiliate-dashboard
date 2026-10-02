@@ -72,6 +72,19 @@ function isDate(s) {
   dateValidity.set(s, valid);
   return valid;
 }
+function validClickTime(clickAt, orderAt) {
+  const click = String(clickAt || '').trim(), order = String(orderAt || '').trim();
+  const clickDay = dayOnly(click), orderDay = dayOnly(order);
+  if (!isDate(clickDay) || !isDate(orderDay) || clickDay > orderDay) return false;
+  // A date-only export still identifies the daily cohort. When a time is
+  // supplied, reject malformed clocks and clicks occurring after the order.
+  const timestamp = /^\d{4}-\d{2}-\d{2}[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/;
+  if (click !== clickDay && !timestamp.test(click)) return false;
+  if (timestamp.test(click) && timestamp.test(order)) {
+    return Date.parse(click.replace(' ', 'T')) <= Date.parse(order.replace(' ', 'T'));
+  }
+  return true;
+}
 function addDays(iso, n) {
   if (!isDate(iso) || !Number.isFinite(Number(n))) return '';
   const d = new Date(iso + 'T00:00:00Z');
@@ -136,7 +149,9 @@ const COL = {
   },
   ads: {
     date:    ['Reporting starts'],
-    name:    ['Ad name', 'Campaign name', 'Ad set name'],
+    name:    ['Ad name', 'Campaign name', 'Ad set name', 'ad_unit'],
+    id:      ['Ad ID', 'Ad id', 'ad_id'],
+    created: ['Date created', 'Creation date', 'Ad creation date', 'Created time', 'created_at'],
     campaign:['Campaign name'],
     spend:   ['Amount spent (IDR)', 'Amount spent'],
     clicks:  ['Link clicks'],
@@ -165,6 +180,13 @@ function pick(row, keys) {
   if (!row) return undefined;
   for (const k of keys) if (Object.prototype.hasOwnProperty.call(row, k) && row[k] != null && String(row[k]).trim() !== '') return row[k];
   return undefined;
+}
+function adIdentity(row) {
+  const adName = String(pick(row, COL.ads.name) || '');
+  const adId = String(pick(row, COL.ads.id) || '').trim();
+  const createdAt = String(pick(row, COL.ads.created) || '').trim();
+  const adKey = adId ? 'id:' + adId : createdAt ? 'created:' + JSON.stringify([adName, createdAt]) : 'name:' + adName;
+  return { adKey, mapKey: '@' + adKey, adId, adName, createdAt };
 }
 function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '').trim(); }
 
@@ -312,7 +334,7 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   // An explicit correction wins over an embedded pipe tag. Manual mappings
   // apply to the full normalized ad name, never unrelated substring names.
   const map = tagMap || {};
-  const manual = Object.keys(map).find(k => normalize(k) === n && String(map[k] || '').trim());
+  const manual = Object.keys(map).find(k => !k.startsWith('@') && normalize(k) === n && String(map[k] || '').trim());
   if (manual !== undefined) return { tag: cleanTag(map[manual]), method: 'Manual', confidence: 1 };
 
   const piped = noPipe ? '' : extractPipeTag(raw);
@@ -428,6 +450,41 @@ function analyze(data, options) {
   if (ds && de && ds > de) [ds, de] = [de, ds];
   const inRange = d => isDate(d) && d >= ds && d <= de;
 
+  // The accounting window stays fixed; only the explicitly selected observation
+  // cutoff may admit later orders into the selected click cohorts.
+  const observationEnd = isDate(o.observationEnd) && o.observationEnd >= de ? o.observationEnd : de;
+  const sourceState = {};
+  const sourceRows = { affiliate: aff, ads, clicks: clk };
+  const dateCols = { affiliate: COL.aff.orderAt, ads: COL.ads.date, clicks: COL.clk.time };
+  const sourceCoverage = {};
+  for (const kind of ['affiliate', 'ads', 'clicks']) {
+    const supplied = data.sourceState && data.sourceState[kind];
+    sourceState[kind] = ['loaded', 'partial', 'missing'].includes(supplied) || (kind === 'ads' && supplied === 'none')
+      ? supplied : sourceRows[kind].length ? 'loaded' : 'missing';
+    const end = kind === 'affiliate' ? observationEnd : de;
+    const dates = [...new Set(sourceRows[kind].map(r => dayOnly(pick(r, dateCols[kind]))).filter(isDate))].sort();
+    const observed = new Set(dates);
+    let dense = !!ds && !!end && ds <= end;
+    for (let date = ds; dense && date <= end; date = addDays(date, 1)) {
+      if (!observed.has(date)) dense = false;
+    }
+    const confirmation = data.coverage && data.coverage[kind];
+    const confirmed = !!(confirmation && confirmation.confirmed === true && isDate(confirmation.start)
+      && isDate(confirmation.end) && confirmation.start <= ds && confirmation.end >= end && ds && end && ds <= end);
+    const declaredNone = sourceState[kind] === 'none' && !sourceRows[kind].some(r => inRange(dayOnly(pick(r, dateCols[kind]))));
+    const available = declaredNone || (sourceState[kind] === 'loaded' && (confirmed || dense));
+    sourceCoverage[kind] = { start: dates[0] || '', end: dates[dates.length - 1] || '',
+      requiredStart: ds, requiredEnd: end, confirmed, observedDense: dense, available,
+      basis: declaredNone ? 'declared-none' : confirmed ? 'confirmed' : dense ? 'observed' : 'incomplete' };
+  }
+  const costsKnown = sourceCoverage.ads.available;
+  const affiliateReady = sourceCoverage.affiliate.available;
+  const sourceBlockers = [];
+  if (!costsKnown) sourceBlockers.push(sourceState.ads === 'partial' ? 'Laporan Meta parsial; biaya belum lengkap'
+    : sourceState.ads === 'missing' ? 'Laporan Meta belum tersedia' : 'Cakupan tanggal Meta belum lengkap atau belum dikonfirmasi');
+  if (!affiliateReady) sourceBlockers.push(sourceState.affiliate === 'partial' ? 'Laporan afiliasi parsial'
+    : sourceState.affiliate === 'missing' ? 'Laporan afiliasi belum tersedia' : 'Cakupan afiliasi sampai batas observasi belum lengkap atau belum dikonfirmasi');
+
   /* ── Filter source rows ─────────────────────────────────────────────── */
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
   const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
@@ -463,6 +520,11 @@ function analyze(data, options) {
   });
   const fAds = ads.filter(r => inRange(dayOnly(pick(r, COL.ads.date))));
   const fClk = clk.filter(r => inRange(dayOnly(pick(r, COL.clk.time))));
+  const cohortAff = aff.filter(r => {
+    const date = dayOnly(pick(r, COL.aff.orderAt));
+    const status = String(pick(r, COL.aff.status) || '').trim();
+    return isDate(date) && date >= ds && date <= observationEnd && !Object.prototype.hasOwnProperty.call(EXCLUDED, status);
+  });
 
   /* Click report often covers a shorter window than ads — leakage must only
      be computed on the overlap, otherwise every tag looks like it is leaking. */
@@ -480,7 +542,7 @@ function analyze(data, options) {
       orders: new Set(), doneOrders: new Set(), pendingOrders: new Set(),
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
       days: new Set(), daily: dict(), shopeeClicks: 0, metaClicksWindow: 0, spendWindow: 0,
-      adNames: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
+      cohortDaily: dict(), missingClickRows: 0, adNames: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
     };
     return T[t];
   }
@@ -545,15 +607,43 @@ function analyze(data, options) {
     }
   });
 
-  const affiliateTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
+  // Known tags include later imported orders and click-only products. Matching
+  // must work before the first sale and across a selected month boundary.
+  const knownTags = new Map();
+  aff.forEach(r => { const t = cleanTag(pick(r, COL.aff.tag)); if (t) knownTags.set(normalize(t), t); });
+  const clickTagAuthority = new Map(knownTags);
+  clk.forEach(r => { const t = resolveClickTag(pick(r, COL.clk.tag), clickTagAuthority); if (t) knownTags.set(normalize(t), t); });
+  const affiliateTags = [...knownTags.values()].filter(t => t !== '(tanpa tag)');
+
+  // Cohorts have their own click-date buckets; accounting buckets above retain
+  // order dates and never receive later-period revenue.
+  cohortAff.forEach(r => {
+    const status = String(pick(r, COL.aff.status) || '').trim();
+    const clickDate = dayOnly(pick(r, COL.aff.clickAt));
+    const t = cleanTag(pick(r, COL.aff.tag)) || '(tanpa tag)';
+    const b = bucket(t);
+    if (!validClickTime(pick(r, COL.aff.clickAt), pick(r, COL.aff.orderAt))) { b.missingClickRows++; return; }
+    if (!inRange(clickDate)) return;
+    if (!b.cohortDaily[clickDate]) b.cohortDaily[clickDate] = { comm: 0, commEff: 0, orders: new Set() };
+    const cohort = b.cohortDaily[clickDate], commission = num(pick(r, COL.aff.comm));
+    cohort.comm += commission;
+    cohort.commEff += status === 'Tertunda' ? commission * o.pendingFactor : commission;
+    const id = String(pick(r, COL.aff.orderId) || '').trim();
+    if (id) cohort.orders.add(id);
+  });
 
   /* ── Ads aggregation + matching (also per ad unit) ──────────────────── */
   const units = dict();
   const matchCache = new Map();
   fAds.forEach(r => {
-    const rawName = String(pick(r, COL.ads.name) || '');
-    if (!matchCache.has(rawName)) matchCache.set(rawName, matchAdToTag(rawName, affiliateTags, tagMap));
-    const m = matchCache.get(rawName);
+    const identity = adIdentity(r), rawName = identity.adName;
+    if (!matchCache.has(identity.adKey)) {
+      const manual = Object.prototype.hasOwnProperty.call(tagMap, identity.mapKey) && cleanTag(tagMap[identity.mapKey]);
+      const match = manual ? { tag: manual, method: 'Manual', confidence: 1, mappingScope: 'identity' }
+        : matchAdToTag(rawName, affiliateTags, tagMap);
+      matchCache.set(identity.adKey, { ...match, mappingScope: match.mappingScope || (match.method === 'Manual' ? 'name' : 'automatic') });
+    }
+    const m = matchCache.get(identity.adKey);
     const t = m.tag || '(tanpa tag)';
     const b = bucket(t);
 
@@ -587,12 +677,12 @@ function analyze(data, options) {
     if (clkStart && d >= clkStart && d <= clkEnd) { b.metaClicksWindow += cl; b.spendWindow += spPPN; }
 
     // Per ad unit — the reference dashboard's primary grain
-    if (!units[rawName]) units[rawName] = {
-      adName: rawName, tag: t, candidateTag: m.candidateTag || '', candidates: m.candidates || [], method: m.method, confidence: m.confidence,
+    if (!units[identity.adKey]) units[identity.adKey] = {
+      ...identity, mappingScope: m.mappingScope, tag: t, candidateTag: m.candidateTag || '', candidates: m.candidates || [], method: m.method, confidence: m.confidence,
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, days: new Set(),
       delivery: dict(), quality: dict(), daily: dict(), latestDelivery: null,
     };
-    const u = units[rawName];
+    const u = units[identity.adKey];
     u.spend += spPPN; u.clicks += cl; u.impr += im; u.reach += rc; u.lpv += lp;
     if (isDate(d)) {
       if (!u.daily[d]) u.daily[d] = { spend: 0, clicks: 0, impr: 0 };
@@ -619,7 +709,7 @@ function analyze(data, options) {
       const b = bucket(t);
       b.shopeeClicks++;
       // Per tag AND per day, so a single date can be opened up to show which
-      // tag lost its clicks that day rather than only the month-wide total.
+      // tag has a count difference that day rather than only the month-wide total.
       if (isDate(d)) {
         if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
         b.daily[d].shopeeClicks = (b.daily[d].shopeeClicks || 0) + 1;
@@ -636,15 +726,15 @@ function analyze(data, options) {
   });
 
   /* ── Attribution maturity ───────────────────────────────────────────── */
-  const matureUntil = de ? addDays(de, -o.lagDays) : '';
+  const matureUntil = observationEnd ? addDays(observationEnd, -o.lagDays) : '';
   const isMature = d => !matureUntil || d <= matureUntil;
 
   const lagHist = dict(), lagOrders = new Set();
   let lagTotal = 0;
-  fAff.forEach(r => {
+  cohortAff.forEach(r => {
     const ck = dayOnly(pick(r, COL.aff.clickAt));
     const od = dayOnly(pick(r, COL.aff.orderAt));
-    if (!isDate(ck) || !isDate(od)) return;
+    if (!validClickTime(pick(r, COL.aff.clickAt), pick(r, COL.aff.orderAt))) return;
     const g = diffDays(ck, od);
     if (g >= 0 && g <= 30) {
       const id = String(pick(r, COL.aff.orderId) || '').trim();
@@ -706,7 +796,7 @@ function analyze(data, options) {
     const qualified = spend > 0 && spend >= o.minSpend && daysProd > 0 && daysProd >= o.minDays;
 
     if (!hasPaidSpend && commEff > 0) {
-      status = 'organik'; label = 'ORGANIK'; reason = 'Komisi tanpa biaya iklan';
+      status = 'organik'; label = 'Tanpa biaya Meta terdeteksi'; reason = 'Tidak ada biaya Meta yang terhubung ke tag ini; sumber akuisisi belum terverifikasi';
     } else if (!qualified) {
       const need = [];
       if (spend <= 0 || spend < o.minSpend) need.push('spend matang belum cukup');
@@ -726,11 +816,20 @@ function analyze(data, options) {
       reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di bawah titik impas`;
     }
     if (leak && leak.severity === 'bad' && status === 'stop') {
-      reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
+      reason += `; rasio klik tercatat Shopee terhadap Meta ${Math.round(leak.pct)}% (metode pencatatan berbeda)`;
     }
     return { status, label, reason, streak };
   }
 
+  const unresolved = Object.values(units).filter(u => u.spend > 0 && (u.confidence < 0.5 || u.candidateTag));
+  const unresolvedTags = new Set();
+  unresolved.forEach(u => [u.tag, u.candidateTag, ...u.candidates].filter(Boolean).forEach(t => unresolvedTags.add(t)));
+  const observedSpend = Object.values(units).reduce((sum, u) => sum + u.spend, 0);
+  const tagUnitCounts = dict();
+  Object.values(units).forEach(u => { tagUnitCounts[u.tag] = (tagUnitCounts[u.tag] || 0) + 1; });
+  const nullFields = (row, fields) => { fields.forEach(field => { if (Object.prototype.hasOwnProperty.call(row, field)) row[field] = null; }); };
+  const costFields = ['spend', 'net', 'netEff', 'roas', 'roasEff', 'roi', 'margin', 'cpc', 'cpm', 'cpcIdeal', 'cpcGap',
+    'costPerOrder', 'cpcShopee', 'winSpend', 'matureSpend', 'matureRoasEff', 'commPerClick', 'convRate'];
   const tags = Object.keys(T).map(k => {
     const b = T[k];
     const spend = b.spend * ppnMult;
@@ -751,8 +850,7 @@ function analyze(data, options) {
     const freq = b.reach > 0 ? b.impr / b.reach : 0;
     const lpvRate = b.clicks > 0 ? b.lpv / b.clicks * 100 : 0;
     const commPerClick = b.clicks > 0 ? commEff / b.clicks : 0;
-    const cpcIdeal = b.clicks > 0 ? commPerClick / targetMult : 0;
-    const cpcGap = cpcIdeal - cpc;
+    let cpcIdeal = 0, cpcGap = 0;
     const convRate = b.clicks > 0 ? orders / b.clicks * 100 : 0;
     const costPerOrder = orders > 0 ? spend / orders : 0;
     const avgComm = orders > 0 ? b.comm / orders : 0;
@@ -765,9 +863,10 @@ function analyze(data, options) {
       const shopee = b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
-      const wasted = (winSpend / b.metaClicksWindow) * failed;
+      // Cross-platform totals do not identify a lost-click journey or wasted spend.
+      const wasted = null;
       leak = {
-        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
+        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, difference: b.metaClicksWindow - shopee, failed, wasted,
         severity: pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad',
       };
     }
@@ -775,11 +874,11 @@ function analyze(data, options) {
     const prodDays = Object.keys(b.daily)
       .filter(d => isDate(d) && b.daily[d].spend > 0 && isMature(d)).sort();
     const dailyRows = prodDays.map(d => {
-      const dd = b.daily[d];
+      const dd = b.daily[d], cohort = b.cohortDaily[d];
       return {
-        date: d, comm: dd.comm, commEff: dd.commEff || 0, spend: dd.spend, gmv: dd.gmv,
-        roas: dd.spend > 0 ? (dd.commEff || 0) / dd.spend : 0,
-        orders: dd.orders.size, clicks: dd.clicks,
+        date: d, comm: cohort ? cohort.comm : 0, commEff: cohort ? cohort.commEff : 0, spend: dd.spend,
+        roas: dd.spend > 0 && cohort ? cohort.commEff / dd.spend : 0,
+        orders: cohort ? cohort.orders.size : 0, clicks: dd.clicks,
       };
     });
     /* dailyRows above is deliberately filtered to mature days that had spend,
@@ -798,11 +897,22 @@ function analyze(data, options) {
 
     const matureDaysProd = prodDays.length;
     const matureSpend = dailyRows.reduce((sum, row) => sum + row.spend, 0);
-    const matureCommEff = Object.keys(b.daily).filter(isMature).reduce((sum, d) => sum + (b.daily[d].commEff || 0), 0);
+    const matureClicks = dailyRows.reduce((sum, row) => sum + row.clicks, 0);
+    const matureCommEff = Object.keys(b.cohortDaily).filter(isMature).reduce((sum, d) => sum + b.cohortDaily[d].commEff, 0);
     const matureRoasEff = matureSpend > 0 ? matureCommEff / matureSpend : 0;
+    cpcIdeal = matureClicks > 0 ? matureCommEff / matureClicks / targetMult : 0;
+    cpcGap = cpcIdeal - (matureClicks > 0 ? matureSpend / matureClicks : 0);
     const v = spend > 0
       ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, leak, true)
       : verdictFor(spend, commEff, daysProd, dailyRows, leak, false);
+
+    const blockers = sourceBlockers.slice();
+    if (unresolvedTags.has(k)) blockers.push('Pencocokan iklan ke tag belum selesai');
+    if (b.missingClickRows) blockers.push(`${b.missingClickRows} baris pesanan tidak memiliki tanggal klik yang valid`);
+    if (!spend && unresolved.length) blockers.push('Masih ada iklan berbayar yang belum dipasangkan');
+    if (blockers.length) Object.assign(v, { status: 'evaluasi', label: 'Data belum siap', reason: blockers.join('; '), streak: 0 });
+    else if (v.status === 'evaluasi' && v.reason) blockers.push(v.reason);
+    const decisionReady = !blockers.length;
 
     let bidHint = '';
     if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
@@ -815,17 +925,17 @@ function analyze(data, options) {
     const shopeeClicks = b.shopeeClicks;
     const cpcShopee = shopeeClicks > 0 && winSpend > 0 ? winSpend / shopeeClicks : 0;
 
-    const activeUnits = Object.keys(b.adNames).length;
+    const activeUnits = tagUnitCounts[k] || 0;
     const delivery = topOf(b.delivery, 1)[0];
 
-    return {
-      tag: k, comm: b.comm, commDone: b.commDone, commPending: b.commPending, commEff,
+    const row = {
+      tag: k, basis: 'click-cohort', decisionReady, blockers, observedSpend: spend, comm: b.comm, commDone: b.commDone, commPending: b.commPending, commEff,
       spend, net, netEff, roas, roasEff, roi, margin,
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
       shopeeClicks, cpcShopee, winSpend, winClicks,
-      daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
+      daysProd, matureDaysProd, matureSpend, matureClicks, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
@@ -833,7 +943,14 @@ function analyze(data, options) {
       topShop: topOf(b.shops, 1)[0] || null,
       adNames: Object.keys(b.adNames),
     };
-  }).sort((a, b) => b.spend - a.spend || b.comm - a.comm);
+    if (!decisionReady) nullFields(row, ['matureRoasEff', 'cpcIdeal', 'cpcGap']);
+    if (!costsKnown) {
+      nullFields(row, costFields);
+      Object.values(row.byDate).forEach(day => { day.observedSpend = day.spend; day.spend = null; });
+      row.dailyRows.forEach(day => { day.observedSpend = day.spend; day.spend = null; day.roas = null; });
+    }
+    return row;
+  }).sort((a, b) => b.observedSpend - a.observedSpend || b.comm - a.comm);
 
   const tagIndex = dict();
   tags.forEach(t => { tagIndex[t.tag] = t; });
@@ -843,14 +960,14 @@ function analyze(data, options) {
     const u = units[k];
     const parent = tagIndex[u.tag];
     // Commission is only known at tag level; attribute it to units by spend share.
-    const tagSpend = parent ? parent.spend : 0;
+    const tagSpend = parent ? parent.observedSpend : 0;
     const share = tagSpend > 0 ? u.spend / tagSpend : 0;
     const commEff = parent ? parent.commEff * share : 0;
     const orders = parent ? Math.round(parent.orders * share) : 0;
     const cpc = u.clicks > 0 ? u.spend / u.clicks : 0;
     const cpm = u.impr > 0 ? u.spend / u.impr * 1000 : 0;
     const ctr = u.impr > 0 ? u.clicks / u.impr * 100 : 0;
-    const cpcIdeal = u.clicks > 0 ? (commEff / u.clicks) / targetMult : 0;
+    const cpcIdeal = parent ? parent.cpcIdeal : null;
     /* Shopee only reports clicks per tag. Split them by the same spend share
        used for commission, and carry the tag's Shopee CPC unchanged — two ads
        on one tag cannot be told apart by anything in the data. */
@@ -859,7 +976,8 @@ function analyze(data, options) {
     const byDate = dict();
     Object.keys(u.daily).forEach(d => {
       const ud = u.daily[d], pd = parent && parent.byDate ? parent.byDate[d] : null;
-      const dayShare = pd && pd.spend > 0 ? ud.spend / pd.spend : 0;
+      const daySpend = pd && (pd.observedSpend == null ? pd.spend : pd.observedSpend);
+      const dayShare = daySpend > 0 ? ud.spend / daySpend : 0;
       byDate[d] = {
         date: d, spend: ud.spend, clicks: ud.clicks, impr: ud.impr,
         comm: pd ? pd.comm * dayShare : 0,
@@ -872,11 +990,13 @@ function analyze(data, options) {
     const roasEff = u.spend > 0 ? commEff / u.spend : 0;
     const dv = u.latestDelivery || topOf(u.delivery, 1)[0];
     const active = dv ? /^(active|aktif)$/i.test(dv.name.trim()) : false;
-    return {
-      adName: k, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
+    const row = {
+      adName: u.adName, adKey: u.adKey, mapKey: u.mapKey, adId: u.adId, createdAt: u.createdAt, mappingScope: u.mappingScope,
+      basis: 'click-cohort', decisionReady: !!(parent && parent.decisionReady), blockers: parent ? parent.blockers.slice() : ['Tidak ada data tag'],
+      observedSpend: u.spend, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
       spend: u.spend, clicks: u.clicks, impr: u.impr, reach: u.reach, lpv: u.lpv,
       shopeeClicks, cpcShopee, byDate,
-      days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: cpcIdeal - cpc,
+      days: u.days.size, cpc, cpm, ctr, cpcIdeal, cpcGap: parent ? parent.cpcGap : null,
       commEff, orders, roasEff, netEff: commEff - u.spend,
       roi: u.spend > 0 ? (commEff - u.spend) / u.spend * 100 : 0,
       convRate: u.clicks > 0 ? orders / u.clicks * 100 : 0,
@@ -884,14 +1004,20 @@ function analyze(data, options) {
       delivery: dv ? dv.name : '', active,
       quality: topOf(u.quality, 1)[0] ? topOf(u.quality, 1)[0].name : '',
       status: parent ? parent.status : 'evaluasi',
-      label: parent ? parent.label : 'Belum cukup data',
+      label: parent ? parent.label : 'Belum cukup data', reason: parent ? parent.reason : '',
       estimated: share > 0 && share < 1,
     };
-  }).sort((a, b) => b.spend - a.spend);
+    if (!costsKnown) {
+      nullFields(row, costFields);
+      Object.values(row.byDate).forEach(day => { day.observedSpend = day.spend; day.spend = null; });
+    }
+    return row;
+  }).sort((a, b) => b.observedSpend - a.observedSpend);
 
   const matchLog = adUnits.map(u => ({
-    adName: u.adName, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
-    spend: u.spend, clicks: u.clicks,
+    adName: u.adName, adKey: u.adKey, mapKey: u.mapKey, adId: u.adId, createdAt: u.createdAt, mappingScope: u.mappingScope,
+    decisionReady: u.decisionReady, blockers: u.blockers, tag: u.tag, candidateTag: u.candidateTag, candidates: u.candidates, method: u.method, confidence: u.confidence,
+    spend: u.observedSpend, clicks: u.clicks,
   }));
 
   /* ── Portfolio totals ───────────────────────────────────────────────── */
@@ -942,7 +1068,7 @@ function analyze(data, options) {
     avgOrder: allOrders.size > 0 ? sum(t => t.gmv) / allOrders.size : 0,
     commRate: sum(t => t.gmv) > 0 ? totalComm / sum(t => t.gmv) * 100 : 0,
     shopeeClicks: fClk.length,
-    wasted: tags.reduce((s, t) => s + (t.leak ? t.leak.wasted : 0), 0),
+    wasted: null,
     leakTags: tags.filter(t => t.leak && t.leak.severity === 'bad').length,
     excluded, statusCount,
     counts: { scale: 0, pantau: 0, stop: 0, organik: 0, evaluasi: 0 },
@@ -952,13 +1078,15 @@ function analyze(data, options) {
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
     const commEff = v.commEff || 0;
-    return {
+    const row = {
       date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
       commEff, netEff: commEff - v.spend,
       roasEff: v.spend > 0 ? commEff / v.spend : 0,
-      // A source row was observed on this date; these flags do not establish
-      // whole-day report completeness. statusDay also includes excluded orders.
-      hasAffiliate: Object.prototype.hasOwnProperty.call(statusDay, d), hasAds: !!v.hasAds,
+      // Observed source rows do not establish whole-day completeness.
+      // An explicit no-Meta declaration establishes known zero costs.
+      // statusDay also includes excluded orders.
+      hasAffiliate: Object.prototype.hasOwnProperty.call(statusDay, d),
+      hasAds: !!v.hasAds || sourceCoverage.ads.basis === 'declared-none',
       shopeeClicks: clickDaily[d] || 0,
       orders: v.orders.size, net: v.comm - v.spend,
       roas: v.spend > 0 ? v.comm / v.spend : 0,
@@ -967,22 +1095,25 @@ function analyze(data, options) {
       convRate: v.clicks > 0 ? v.orders.size / v.clicks * 100 : 0,
       mature: isMature(d),
     };
+    row.observedSpend = v.spend;
+    if (!costsKnown) nullFields(row, costFields.filter(field => Object.prototype.hasOwnProperty.call(row, field)));
+    return row;
   });
 
   /* ── Actions: turn the verdicts into money, not just labels ─────────────
      The dashboard used to say "turunkan bid" six times without ever adding it
      up. These are the numbers that make the advice worth acting on. */
   const overbid = tags.filter(t => t.status !== 'stop' && t.status !== 'evaluasi' && t.spend > 0 && t.clicks > 0 && t.cpcGap < 0);
-  const bidSaving = overbid.reduce((s, t) => s + Math.abs(t.cpcGap) * t.clicks, 0);
+  const bidSaving = overbid.reduce((s, t) => s + Math.abs(t.cpcGap) * t.matureClicks, 0);
   const stopTags = tags.filter(t => t.status === 'stop');
   const stopSpend = stopTags.reduce((s, t) => s + t.spend, 0);
   const stopLoss = Math.abs(stopTags.reduce((s, t) => s + Math.min(t.netEff, 0), 0));
-  const leakWaste = tags.reduce((s, t) => s + (t.leak && t.leak.severity === 'bad' ? t.leak.wasted : 0), 0);
+  const leakWaste = null;
 
-  /* Organic tags earn with zero ad spend — the strongest ad candidates in the
-     account, previously shown only as a purple badge with no suggestion. */
+  /* No detected Meta cost is an acquisition hypothesis. Propose a paid trial
+     only after report coverage and every paid mapping are resolved. */
   const organicCandidates = tags
-    .filter(t => t.status === 'organik' && t.comm > 0 && t.tag !== '(tanpa tag)')
+    .filter(t => t.decisionReady && !unresolved.length && t.status === 'organik' && t.comm > 0 && t.tag !== '(tanpa tag)')
     .sort((a, b) => b.comm - a.comm).slice(0, 8)
     .map(t => ({
       tag: t.tag, comm: t.comm, orders: t.orders, gmv: t.gmv, avgComm: t.avgComm,
@@ -1010,8 +1141,19 @@ function analyze(data, options) {
     organicCandidates, concentration,
   };
 
+  if (!costsKnown) {
+    nullFields(kpi, costFields.concat(['paidSpend', 'paidRoas', 'paidNet', 'paidComm', 'organicComm', 'organicShare']));
+    nullFields(actions, ['bidSaving', 'stopSpend', 'stopLoss', 'reclaimable']);
+  }
+  if (unresolved.length) { kpi.organicComm = null; kpi.organicShare = null; }
+  const reasons = [...new Set(sourceBlockers.concat(unresolved.length ? ['Pencocokan iklan ke tag belum selesai'] : [],
+    tags.flatMap(t => t.blockers)))];
+  const readiness = { costsKnown, decisionReady: !reasons.length, basis: 'click-cohort',
+    unresolvedUnits: unresolved.length, unresolvedSpend: unresolved.reduce((sum, u) => sum + u.spend, 0),
+    observedSpend, observationEnd, reasons, sourceState, coverage: sourceCoverage };
   return {
-    range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
+    readiness, observedTags: affiliateTags,
+    range: { start: ds, end: de, matureUntil, observationEnd, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
     kpi, tags, adUnits, daily, matchLog, lagProfile, lagCal, settlement, actions,
     statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
@@ -1090,6 +1232,7 @@ function toSnapshot(result, meta) {
     saved: (meta && meta.saved) || new Date().toISOString().slice(0, 19).replace('T', ' '),
     range: result.range,
     options: result.options,
+    readiness: result.readiness || { basis: 'legacy-order-date', decisionReady: false, reasons: ['Snapshot lama; dasar cohort belum tersedia'] },
     kpi: {
       spend: result.kpi.spend, comm: result.kpi.comm, commEff: result.kpi.commEff,
       commPending: result.kpi.commPending, netEff: result.kpi.netEff,
@@ -1100,8 +1243,10 @@ function toSnapshot(result, meta) {
       cpc: result.kpi.cpc, convRate: result.kpi.convRate, costPerOrder: result.kpi.costPerOrder,
       wasted: result.kpi.wasted, leakTags: result.kpi.leakTags, counts: result.kpi.counts,
     },
-    tags: result.tags.filter(t => t.spend > 0 || t.comm > 0).map(t => ({
+    tags: result.tags.filter(t => t.observedSpend > 0 || t.spend > 0 || t.comm > 0).map(t => ({
       tag: t.tag, status: t.status, label: t.label, reason: t.reason,
+      basis: t.basis, decisionReady: t.decisionReady, blockers: t.blockers, observedSpend: t.observedSpend,
+      matureSpend: t.matureSpend, matureCommEff: t.matureCommEff, matureRoasEff: t.matureRoasEff,
       spend: t.spend, commEff: t.commEff, netEff: t.netEff, roasEff: t.roasEff, roi: t.roi,
       cpc: t.cpc, cpcIdeal: t.cpcIdeal, orders: t.orders, convRate: t.convRate,
       leakPct: t.leak ? t.leak.pct : null,
@@ -1112,6 +1257,7 @@ function toSnapshot(result, meta) {
 /* Build a comparable series from saved snapshots of ONE account.
    Snapshots are deduped by account and full date range so distinct windows
    ending on the same day are retained; the newest save for a period wins. */
+function numericDelta(a, b) { return Number.isFinite(a) && Number.isFinite(b) ? a - b : null; }
 function buildTrend(snapshots, account) {
   const rows = (snapshots || [])
     .filter(s => !account || (s.account || 'default') === account)
@@ -1130,17 +1276,18 @@ function buildTrend(snapshots, account) {
     return {
       period: s.range && s.range.end ? s.range.end : s.saved, saved: s.saved,
       start: s.range ? s.range.start : '', end: s.range ? s.range.end : '',
-      spend: s.kpi.spend || 0,
+      spend: s.kpi.spend == null ? null : s.kpi.spend,
       commEff: s.kpi.commEff || 0,
-      netEff: s.kpi.netEff || 0,
-      roasEff: s.kpi.roasEff || 0,
-      paidRoas: s.kpi.paidRoas || 0,
-      organicComm: s.kpi.organicComm || 0,
-      organicShare: s.kpi.organicShare || 0,
+      netEff: s.kpi.netEff == null ? null : s.kpi.netEff,
+      roasEff: s.kpi.roasEff == null ? null : s.kpi.roasEff,
+      paidRoas: s.kpi.paidRoas == null ? null : s.kpi.paidRoas,
+      organicComm: s.kpi.organicComm == null ? null : s.kpi.organicComm,
+      organicShare: s.kpi.organicShare == null ? null : s.kpi.organicShare,
       orders: s.kpi.orders || 0,
-      cpc: s.kpi.cpc || 0,
-      convRate: s.kpi.convRate || 0,
-      wasted: s.kpi.wasted || 0,
+      cpc: s.kpi.cpc == null ? null : s.kpi.cpc,
+      convRate: s.kpi.convRate == null ? null : s.kpi.convRate,
+      wasted: s.kpi.wasted == null ? null : s.kpi.wasted,
+      readiness: s.readiness || { basis: 'legacy-order-date', decisionReady: false, reasons: ['Snapshot lama; dasar cohort belum tersedia'] },
       counts: s.kpi.counts || {},
       tags: s.tags || [],
     };
@@ -1153,6 +1300,7 @@ function buildTrend(snapshots, account) {
       if (!tagTrend[t.tag]) tagTrend[t.tag] = { tag: t.tag, points: [] };
       tagTrend[t.tag].points.push({
         period: pt.period, roasEff: t.roasEff, status: t.status,
+        basis: t.basis || pt.readiness.basis, decisionReady: t.decisionReady == null ? false : t.decisionReady,
         spend: t.spend, netEff: t.netEff, cpc: t.cpc, cpcIdeal: t.cpcIdeal,
       });
     });
@@ -1164,7 +1312,7 @@ function buildTrend(snapshots, account) {
     const first = p[p.length - 2], last = p[p.length - 1];
     return {
       tag: tt.tag, from: first.roasEff, to: last.roasEff,
-      delta: (last.roasEff || 0) - (first.roasEff || 0),
+      delta: numericDelta(last.roasEff, first.roasEff),
       fromStatus: first.status, toStatus: last.status,
       changed: first.status !== last.status,
       points: p,
@@ -1174,19 +1322,19 @@ function buildTrend(snapshots, account) {
   const latest = series[series.length - 1] || null;
   const prev = series.length > 1 ? series[series.length - 2] : null;
   const delta = latest && prev ? {
-    spend: latest.spend - prev.spend,
-    netEff: latest.netEff - prev.netEff,
-    roasEff: latest.roasEff - prev.roasEff,
-    paidRoas: latest.paidRoas - prev.paidRoas,
-    orders: latest.orders - prev.orders,
-    wasted: latest.wasted - prev.wasted,
+    spend: numericDelta(latest.spend, prev.spend),
+    netEff: numericDelta(latest.netEff, prev.netEff),
+    roasEff: numericDelta(latest.roasEff, prev.roasEff),
+    paidRoas: numericDelta(latest.paidRoas, prev.paidRoas),
+    orders: numericDelta(latest.orders, prev.orders),
+    wasted: numericDelta(latest.wasted, prev.wasted),
   } : null;
 
   return { series, tagTrend, movers, latest, prev, delta };
 }
 
 return {
-  DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
+  DEFAULTS, normalizeOptions, adIdentity, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
   cleanTag, resolveClickTag, COL, pick, topOf, variantOf, variantClash, overlapScore,
 };

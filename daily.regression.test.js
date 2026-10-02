@@ -132,9 +132,9 @@ test('validated imports preserve old string-row dedup for repeated, overlapping 
     assert.equal(repeat.added, 0);
     assert.equal(repeat.updated, 0);
     parsed[kind] = DashboardImport.parseText(Papa.unparse(rows)).rows;
-    assert.deepEqual(await save(store, account, kind, parsed[kind]), { added: 0, updated: 1, duplicates: 1 });
-    const [day] = await store.range(account.id, kind);
-    assert.equal(kind === 'clicks' ? day.clicks : day.rows, 2);
+    assert.deepEqual(await save(store, account, kind, parsed[kind]), { added: kind === 'ads' ? 1 : 0, updated: kind === 'ads' ? 0 : 1, duplicates: 1 });
+    const days = await store.range(account.id, kind);
+    assert.equal(days.reduce((sum, day) => sum + (kind === 'clicks' ? day.clicks : day.rows), 0), 2);
     assert.equal((await store.knownRowHashes(account.id, kind)).size, 2);
   }
   const backup = await store.exportAccount(account.id);
@@ -203,7 +203,7 @@ test('two independent connections serialize overlap and account creation', async
 test('incremental ad aggregates derive rates from combined amounts and counts', async () => {
   const { store, account } = await context();
   await save(store, account, 'ads', [ad()]);
-  await save(store, account, 'ads', [ad('ad-2', '2026-08-01', { 'Amount spent (IDR)': '300', 'Link clicks': '30', 'Impressions': '1000' })]);
+  await save(store, account, 'ads', [ad('ad-1', '2026-08-01', { 'Amount spent (IDR)': '300', 'Link clicks': '30', 'Impressions': '1000' })]);
   const [day] = await store.range(account.id, 'ads');
   assert.equal(day.spend, 400);
   assert.equal(day.impressions, 2000);
@@ -299,7 +299,7 @@ test('failed writes roll back daily totals, fingerprints and upload guards toget
 test('v1 migration preserves history and rejects unidentified legacy overlap atomically', async () => {
   await seedV1();
   const store = await DailyStore.open(), account = { id: 1 };
-  assert.equal(store.db.version, 2);
+  assert.equal(store.db.version, 3);
   assert.equal((await store.range(1, 'affiliate'))[0].comm, 200);
   assert.equal((await store.range(1, 'affiliate'))[0].orders, 1);
   assert.ok(await store.seenFile(1, A.hashRows([affiliate()]), 'affiliate'));
@@ -403,7 +403,7 @@ test('versioned backup restores every aggregate, order key, fingerprint and uplo
   const otherBefore = backupRecords(await store.exportAccount(other.id));
   assert.equal(backup.format, DailyStore.BACKUP_FORMAT);
   assert.equal(backup.version, DailyStore.BACKUP_VERSION);
-  assert.equal(backup.database_version, 2);
+  assert.equal(backup.database_version, 3);
   assert.equal(backup.rowhashes.length, 7);
   const validated = DailyStore.validateBackup(clone(backup));
   assert.equal(validated.summary.days, 2);

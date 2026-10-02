@@ -56,7 +56,7 @@ async function main() {
     assert.equal(await page.locator('#tblMatch [data-accept-tag]').count(), 0, 'the question is gone once answered');
     await page.locator('#btnSaveMap').click();
     assert.equal(await spendOf('AtasanRebecca'), 300, 'Simpan must keep the mapping accepted by click');
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default')).atasan), 'AtasanRebecca');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default'))['@name:Atasan']), 'AtasanRebecca');
   });
 
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {

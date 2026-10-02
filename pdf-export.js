@@ -12,7 +12,7 @@
   const amount = value => finite(value) ? value : 0;
   const integer = value => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(amount(value));
   // Keep fractions produced by PPN / attribution; never abbreviate money as rb/jt.
-  const money = value => 'Rp ' + new Intl.NumberFormat('id-ID', {
+  const money = value => !finite(value) ? '-' : 'Rp ' + new Intl.NumberFormat('id-ID', {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(amount(value));
   const decimal = (value, digits = 2) => new Intl.NumberFormat('id-ID', {
@@ -75,7 +75,10 @@
     const charts = root.DashboardPDFCharts.create(doc, { font, text, colors: COLORS });
     const statusColors = { scale: COLORS.accent, pantau: [142, 97, 13], stop: COLORS.danger,
       organik: [77, 113, 157], evaluasi: [85, 104, 115] };
-    const statusNames = { scale: 'Scale', pantau: 'Pantau', stop: 'Stop', organik: 'Organik', evaluasi: 'Evaluasi' };
+    const statusNames = { scale: 'Scale', pantau: 'Pantau', stop: 'Stop', organik: 'Tanpa biaya Meta', evaluasi: 'Perlu diperiksa' };
+    const readiness = result.readiness || {};
+    const decisionLabel = row => row.label || statusNames[row.status] || 'Perlu diperiksa';
+    const adLabel = row => row.adName + (row.adId ? '\nID: ' + row.adId : row.createdAt ? '\nDibuat: ' + row.createdAt : '\nKelompok nama');
     const account = text(settings.account || 'Akun aktif');
     const title = text(settings.title || 'Laporan kinerja affiliate');
     const generated = settings.generatedAt == null ? new Date() : new Date(settings.generatedAt);
@@ -211,13 +214,13 @@
     section('Dashboard utama');
     metricGrid([
       ['Komisi Total', money(k.commEff), integer(k.orders) + ' pesanan | ' + integer(k.qty) + ' produk'],
-      ['Spend Iklan', money(k.spend), 'Termasuk PPN ' + decimal(amount(o.ppn)) + '%'],
-      ['Laba Bersih', money(k.netEff), 'Komisi efektif dikurangi biaya iklan', amount(k.netEff) < 0],
+      ['Spend Iklan', money(k.spend), readiness.costsKnown === false ? 'Biaya belum diketahui lengkap' : 'Termasuk PPN ' + decimal(amount(o.ppn)) + '%'],
+      ['Laba Bersih', money(k.netEff), readiness.costsKnown === false ? 'Menunggu cakupan biaya' : 'Komisi efektif dikurangi biaya iklan', amount(k.netEff) < 0],
       ['ROAS Total', ratio(k.roasEff, amount(k.spend) > 0), 'Iklan berbayar ' + ratio(k.paidRoas, amount(k.paidSpend) > 0)],
     ], 2);
     // Use the same matched tag/window totals as the main dashboard, rather
     // than comparing all Meta clicks with all Shopee clicks across different dates.
-    const clickTags = result.tags.filter(t => t.leak && finite(t.leak.pct));
+    const clickTags = result.tags.filter(t => t.leak && t.leak.comparisonReady !== false && finite(t.leak.pct));
     const metaClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.metaClicks), 0);
     const shopeeClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.shopeeClicks), 0);
     const lostClicks = clickTags.reduce((sum, t) => sum + Math.max(0, amount(t.leak.metaClicks) - amount(t.leak.shopeeClicks)), 0);
@@ -227,8 +230,8 @@
     metricGrid([
       ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
       ['Klik Shopee', hasClickComparison ? integer(shopeeClicks) : '-', 'Jendela dan tag sama'],
-      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', 'Selisih turun per tag', lostClicks > 0],
-      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Shopee / Meta'],
+      ['Selisih klik', hasClickComparison ? integer(lostClicks) : '-', 'Selisih turun, bukan bukti hilang'],
+      ['Rasio klik Shopee/Meta', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Dua laporan, metode berbeda'],
     ], 4);
     section('Prioritas anggaran');
     metricGrid([
@@ -243,13 +246,18 @@
       [daily.filter(d => d.hasAffiliate === false).length, 'affiliate'],
       [daily.filter(d => d.hasAds === false).length, 'iklan'],
     ].filter(([count]) => count > 0).map(([count, source]) => integer(count) + ' hari tanpa baris ' + source);
-    if (coverage.length) paragraph('Cakupan: ' + coverage.join('; ') + '. Laba memakai data yang tersedia.',
+    if (coverage.length) paragraph('Cakupan: ' + coverage.join('; ') + '. Tanda - berarti nilai belum diketahui.',
       { size: 7, color: COLORS.ink, bold: true, gap: 1 });
     paragraph('Keputusan sampai ' + (r.matureUntil || '-') + '. '
       + (tags.some(t => t.status === 'evaluasi') ? integer(tags.filter(t => t.status === 'evaluasi').length) + ' tag perlu evaluasi; lihat tabel. ' : '')
       + 'Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'belum tersedia') + '.', { size: 7, gap: 0 });
 
     nextPage();
+    section('Kesiapan keputusan');
+    paragraph('Ringkasan keuangan memakai tanggal pesanan. Keputusan iklan memakai kelompok tanggal klik yang sudah cukup lama diamati, sampai '
+      + (readiness.observationEnd || r.end || '-') + '. Mapping yang belum selesai menahan rekomendasi.', { size: 8 });
+    const readinessReasons = array(readiness.reasons).map(item => typeof item === 'string' ? item : item && (item.message || item.label || item.code)).filter(Boolean);
+    if (readinessReasons.length) paragraph(readinessReasons.join('; '), { size: 8, color: COLORS.ink });
     section('Tren biaya dan komisi');
     ensure(76);
     charts.trend({ x: M, y, width: WIDTH, height: 76, matureUntil: r.matureUntil,
@@ -267,7 +275,7 @@
     section('Bagaimana laba terbentuk');
     moneyFlow();
     metricGrid([
-      ['Komisi organik efektif', money(k.organicComm), 'Termasuk dalam Komisi Total'],
+      ['Komisi tanpa biaya Meta', money(k.organicComm), 'Sumber organik/boost belum terpisah'],
       ['Komisi tertunda', money(k.commPending), percent(k.pendingPct) + ' dari komisi laporan'],
     ], 2);
 
@@ -280,21 +288,21 @@
     y += 99;
     section('Keputusan setiap tag', 'ROAS matang = dasar keputusan. Tanda "-" berarti biaya pembagi tidak tersedia.');
     table(['Tag', 'Keputusan', 'Biaya + PPN', 'Komisi efektif', 'Laba efektif', 'ROAS matang'], tags.map(t => [
-      t.tag, statusNames[t.status] || t.label, money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
+      t.tag, decisionLabel(t), money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
     ]), [45, 25, 30, 30, 30, 22], { numeric: [2, 3, 4, 5], statuses: tags.map(t => t.status) });
 
     section('Prioritas tindakan');
     table(['Periksa', 'Tag', 'Nilai terkait'], [
       ['Tag berstatus Stop', integer(tags.filter(t => t.status === 'stop').length), money(a.stopSpend) + ' biaya periode ini'],
       ['Bid di atas target', integer(a.overbidCount), money(a.bidSaving) + ' selisih terhadap CPC ideal'],
-      ['Selisih klik berat', integer(tags.filter(t => t.leak && t.leak.severity === 'bad').length), money(a.leakWaste) + ' estimasi biaya terkait'],
+      ['Perbedaan laporan klik', integer(clickTags.length), 'Periksa periode dan metode penghitungan; bukan estimasi uang terbuang'],
     ], [74, 20, 88], { numeric: [1] });
     paragraph('Nilai tindakan memakai biaya historis, bukan jaminan penghematan.', { size: 7 });
 
-    section('Kandidat iklan dari organik', 'Maksimal 8 kandidat seperti pada dashboard. Komisi laporan sebelum bobot tertunda; batas biaya per pesanan memakai komisi efektif dan target ROI.');
+    section('Kandidat uji iklan', 'Tag tanpa biaya Meta terdeteksi; sumber trafik belum membedakan organik/boost. Maksimal 8 kandidat jika cakupan biaya dan mapping mendukung.');
     table(['Tag', 'Komisi laporan', 'Pesanan', 'Maks biaya / pesanan', 'Kanal utama'], array(a.organicCandidates).filter(c => !omittedTags.has(c.tag)).map(c => [
       c.tag, money(c.comm), integer(c.orders), amount(c.orders) > 0 ? money(c.maxCpa) : '-', c.topPlatform || '-',
-    ]), [46, 36, 20, 40, 40], { numeric: [1, 2, 3], empty: 'Belum ada kandidat organik dengan komisi.' });
+    ]), [46, 36, 20, 40, 40], { numeric: [1, 2, 3], empty: 'Belum ada kandidat dengan data yang cukup.' });
     if (a.concentration) {
       section('Risiko konsentrasi anggaran');
       metricGrid([
@@ -316,7 +324,7 @@
 
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
       table(['Iklan / tag', 'Penayangan / keputusan', 'Biaya + PPN', 'Komisi efektif / laba', 'Klik / CPC Meta'], units.map(u => [
-        u.adName + '\nTag: ' + u.tag, (u.delivery || 'Status tidak tersedia') + '\n' + (u.label || u.status || '-'),
+        adLabel(u) + '\nTag: ' + u.tag, (u.delivery || 'Status tidak tersedia') + '\n' + decisionLabel(u),
         money(u.spend), money(u.commEff) + '\n' + money(u.netEff), integer(u.clicks) + '\n' + (amount(u.clicks) > 0 ? money(u.cpc) : '-'),
       ]), [51, 31, 31, 38, 31], { numeric: [2, 3, 4], empty: 'Tidak ada iklan pada hasil analisis periode ini.' });
 
@@ -332,19 +340,19 @@
 
     if (mode === 'lengkap') {
       section('Alasan keputusan', 'Rincian penjelasan untuk penelusuran setiap tag.');
-      table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, statusNames[t.status] || t.label,
+      table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, decisionLabel(t),
         [t.reason, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
       table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).filter(m => !omittedTags.has(m.tag)).map(m => [
-        m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + ((m.candidates && m.candidates.length) ? m.candidates.join(' / ') : m.candidateTag) : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
+        adLabel(m), m.tag + (m.candidateTag ? '\nKandidat: ' + ((m.candidates && m.candidates.length) ? m.candidates.join(' / ') : m.candidateTag) : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
       ]), [57, 52, 37, 36], { numeric: [3] });
 
-      section('Perbandingan klik Meta dan Shopee', r.clickStart ? 'Jendela ' + r.clickStart + ' s/d ' + r.clickEnd + '. Selisih positif dapat mencakup klik tambahan di luar iklan; selisih negatif perlu diperiksa.' : 'Tidak tersedia laporan klik pada periode ini.');
-      const leaks = tags.filter(t => t.leak && finite(t.leak.pct));
-      table(['Tag', 'Klik Meta', 'Klik Shopee', 'Selisih', 'Masuk', 'Estimasi biaya selisih'], leaks.map(t => [
+      section('Perbandingan klik Meta dan Shopee', r.clickStart ? 'Jendela ' + r.clickStart + ' s/d ' + r.clickEnd + '. Dua laporan dapat berbeda cakupan, sumber trafik, dan metode. Selisih tidak membuktikan klik hilang atau uang terbuang.' : 'Tidak tersedia laporan klik pada periode ini.');
+      const leaks = tags.filter(t => t.leak && t.leak.comparisonReady !== false && finite(t.leak.pct));
+      table(['Tag', 'Klik Meta', 'Klik Shopee', 'Selisih', 'Rasio Shopee/Meta'], leaks.map(t => [
         t.tag, integer(t.leak.metaClicks), integer(t.leak.shopeeClicks), integer(amount(t.leak.shopeeClicks) - amount(t.leak.metaClicks)),
-        percent(t.leak.pct), money(t.leak.wasted),
-      ]), [50, 25, 25, 22, 24, 36], { numeric: [1, 2, 3, 4, 5], empty: 'Perbandingan klik belum dapat dihitung.' });
+        percent(t.leak.pct),
+      ]), [60, 29, 29, 28, 36], { numeric: [1, 2, 3, 4], empty: 'Perbandingan klik belum dapat dihitung.' });
 
       section('Status pesanan per hari', 'Jumlah adalah pesanan per status, bukan baris produk. Pesanan yang tercatat pada beberapa status dapat dihitung pada setiap statusnya.');
       table(['Tanggal', 'Selesai', 'Tertunda', 'Belum dibayar', 'Dibatalkan', 'Lainnya'], array(result.statusDaily).map(d => [
@@ -378,7 +386,7 @@
       ['Lag atribusi', integer(o.lagDays) + ' hari', 'Target ROI', percent(amount(o.targetROI))],
       ['Ambang Scale', decimal(amount(o.thScale)) + 'x', 'Ambang Pantau', decimal(amount(o.thPantau)) + 'x'],
       ['Minimum biaya', money(o.minSpend), 'Minimum produksi', integer(o.minDays) + ' hari matang'],
-      ['Streak rugi', integer(o.streakDays) + ' hari', 'Komisi organik', money(k.organicComm)],
+      ['Streak rugi', integer(o.streakDays) + ' hari', 'Komisi tanpa biaya Meta', money(k.organicComm)],
     ], [44, 47, 44, 47]);
     paragraph(integer(tags.length) + ' tag / ' + integer(units.length) + ' iklan / ' + integer(daily.length) + ' hari. '
       + 'Baris aktif: affiliate ' + integer(counts.affiliate) + ', iklan ' + integer(counts.ads) + ', klik ' + integer(counts.clicks) + '. '

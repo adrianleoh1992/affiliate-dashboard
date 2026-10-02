@@ -158,7 +158,7 @@ async function main() {
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
       for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
-        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
+        'Klik Meta', 'Klik Shopee', 'Selisih klik', 'Rasio klik Shopee/Meta', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
       assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
@@ -219,23 +219,27 @@ async function main() {
         return results.map(result => {
           labels = [];
           DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' });
-          return ['Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
+          return ['Klik Meta', 'Klik Shopee', 'Selisih klik', 'Rasio klik Shopee/Meta'].map(label => labels[labels.indexOf(label) + 1]);
         });
       } finally { window.jspdf.jsPDF = OriginalPDF; }
     }, [clickSource, { ...clickSource, clicks: [] }, { ...clickSource, ads: [] }]
       .map(source => Engine.analyze(source, { ppn: 0, lagDays: 0 })));
     assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%'],
-      'Dashboard compares matched tags in the click window; gains on one tag must not offset lost clicks on another');
+      'Dashboard compares matched tags in the click window; gains on one tag must not offset differences on another');
     assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
     assert.deepEqual(clickReports[2], ['-', '-', '-', '-'], 'Without ads, a click comparison must remain unavailable');
-    console.log('PASS PDF dashboard click scope, per-tag losses and unavailable comparisons');
-    const partialSources = Engine.analyze({
+    console.log('PASS PDF dashboard click scope, per-tag differences and unavailable comparisons');
+    const partialInput = {
       affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',
         'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Tag_link1': 'Coverage',
         'Total Komisi per Produk(Rp)': day === 4 ? '0' : '100' })),
       ads: [1, 2, 4].map(day => ({ 'Ad name': 'Coverage', 'Amount spent (IDR)': day === 4 ? '0' : '50',
         'Reporting starts': '2026-09-0' + day, 'Reporting ends': '2026-09-0' + day })), clicks: [],
-    }, { ppn: 0, lagDays: 0 });
+    };
+    const partialSources = Engine.analyze(partialInput, { ppn: 0, lagDays: 0 });
+    assert.equal(partialSources.daily[1].spend, null, 'Unconfirmed missing Meta dates keep reported cost totals unknown');
+    const confirmedCostCoverage = Engine.analyze({ ...partialInput, coverage: { ads: {
+      start: '2026-09-01', end: '2026-09-04', confirmed: true } } }, { ppn: 0, lagDays: 0 });
     const coverageRows = await page.evaluate(result => {
       const api = window.jspdf.jsPDF.API, original = api.autoTable;
       let dailyRows;
@@ -246,7 +250,7 @@ async function main() {
       try { window.DashboardPDF.create(result, { mode: 'standar', generatedAt: '2026-09-06' }); }
       finally { api.autoTable = original; }
       return dailyRows;
-    }, partialSources);
+    }, confirmedCostCoverage);
     assert.equal(coverageRows.length, 4);
     assert.deepEqual(coverageRows[1].slice(1), ['Rp 50,00', '-', '-', '-', '-'], 'Ad-only day must not claim zero affiliate sales or a confirmed loss');
     assert.deepEqual(coverageRows[2].slice(1), ['-', 'Rp 100,00', '-', '-', '1'], 'Affiliate-only day must not imply zero ad spend');

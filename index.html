@@ -169,8 +169,8 @@
         <div class="tscroll"><table id="tblUnit"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-print="peluang">
-        <div class="card-head"><h2>Kandidat Iklan dari Organik</h2>
-          <span class="sub">Tag yang sudah membuktikan permintaan tanpa biaya iklan</span></div>
+        <div class="card-head"><h2>Kandidat Uji Iklan</h2>
+          <span class="sub">Tag berkomisi tanpa biaya Meta terdeteksi; sumber akuisisi belum terverifikasi</span></div>
         <p class="hint">Maks Biaya/Order adalah batas biaya per pesanan berdasarkan komisi efektif dan target ROI. Batas CPC memerlukan data konversi klik menjadi pesanan.</p>
         <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
       </div>
@@ -184,9 +184,7 @@
       <h3 class="print-sec">Klik Meta vs Klik Shopee</h3>
       <div class="card">
         <div class="card-head"><h2>Klik Meta vs Klik Shopee</h2><span class="sub" id="leakRange"></span></div>
-        <p class="hint">Kolom <b>± Share</b> bertanda dua arah. <b>Positif</b> berarti klik yang masuk Shopee lebih banyak
-          daripada yang Anda bayar — kontennya dibagikan orang, dan itu bagus. <b>Negatif</b> berarti klik yang sudah
-          dibayar tidak sampai ke Shopee — di situ baru ada kebocoran link.</p>
+        <p class="hint">Selisih membandingkan jumlah klik yang dicatat Shopee dan Meta pada jendela laporan yang sama. Definisi klik, waktu pencatatan, dan atribusi kedua platform bisa berbeda. Selisih ini tidak membuktikan klik hilang, aktivitas berbagi, atau biaya terbuang.</p>
         <div class="tscroll"><table id="tblLeak"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="grid2">
@@ -380,27 +378,33 @@
   </div>
 </main>
 
-<div class="modal" id="mapModal">
-  <div class="modal-box">
-    <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
-      <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate —
-      <b>Telesin video 2</b> di Meta adalah <b>TelesinGripvideo2</b> di Shopee. Mapping di sini selalu menang
-      atas pencocokan otomatis, dan disimpan terpisah per akun. Satu link bisa membawa sampai lima tag;
-      yang pertama dipakai sebagai tag induk.</p>
-    <h3 class="sec-split">Hasil pencocokan saat ini</h3>
-    <p class="hint">Metode bertanda <b>Lemah</b>, <b>Ambigu</b> atau <b>Tidak cocok</b> perlu diperiksa —
-      klik tag yang disarankan untuk langsung menyambungkannya.</p>
-    <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
-    <h3 class="sec-split">Perbaiki manual</h3>
-    <div id="mapRows"></div>
-    <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>
-    <div style="margin-top:15px;display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn ghost" data-close>Batal</button>
-      <button class="btn primary" id="btnSaveMap">Simpan</button>
-    </div>
+<div class="modal" id="mapModal"><div class="modal-box matching-modal">
+  <div class="card-head"><h2>Hubungkan iklan ke tag</h2><button class="btn ghost" data-close>Tutup</button></div>
+  <p class="hint" id="mapContext"></p>
+  <p class="hint">Pilih iklan, cari tag dari laporan, lalu simpan. Perubahan langsung dipakai untuk akun ini.</p>
+  <div id="mapStatus" class="map-status" role="status" aria-live="polite"></div>
+  <div class="matching-controls"><div class="field"><label for="matchSearch">Cari nama iklan</label><input id="matchSearch" type="search" placeholder="Nama iklan atau ID"></div>
+  <div class="field"><label for="matchFilter">Tampilkan</label><select id="matchFilter"><option value="unresolved">Perlu dipasangkan</option><option value="all">Semua iklan</option><option value="manual">Mapping manual</option></select></div></div>
+  <p class="hint" id="matchCount"></p>
+  <div id="mapEditor" class="map-editor hidden">
+    <h3 id="mapSelectedName"></h3><p class="hint" id="mapSelectedScope"></p>
+    <div class="field"><label for="mapTagSearch">Cari tag dari laporan</label><input type="search" id="mapTagSearch" placeholder="Tag komisi atau klik"></div>
+    <div class="field"><label for="mapTagPicker">Tag tujuan</label><select id="mapTagPicker" size="5"></select></div>
+    <p id="mapPreview" class="map-preview"></p>
+    <div class="button-row"><button class="btn ghost" id="btnCancelMapEdit">Batal memilih</button><button class="btn primary" id="btnApplyMap">Simpan pasangan</button></div>
   </div>
-</div>
+  <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+  <details class="saved-mappings"><summary>Aturan tersimpan dan cadangan</summary><p class="hint">Aturan lama berdasarkan nama dipakai bersama oleh iklan dengan nama yang sama. Pasangan baru menyimpan identitas iklan bila tersedia.</p><div id="mapRows"></div>
+    <div class="button-row"><button class="btn" id="btnExportMap">Ekspor mapping JSON</button><button class="btn" id="btnImportMap">Impor mapping JSON</button><input id="importMapFile" type="file" accept="application/json,.json" class="hidden"></div>
+    <div id="mapImportPreview" class="map-editor hidden"><p id="mapImportSummary"></p><div class="button-row"><button class="btn ghost" id="btnCancelMapImport">Batal impor</button><button class="btn primary" id="btnMergeMap">Gabung mapping</button></div></div>
+  </details>
+  <div class="button-row"><button class="btn" id="btnSaveMap">Selesai</button></div>
+</div></div>
+<div class="modal" id="sourceConfirmModal"><div class="modal-box narrow">
+  <div class="card-head"><h2>Konfirmasi laporan periode</h2><button class="btn ghost" data-close>Tutup</button></div>
+  <p id="sourceConfirmText"></p><p class="hint" id="sourceConfirmHint"></p>
+  <div class="button-row"><button class="btn ghost" data-close>Batal</button><button class="btn primary" id="btnConfirmSource">Konfirmasi untuk periode ini</button></div>
+</div></div>
 
 <div class="modal" id="exportModal"><div class="modal-box narrow">
   <div class="card-head"><h2>Ekspor analisis</h2><button class="btn ghost" data-close>Tutup</button></div>
@@ -419,7 +423,7 @@
     <div class="field"><label for="pdfTitle">Judul laporan</label><input id="pdfTitle" maxlength="100" value="Laporan kinerja affiliate"></div>
     <p class="hint pdf-intro">Dashboard utama menjadi halaman pembuka: komisi, spend, laba, ROAS, klik, prioritas anggaran, dan kartu keputusan. Dilanjutkan grafik, diagram, dan tabel. Tag dengan biaya dan komisi sama-sama nol tidak disertakan.</p>
     <div class="pdfopts">
-      <button class="pdfopt" data-pdf="ringkas"><b>Ringkas</b><span>Gambaran visual</span><em>Dashboard utama, grafik, tabel keputusan, peluang organik, dan catatan data.</em></button>
+      <button class="pdfopt" data-pdf="ringkas"><b>Ringkas</b><span>Gambaran visual</span><em>Dashboard utama, grafik, tabel keputusan, kandidat uji iklan, dan catatan data.</em></button>
       <button class="pdfopt" data-pdf="standar"><b>Standar</b><span>Evaluasi berkala</span><em>Ringkasan visual ditambah tabel efisiensi, iklan, dan kinerja harian.</em></button>
       <button class="pdfopt" data-pdf="lengkap"><b>Lengkap</b><span>Arsip analisis</span><em>Standar ditambah alasan keputusan, matching, produk, dan rincian sumber.</em></button>
     </div>
@@ -445,6 +449,7 @@
         <div class="tip" id="adsAcctNote">Label untuk data spend akun ini</div></div>
       <div class="field"><label>Dari</label><input type="date" id="dateStart"></div>
       <div class="field"><label>Sampai</label><input type="date" id="dateEnd"></div>
+      <div class="field"><label for="observationEnd">Pesanan diamati sampai</label><input type="date" id="observationEnd"><small>Opsional. Untuk hasil klik yang menyusul pada laporan pesanan; periode keuangan tetap mengikuti Dari–Sampai.</small></div>
       <div class="field"><label>PPN Iklan</label>
         <select id="ppn">
           <option value="0" selected>0% — tanpa PPN</option>

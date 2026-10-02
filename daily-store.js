@@ -2,7 +2,7 @@
    commits in one IndexedDB transaction; raw CSV rows are never persisted. */
 'use strict';
 const DailyStore = (() => {
-  const DB_NAME = 'affiliate_daily', VERSION = 2;
+  const DB_NAME = 'affiliate_daily', VERSION = 3;
   const KINDS = ['affiliate', 'ads', 'clicks'];
   const BACKUP_FORMAT = 'affiliate-daily-backup', BACKUP_VERSION = 1;
   const MAX_BACKUP_RECORDS = 500000;
@@ -46,7 +46,7 @@ const DailyStore = (() => {
       return value;
     };
     object(input, ['format', 'version', 'database_version', 'exported_at', 'account', ...KINDS, 'uploads', 'rowhashes', 'parameters'], 'berkas');
-    if (input.format !== BACKUP_FORMAT || input.version !== BACKUP_VERSION || input.database_version !== VERSION)
+    if (input.format !== BACKUP_FORMAT || input.version !== BACKUP_VERSION || ![2, VERSION].includes(input.database_version))
       bad('format/versi tidak didukung. Gunakan cadangan lengkap terbaru, bukan ekspor riwayat lama atau snapshot');
     stamp(input.exported_at, 'waktu ekspor');
     const source = object(input.account, ['id', 'kind', 'name', 'created'], 'akun');
@@ -75,8 +75,8 @@ const DailyStore = (() => {
       }
       result[key] = [...records.values()];
     };
-    const timestamps = (row, clean) => {
-      for (const field of ['created_at', 'updated_at']) if (row[field] !== undefined) clean[field] = stamp(row[field], field);
+    const timestamps = (row, clean, kind) => {
+      for (const field of (kind === 'ads' ? ['stored_at', 'updated_at'] : ['created_at', 'updated_at'])) if (row[field] !== undefined) clean[field] = stamp(row[field], field);
       if (row.merge_version !== undefined) {
         if (row.merge_version !== 1) bad('versi agregasi tidak didukung');
         clean.merge_version = 1;
@@ -90,7 +90,7 @@ const DailyStore = (() => {
     };
     for (const kind of KINDS) {
       const field = kind === 'ads' ? 'ad_unit' : 'tag';
-      const extras = kind === 'affiliate' ? ['order_keys'] : kind === 'ads' ? ['delivery'] : ['by_region', 'by_source'];
+      const extras = kind === 'affiliate' ? ['order_keys'] : kind === 'ads' ? ['delivery', 'ad_key', 'ad_id', 'stored_at', 'source_partial'] : ['by_region', 'by_source'];
       list(kind, ['date', field, ...amounts[kind], ...extras, 'merge_version', 'created_at', 'updated_at'], row => {
         const clean = { date: date(row.date, 'tanggal ' + kind), [field]: string(row[field], field) };
         for (const name of amounts[kind]) clean[name] = number(row[name], kind + '.' + name, ['orders', 'excluded', 'rows'].includes(name) || kind === 'clicks');
@@ -104,6 +104,17 @@ const DailyStore = (() => {
           if (row.excluded > row.rows || row.orders > row.rows - row.excluded) bad('jumlah order/baris tidak konsisten');
         } else if (kind === 'ads') {
           clean.delivery = string(row.delivery, 'status iklan', 256, true);
+          if (row.source_partial !== undefined) {
+            if (typeof row.source_partial !== 'boolean') bad('kesiapan agregat iklan');
+            clean.source_partial = row.source_partial;
+          }
+          // Old created_at meant saved time. A missing key is always name-scoped.
+          clean.ad_key = row.ad_key === undefined ? 'name:' + clean.ad_unit : string(row.ad_key, 'identitas iklan', 8192);
+          if (row.ad_id !== undefined) clean.ad_id = string(row.ad_id, 'ID iklan', 2048, true);
+          if (row.created_at !== undefined) clean.created_at = string(row.created_at, 'waktu pembuatan iklan', 2048, true);
+          const expected = clean.ad_id ? 'id:' + clean.ad_id : clean.ad_key.startsWith('created:')
+            ? 'created:' + JSON.stringify([clean.ad_unit, clean.created_at || '']) : 'name:' + clean.ad_unit;
+          if (clean.ad_key !== expected) bad('identitas iklan tidak konsisten');
         } else {
           for (const name of extras) {
             const values = object(row[name], null, name);
@@ -114,15 +125,15 @@ const DailyStore = (() => {
             clean[name] = Object.fromEntries(entries);
           }
         }
-        return timestamps(row, clean);
-      }, row => JSON.stringify([row.date, row[field]]));
+        return timestamps(row, clean, kind);
+      }, row => JSON.stringify([row.date, kind === 'ads' ? row.ad_key : row[field]]));
     }
     list('rowhashes', ['kind', 'hash', 'date'], row => {
       if (!KINDS.includes(row.kind)) bad('jenis fingerprint');
       const hash = string(row.hash, 'fingerprint', 256);
       return { kind: row.kind, hash, date: row.date == null ? null : date(row.date, 'tanggal fingerprint') };
     }, row => JSON.stringify([row.kind, row.hash]));
-    list('uploads', ['kind', 'file_hash', 'file_name', 'rows', 'added', 'updated', 'duplicates', 'period_start', 'period_end', 'uploaded_at'], row => {
+    list('uploads', ['kind', 'file_hash', 'file_name', 'rows', 'added', 'updated', 'duplicates', 'period_start', 'period_end', 'uploaded_at', 'source_state'], row => {
       if (!KINDS.includes(row.kind)) bad('jenis unggahan');
       const clean = { kind: row.kind, file_hash: string(row.file_hash, 'hash berkas', 256),
         file_name: string(row.file_name || '', 'nama berkas', 1024, true) };
@@ -130,6 +141,10 @@ const DailyStore = (() => {
       clean.period_start = row.period_start == null ? null : date(row.period_start, 'awal periode');
       clean.period_end = row.period_end == null ? null : date(row.period_end, 'akhir periode');
       if (!!clean.period_start !== !!clean.period_end || clean.period_start > clean.period_end) bad('rentang unggahan');
+      if (row.source_state !== undefined) {
+        if (!['loaded', 'partial'].includes(row.source_state)) bad('kesiapan sumber unggahan');
+        clean.source_state = row.source_state;
+      }
       if (row.uploaded_at !== undefined) clean.uploaded_at = stamp(row.uploaded_at, 'waktu unggahan');
       return clean;
     }, row => JSON.stringify([row.kind, row.file_hash]));
@@ -154,7 +169,7 @@ const DailyStore = (() => {
     }
     if (input.parameters !== undefined) {
       const numeric = ['ppn', 'thScale', 'thPantau', 'minSpend', 'minDays', 'lagDays', 'lagCoverage', 'streakDays', 'pendingFactor', 'targetROI'];
-      object(input.parameters, [...numeric, 'dateStart', 'dateEnd'], 'parameter');
+      object(input.parameters, [...numeric, 'dateStart', 'dateEnd', 'observationEnd'], 'parameter');
       result.parameters = Object.fromEntries(Object.entries(input.parameters).map(([key, value]) =>
         [key, numeric.includes(key) ? number(value, 'parameter.' + key) : value === '' ? '' : date(value, key)]));
     }
@@ -199,6 +214,17 @@ const DailyStore = (() => {
             s.createIndex('acct_date', ['account_id', 'date']);
           }
         }
+        const ads = tx.objectStore('ads');
+        if (ads.indexNames.contains('acct_date_unit')) ads.deleteIndex('acct_date_unit');
+        if (!ads.indexNames.contains('acct_date_identity'))
+          ads.createIndex('acct_date_identity', ['account_id', 'date', 'ad_key'], { unique: true });
+        const cursor = ads.openCursor();
+        cursor.onsuccess = () => {
+          const entry = cursor.result;
+          if (!entry) return;
+          if (!entry.value.ad_key) entry.update({ ...entry.value, ad_key: 'name:' + entry.value.ad_unit });
+          entry.continue();
+        };
         let uploads;
         if (!db.objectStoreNames.contains('uploads')) {
           uploads = db.createObjectStore('uploads', { keyPath: 'id', autoIncrement: true });
@@ -300,71 +326,127 @@ const DailyStore = (() => {
         (await rq(tx.objectStore('rowhashes').index('acct_kind').getAll([accountId, kind]))).map(r => r.hash)));
     }
     async existingKeys(accountId, kind) {
-      const field = kindOf(kind) === 'ads' ? 'ad_unit' : 'tag';
+      const field = kindOf(kind) === 'ads' ? 'ad_key' : 'tag';
       return new Set((await this.range(accountId, kind)).map(r => `${r.date}|${r[field]}`));
     }
 
-    // New ingestion passes rawRows for transactional row dedup. They are used
-    // only in memory; the store retains daily figures, hashed order IDs and
-    // dated row fingerprints. The older aggregate API remains a replacement.
+    // One transaction covers every report, its fingerprints, and upload log.
+    // Raw source rows are used in memory only, never persisted.
     async saveDaily(accountId, kind, records, opts) {
-      kindOf(kind);
-      const o = opts || {}, A = agg(), field = kind === 'ads' ? 'ad_unit' : 'tag';
-      const indexName = kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag';
-      return this.transaction(['accounts', kind, 'rowhashes', 'uploads'], 'readwrite', async tx => {
-        if (!await rq(tx.objectStore('accounts').get(accountId))) throw new Error('Akun tidak ditemukan');
-        const uploads = tx.objectStore('uploads');
-        if (o.fileHash && await rq(uploads.index('acct_kind_hash').get([accountId, kind, o.fileHash]))) {
-          return { added: 0, updated: 0, duplicates: o.sourceRows || 0, skipped: true };
-        }
-        const hs = tx.objectStore('rowhashes');
-        const knownRows = await rq(hs.index('acct_kind').getAll([accountId, kind]));
-        const known = new Map(knownRows.map(r => [r.hash, r]));
-        let hashes = [], duplicates = o.duplicates || 0, period = o.period;
-        const incremental = Array.isArray(o.rawRows);
-        if (incremental) {
-          const valid = o.rawRows.filter(r => A.isDate(A.rowDate(r, kind)));
-          const dates = valid.map(r => A.rowDate(r, kind)).sort();
-          period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
-          const dedup = A.dedupe(valid, new Set(known.keys()));
-          duplicates = dedup.duplicates;
-          records = A.aggregate(kind, dedup.kept);
-          hashes = dedup.kept.map((r, i) => ({ hash: dedup.hashes[i], date: A.rowDate(r, kind) }));
-        } else {
-          hashes = [...new Set(o.rowHashes || [])].filter(h => !known.has(h)).map(hash => ({ hash,
-            date: records.length && records.every(r => r.date === records[0].date) ? records[0].date : null }));
-        }
-        const store = tx.objectStore(kind), idx = store.index(indexName);
-        let added = 0, updated = 0;
-        for (const r of records || []) {
-          if (!A.isDate(r.date) || typeof r[field] !== 'string' || !r[field]) throw new Error('Record harian tidak valid');
-          const found = await rq(idx.get([accountId, r.date, r[field]]));
-          if (incremental && found && found.merge_version !== 1) {
-            throw new Error(`Riwayat lama ${r.date} perlu dihapus lalu diunggah ulang sebelum digabung`);
-          }
-          const rec = incremental && found ? A.mergeDaily(kind, found, r) : { ...r };
-          delete rec.id;
-          rec.account_id = accountId;
-          if (incremental) rec.merge_version = 1;
-          if (found) {
-            await rq(store.put({ ...rec, id: found.id, created_at: found.created_at, updated_at: new Date().toISOString() }));
-            updated++;
-          } else {
-            await rq(store.add({ ...rec, created_at: new Date().toISOString() }));
-            added++;
-          }
-        }
-        // No caught ConstraintError: duplicate guards were checked in this
-        // same serialized transaction. Other failures must roll everything back.
-        await Promise.all(hashes.map(h => rq(hs.add({ ...h, account_id: accountId, kind }))));
-        if (o.fileHash) await rq(uploads.add({
-          account_id: accountId, kind, file_hash: o.fileHash, file_name: o.fileName || '',
-          rows: o.sourceRows || 0, added, updated, duplicates,
-          period_start: period ? period.start : null, period_end: period ? period.end : null,
-          uploaded_at: new Date().toISOString(),
-        }));
-        return { added, updated, duplicates };
+      return (await this.saveBatch(accountId, [{ ...(opts || {}), kind, records }])).items[0];
+    }
+    async saveBatch(accountId, items, options = {}) {
+      if (!Array.isArray(items)) throw new Error('Daftar laporan tidak valid');
+      const ranges = options.replacementRanges || [], A = agg();
+      if (!Array.isArray(ranges)) throw new Error('Rentang penggantian tidak valid');
+      items.forEach(item => { kindOf(item.kind);
+        if (item.sourceState !== undefined && !['loaded', 'partial'].includes(item.sourceState)) throw new Error('Kesiapan sumber tidak valid');
       });
+      for (const range of ranges) {
+        kindOf(range.kind);
+        if (!A.isDate(range.start) || !A.isDate(range.end) || range.start > range.end)
+          throw new Error('Rentang penggantian harus memiliki tanggal awal dan akhir yang valid');
+        const inputs = items.filter(item => item.kind === range.kind);
+        if (inputs.some(item => item.sourceState === 'partial')) throw new Error('Laporan parsial tidak dapat mengganti periode lengkap; perbaiki baris sumber terlebih dahulu');
+        if (!inputs.length || inputs.some(item => !Array.isArray(item.rawRows)))
+          throw new Error('Penggantian memerlukan seluruh baris sumber rawRows, termasuk daftar kosong untuk periode kosong');
+      }
+      const kinds = [...new Set([...items.map(item => item.kind), ...ranges.map(range => range.kind)])];
+      return this.transaction(['accounts', ...kinds, 'rowhashes', 'uploads'], 'readwrite', async tx => {
+        if (!await rq(tx.objectStore('accounts').get(accountId))) throw new Error('Akun tidak ditemukan');
+        let removed = 0;
+        for (const range of ranges) {
+          const store = tx.objectStore(range.kind);
+          const keys = await rq(store.index('acct_date').getAllKeys(IDBKeyRange.bound(
+            [accountId, range.start], [accountId, range.end])));
+          await Promise.all(keys.map(key => rq(store.delete(key))));
+          removed += keys.length;
+          const hashes = tx.objectStore('rowhashes');
+          const guards = await rq(hashes.index('acct_kind').getAll([accountId, range.kind]));
+          await Promise.all(guards.filter(row => !row.date || (row.date >= range.start && row.date <= range.end))
+            .map(row => rq(hashes.delete(row.id))));
+          const uploads = tx.objectStore('uploads');
+          const logs = await rq(uploads.index('acct').getAll(accountId));
+          await Promise.all(logs.filter(row => row.kind === range.kind && (!row.period_start || !row.period_end ||
+            (row.period_start <= range.end && row.period_end >= range.start))).map(row => rq(uploads.delete(row.id))));
+        }
+        const results = [];
+        for (const item of items) {
+          const selected = ranges.filter(range => range.kind === item.kind);
+          const rawRows = selected.length ? item.rawRows.filter(row => {
+            const date = A.rowDate(row, item.kind);
+            return selected.some(range => date >= range.start && date <= range.end);
+          }) : item.rawRows;
+          // A range replacement never changes an outside day, even if its
+          // source file also includes changed rows outside the chosen bounds.
+          const input = selected.length ? { ...item, rawRows, sourceRows: rawRows.length,
+            fileHash: A.hashRows(rawRows) } : item;
+          results.push(await this.writeItem(tx, accountId, input));
+        }
+        return { added: results.reduce((sum, row) => sum + row.added, 0),
+          updated: results.reduce((sum, row) => sum + row.updated, 0),
+          duplicates: results.reduce((sum, row) => sum + row.duplicates, 0),
+          skipped: results.filter(row => row.skipped).length, removed, items: results };
+      });
+    }
+    async writeItem(tx, accountId, o) {
+      const { kind } = o, A = agg(), field = kind === 'ads' ? 'ad_unit' : 'tag';
+      let records = o.records || [];
+      const indexName = kind === 'ads' ? 'acct_date_identity' : 'acct_date_tag';
+      const uploads = tx.objectStore('uploads');
+      if (o.fileHash && await rq(uploads.index('acct_kind_hash').get([accountId, kind, o.fileHash]))) {
+        return { added: 0, updated: 0, duplicates: o.sourceRows || 0, skipped: true };
+      }
+      const hs = tx.objectStore('rowhashes');
+      const knownRows = await rq(hs.index('acct_kind').getAll([accountId, kind]));
+      const known = new Map(knownRows.map(r => [r.hash, r]));
+      let hashes = [], duplicates = o.duplicates || 0, period = o.period;
+      const incremental = Array.isArray(o.rawRows);
+      if (incremental) {
+        const valid = o.rawRows.filter(r => A.isDate(A.rowDate(r, kind)));
+        const dates = valid.map(r => A.rowDate(r, kind)).sort();
+        period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
+        const dedup = A.dedupe(valid, new Set(known.keys()));
+        duplicates = dedup.duplicates;
+        records = A.aggregate(kind, dedup.kept);
+        hashes = dedup.kept.map((r, i) => ({ hash: dedup.hashes[i], date: A.rowDate(r, kind) }));
+      } else {
+        hashes = [...new Set(o.rowHashes || [])].filter(h => !known.has(h)).map(hash => ({ hash,
+          date: records.length && records.every(r => r.date === records[0].date) ? records[0].date : null }));
+      }
+      const store = tx.objectStore(kind), idx = store.index(indexName);
+      let added = 0, updated = 0;
+      for (const r of records || []) {
+        if (!A.isDate(r.date) || typeof r[field] !== 'string' || !r[field]) throw new Error('Record harian tidak valid');
+        const key = kind === 'ads' ? r.ad_key || 'name:' + r.ad_unit : r[field];
+        const found = await rq(idx.get([accountId, r.date, key]));
+        if (incremental && found && found.merge_version !== 1) {
+          throw new Error(`Riwayat lama ${r.date} perlu dihapus lalu diunggah ulang sebelum digabung`);
+        }
+        const rec = incremental && found ? A.mergeDaily(kind, found, r) : { ...r };
+        if (kind === 'ads' && !rec.ad_key) rec.ad_key = 'name:' + rec.ad_unit;
+        if (kind === 'ads' && o.sourceState === 'partial') rec.source_partial = true;
+        delete rec.id;
+        rec.account_id = accountId;
+        if (incremental) rec.merge_version = 1;
+        if (found) {
+          await rq(store.put({ ...rec, id: found.id, ...(kind === 'ads' ? { stored_at: found.stored_at } : { created_at: found.created_at }), updated_at: new Date().toISOString() }));
+          updated++;
+        } else {
+          await rq(store.add({ ...rec, [kind === 'ads' ? 'stored_at' : 'created_at']: new Date().toISOString() }));
+          added++;
+        }
+      }
+      // No caught ConstraintError: duplicate guards were checked in this
+      // same serialized transaction. Other failures must roll everything back.
+      await Promise.all(hashes.map(h => rq(hs.add({ ...h, account_id: accountId, kind }))));
+      if (o.fileHash) await rq(uploads.add({
+        account_id: accountId, kind, file_hash: o.fileHash, file_name: o.fileName || '',
+        rows: o.sourceRows || 0, added, updated, duplicates,
+        period_start: period ? period.start : null, period_end: period ? period.end : null,
+        uploaded_at: new Date().toISOString(), ...(o.sourceState ? { source_state: o.sourceState } : {}),
+      }));
+      return { added, updated, duplicates };
     }
     async range(accountId, kind, start, end) {
       kindOf(kind);

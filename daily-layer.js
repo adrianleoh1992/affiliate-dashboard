@@ -101,14 +101,15 @@
       const valid = rows.filter(r => A.isDate(A.rowDate(r, f.type)));
       const dedup = A.dedupe(valid, known);
       const records = A.aggregate(f.type, dedup.kept);
-      const keyFields = f.type === 'ads' ? ['date', 'ad_unit'] : ['date', 'tag'];
+      const keyFields = f.type === 'ads' ? ['date', 'ad_key'] : ['date', 'tag'];
       const ing = A.planIngest(records, existing, keyFields);
       plan.items.push({
         file: f.name, kind: f.type, fileHash, seenBefore: seen,
+        sourceState: f.partial || (window.analysisData && window.analysisData().sourceState[f.type] === 'partial') ? 'partial' : 'loaded',
         sourceRows: rows.length, duplicates: dedup.duplicates, invalid: rows.length - valid.length,
         overlapsDate: records.some(record => dates.has(record.date)),
         rawRows: rows, records, added: ing.newCount, updated: ing.updateCount,
-        period: ing.period, days: ing.days,
+        period: valid.length ? { start: valid.map(r => A.rowDate(r, f.type)).sort()[0], end: valid.map(r => A.rowDate(r, f.type)).sort().pop() } : null, days: new Set(valid.map(r => A.rowDate(r, f.type))).size,
       });
       if (!seen) {
         records.forEach(r => existing.add(keyFields.map(key => r[key]).join('|')));
@@ -156,7 +157,7 @@
       }).join('');
     }
     if (PLAN.items.some(it => !it.seenBefore && it.overlapsDate)) {
-      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> penyimpanan hanya mengenali duplikat dengan isi baris yang sama. Jika status, komisi, atau angka laporan lama berubah, hapus tanggal terkait dari Riwayat Harian lalu unggah ulang laporan lengkap tanggal tersebut sebelum menyimpan. Menambahkan laporan revisi langsung dapat menghitung ulang transaksi lama.</p>');
+      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> penyimpanan hanya mengenali duplikat dengan isi baris yang sama. Jika status, komisi, atau angka laporan lama berubah, gunakan Ganti periode lengkap di bawah. Muat hanya versi laporan yang benar untuk periode tersebut. Menambahkan laporan revisi langsung dapat menghitung ulang transaksi lama.</p>');
     }
 
     $('ingestPlan').querySelector('.ingest-head').classList.toggle('hidden', allSeen);
@@ -173,6 +174,70 @@
     $('btnSkipSave').classList.toggle('hidden', !writable);
     $('ingestPlan').classList.remove('hidden');
     $('savedNote').classList.add('hidden');
+    renderReplacement();
+  }
+
+  function renderReplacement() {
+    let host = $('replacementControls');
+    if (!host) {
+      host = document.createElement('div'); host.id = 'replacementControls';
+      $('planRows').after(host);
+    }
+    PLAN.replacement = null;
+    const kinds = [...new Set(PLAN.items.map(item => item.kind))];
+    const labels = { affiliate: 'Komisi affiliate', ads: 'Meta Ads', clicks: 'Klik Shopee' };
+    host.innerHTML = `<label><input type="checkbox" id="replaceMode"> Ganti periode lengkap</label>
+      <div id="replacementFields" class="hidden"><p class="hint">Pilih jenis laporan dan isi rentang lengkap yang akan diganti. Semua data lama dalam rentang ini, termasuk tag atau tanggal yang tidak ada di laporan baru, akan dihapus. Muat hanya versi laporan yang benar. Data di luar rentang tidak berubah.</p>
+      ${kinds.map(kind => `<div class="plan-row"><label><input type="checkbox" data-replace-kind="${kind}"> ${labels[kind]}</label>
+        <label>Dari <input type="date" id="replaceStart-${kind}" aria-label="Awal penggantian ${labels[kind]}"></label>
+        <label>Sampai <input type="date" id="replaceEnd-${kind}" aria-label="Akhir penggantian ${labels[kind]}"></label></div>`).join('')}
+      <button type="button" class="btn" id="btnPreviewReplace">Tinjau penggantian</button>
+      <div id="replacementPreview" class="hidden" aria-live="polite"><div id="replacementSummary"></div>
+      <label><input type="checkbox" id="replaceIntent"> Saya memastikan laporan yang dimuat lengkap untuk seluruh rentang dan siap mengganti data lama.</label></div></div>`;
+    let previewRevision = 0;
+    const normal = { disabled: $('btnSaveAll').disabled, mode: $('btnSaveAll').dataset.mode, text: $('btnSaveAll').textContent };
+    const invalidate = () => {
+      if (!PLAN) return;
+      ++previewRevision;
+      PLAN.replacement = null;
+      $('replacementPreview').classList.add('hidden'); $('replaceIntent').checked = false;
+      const mode = $('replaceMode').checked;
+      $('replacementFields').classList.toggle('hidden', !mode);
+      $('btnSaveAll').disabled = mode || normal.disabled;
+      $('btnSaveAll').dataset.mode = mode ? 'replace' : normal.mode;
+      $('btnSaveAll').textContent = mode ? 'Ganti periode lengkap' : normal.text;
+    };
+    host.querySelectorAll('input:not(#replaceIntent)').forEach(input => input.addEventListener(input.type === 'date' ? 'input' : 'change', invalidate));
+    $('replaceIntent').onchange = () => { $('btnSaveAll').disabled = !PLAN || !PLAN.replacement || !$('replaceIntent').checked || SAVING; };
+    $('btnPreviewReplace').onclick = () => run(async () => {
+      const plan = PLAN, account = ACCT, revision = PLAN_REV, preview = ++previewRevision;
+      if (!plan || plan.acct !== account || account.name !== shopeeName()) return;
+      const ranges = kinds.filter(kind => host.querySelector(`[data-replace-kind="${kind}"]`).checked)
+        .map(kind => ({ kind, start: $('replaceStart-' + kind).value, end: $('replaceEnd-' + kind).value }));
+      if (!ranges.length) throw new Error('Pilih jenis laporan yang akan diganti');
+      if (ranges.some(range => !A.isDate(range.start) || !A.isDate(range.end) || range.start > range.end))
+        throw new Error('Isi tanggal awal dan akhir penggantian yang valid');
+      if (plan.items.some(item => ranges.some(range => range.kind === item.kind) && item.sourceState === 'partial'))
+        throw new Error('Laporan parsial tidak dapat mengganti periode lengkap; perbaiki baris sumber terlebih dahulu');
+      const lines = [];
+      for (const range of ranges) {
+        const old = await STORE.range(account.id, range.kind, range.start, range.end);
+        const rows = plan.items.filter(item => item.kind === range.kind).flatMap(item => item.rawRows)
+          .filter(row => { const date = A.rowDate(row, range.kind); return date >= range.start && date <= range.end; });
+        const incoming = A.aggregate(range.kind, A.dedupe(rows).kept);
+        const total = records => range.kind === 'affiliate' ? rp(records.reduce((sum, row) => sum + row.comm, 0))
+          : range.kind === 'ads' ? rp(records.reduce((sum, row) => sum + row.spend, 0))
+          : nf(records.reduce((sum, row) => sum + row.clicks, 0)) + ' klik';
+        lines.push(`${labels[range.kind]} · ${range.start} — ${range.end}: ${old.length} agregat / ${total(old)} → ${incoming.length} agregat / ${total(incoming)}`);
+      }
+      if (PLAN !== plan || ACCT !== account || revision !== PLAN_REV || preview !== previewRevision || account.name !== shopeeName()) return;
+      plan.replacement = { ranges, lines };
+      $('replacementSummary').innerHTML = `<p><b>Akun ${esc(account.name)}</b></p>` + lines.map(line => `<p>${esc(line)}</p>`).join('')
+        + '<p class="hint">Hanya jenis dan rentang yang dipilih diganti. Jenis lain dalam unggahan ini tidak disimpan melalui tindakan ini.</p>';
+      $('replaceIntent').checked = false;
+      $('replacementPreview').classList.remove('hidden');
+      $('btnSaveAll').disabled = true;
+    });
   }
 
   /* ── Stored history ─────────────────────────────────────────────────────── */
@@ -197,7 +262,7 @@
     if (!STORE || !account || account.name !== shopeeName()) return;
     const start = $('dsStart').value || null, end = $('dsEnd').value || null;
     if (start && end && start > end) { toast('Tanggal mulai harus sebelum tanggal akhir'); return; }
-    const [aff, ads, clk] = await Promise.all(['affiliate', 'ads', 'clicks'].map(kind => STORE.range(account.id, kind, start, end)));
+    const [aff, ads, clk, uploads] = await Promise.all([...['affiliate', 'ads', 'clicks'].map(kind => STORE.range(account.id, kind, start, end)), STORE.uploadHistory(account.id)]);
     if (revision !== STORED_REV || ACCT !== account || account.name !== shopeeName()) return;
     if (!aff.length && !ads.length && !clk.length) {
       Object.values(DCHARTS).forEach(chart => chart.destroy());
@@ -224,6 +289,7 @@
       b.impr += r.impressions || 0; });
     clk.forEach(r => { const b = touch(r.date); b.shopeeClicks += r.clicks || 0; });
 
+    const adsDates = new Set(ads.map(row => row.date));
     const days = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
     // Same two adjustments engine.js makes, or the tabs disagree: Meta reports
     // spend without VAT, and pending commission is discounted.
@@ -232,27 +298,40 @@
     const pf = options.pendingFactor;
     days.forEach(d => {
       d.orders += d.orderKeys.size;
-      d.spendPpn = d.spend * ppn;
+      const context = window.dashboardSourceCoverage ? window.dashboardSourceCoverage(account.name, d.date, d.date) : {};
+      const declaredNone = context.sourceState && context.sourceState.ads === 'none';
+      const partial = ads.some(row => row.date === d.date && row.source_partial) || uploads.some(upload => upload.kind === 'ads' && upload.source_state === 'partial' && (!upload.period_start || !upload.period_end || (upload.period_start <= d.date && upload.period_end >= d.date)));
+      const complete = ads.length > 0 && !declaredNone && context.coverage && context.coverage.ads && context.coverage.ads.confirmed;
+      d.costsKnown = !partial && (adsDates.has(d.date) || complete || (!!declaredNone && !ads.length));
+      d.spendPpn = d.costsKnown ? d.spend * ppn : null;
       d.commEff = (d.comm - d.pending) + d.pending * pf;
-      d.net = d.commEff - d.spendPpn;
-      d.roas = d.spendPpn > 0 ? d.commEff / d.spendPpn : 0;
-      d.cpc = d.clicks > 0 ? d.spendPpn / d.clicks : 0;
+      d.net = d.costsKnown ? d.commEff - d.spendPpn : null;
+      d.roas = d.costsKnown ? (d.spendPpn > 0 ? d.commEff / d.spendPpn : 0) : null;
+      d.cpc = d.costsKnown ? (d.clicks > 0 ? d.spendPpn / d.clicks : 0) : null;
       d.leak = d.clicks > 0 ? d.shopeeClicks / d.clicks * 100 : null;
     });
 
     const sum = f => days.reduce((s, d) => s + (d[f] || 0), 0);
-    const totComm = sum('commEff'), totSpend = sum('spendPpn');
-    $('storedNote').textContent = `${days.length} hari · ${days[0].date} — ${days[days.length - 1].date}`;
+    const rangeStart = start || days[0].date, rangeEnd = end || days[days.length - 1].date;
+    const expectedDays = Math.round((Date.parse(rangeEnd + 'T00:00:00Z') - Date.parse(rangeStart + 'T00:00:00Z')) / 86400000) + 1;
+    const wholeRange = window.dashboardSourceCoverage ? window.dashboardSourceCoverage(account.name, rangeStart, rangeEnd) : {};
+    const rangeHasNoMeta = !ads.length && wholeRange.sourceState && wholeRange.sourceState.ads === 'none';
+    const confirmedMeta = ads.length > 0 && !(wholeRange.sourceState && wholeRange.sourceState.ads === 'none') && wholeRange.coverage && wholeRange.coverage.ads && wholeRange.coverage.ads.confirmed;
+    const partialRange = ads.some(row => row.source_partial) || uploads.some(upload => upload.kind === 'ads' && upload.source_state === 'partial' && (!upload.period_start || !upload.period_end || (upload.period_start <= rangeEnd && upload.period_end >= rangeStart)));
+    const costsKnown = !partialRange && days.every(day => day.costsKnown) && (rangeHasNoMeta || confirmedMeta || adsDates.size === expectedDays);
+    const money = value => value == null ? '—' : rp(value);
+    const totComm = sum('commEff'), totSpend = costsKnown ? sum('spendPpn') : null;
+    $('storedNote').textContent = `${days.length} hari · ${days[0].date} — ${days[days.length - 1].date} · Ringkasan agregat; tidak memuat transaksi, produk, atau cohort klik untuk rekomendasi.` + (costsKnown ? (rangeHasNoMeta ? ' Biaya nol mengikuti pernyataan tanpa Meta untuk periode ini.' : confirmedMeta ? ' Biaya mengikuti data Meta dan konfirmasi kelengkapan periode.' : ' Biaya mengikuti data Meta yang teramati; kelengkapan laporan sumber tidak diverifikasi.') : partialRange ? ' Biaya dan laba belum tersedia lengkap: laporan Meta tersimpan masih parsial.' : ' Biaya dan laba belum tersedia lengkap: tanggal tanpa data Meta bukan biaya nol.');
     // Empty range inputs mean all history, including later uploads.
 
     const paidDays = days.filter(d => d.spendPpn > 0);
     $('storedStrip').innerHTML = [
       ['Hari Tersimpan', nf(days.length)],
       ['Komisi Total', rp(totComm)],
-      ['Biaya Total', rp(totSpend)],
-      ['Laba Total', rp(totComm - totSpend)],
-      ['ROAS Rata', rx(totSpend > 0 ? totComm / totSpend : 0)],
-      ['Hari ROAS < 1', nf(paidDays.filter(d => d.roas < 1).length) + ' / ' + nf(paidDays.length)],
+      ['Biaya Total', money(totSpend)],
+      ['Laba Total', money(costsKnown ? totComm - totSpend : null)],
+      ['ROAS Rata', costsKnown ? rx(totSpend > 0 ? totComm / totSpend : 0) : '—'],
+      ['Hari ROAS < 1', costsKnown ? nf(paidDays.filter(d => d.roas < 1).length) + ' / ' + nf(paidDays.length) : '—'],
     ].map(x => `<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
 
     const lbl = days.map(d => d.date.slice(5));
@@ -271,17 +350,17 @@
       { label: 'Klik Shopee', data: days.map(d => d.shopeeClicks), borderColor: cv('--warn'), tension: .3, pointRadius: 2 },
     ]}});
 
-    const cols = ['Tanggal', 'Komisi Efektif', 'Biaya+PPN', 'Laba', 'ROAS', 'Order', 'Klik Meta', 'Klik Shopee', '% Masuk', 'CPC'];
+    const cols = ['Tanggal', 'Komisi Efektif', 'Biaya+PPN', 'Laba', 'ROAS', 'Order', 'Klik Meta', 'Klik Shopee', 'Rasio klik Shopee/Meta', 'CPC'];
     $('tblStored').querySelector('thead').innerHTML = '<tr>' +
       cols.map((h, i) => `<th class="${i ? 'num' : ''}">${h}</th>`).join('') + '</tr>';
     $('tblStored').querySelector('tbody').innerHTML = days.slice().reverse().map(d => `<tr>
-      <td><b>${d.date}</b></td><td class="num">${rp(d.commEff)}</td><td class="num">${rp(d.spendPpn)}</td>
-      <td class="num ${d.net >= 0 ? 'pos' : 'neg'}">${rp(d.net)}</td>
+      <td><b>${d.date}</b></td><td class="num">${rp(d.commEff)}</td><td class="num">${money(d.spendPpn)}</td>
+      <td class="num ${d.net == null ? '' : d.net >= 0 ? 'pos' : 'neg'}">${money(d.net)}</td>
       <td class="num">${d.spendPpn > 0 ? d.roas.toFixed(2) : '—'}</td>
       <td class="num">${nf(d.orders)}</td><td class="num">${nf(d.clicks)}</td>
       <td class="num">${d.shopeeClicks ? nf(d.shopeeClicks) : '—'}</td>
-      <td class="num ${d.leak != null && d.leak < 70 ? 'neg' : ''}">${d.leak != null ? d.leak.toFixed(0) + '%' : '—'}</td>
-      <td class="num">${d.clicks ? nf(d.cpc) : '—'}</td></tr>`).join('');
+      <td class="num ">${d.leak != null ? d.leak.toFixed(0) + '%' : '—'}</td>
+      <td class="num">${d.cpc != null && d.clicks ? nf(d.cpc) : '—'}</td></tr>`).join('');
   }
 
   async function renderUploads() {
@@ -391,19 +470,18 @@
     if (btn.dataset.mode === 'close') { $('ingestPlan').classList.add('hidden'); return; }
     if (SAVING || RESTORING || !PLAN || !ACCT || PLAN.acct !== ACCT || PLAN.acct.name !== shopeeName()) return;
     const plan = PLAN, account = plan.acct;
+    const replacement = btn.dataset.mode === 'replace' ? plan.replacement : null;
+    if (btn.dataset.mode === 'replace' && (!replacement || !$('replaceIntent').checked)) return;
+    if (replacement && !confirm(`Ganti data akun ${account.name}?\n\n${replacement.lines.join('\n')}\n\nData lama pada rentang terpilih akan diganti seluruhnya.`)) return;
     SAVING = true;
     btn.disabled = true; btn.textContent = 'Menyimpan...';
-    let added = 0, updated = 0, skipped = 0;
+    let added = 0, updated = 0, skipped = 0, committed = false;
     try {
-      for (const it of plan.items) {
-        if (it.seenBefore) { skipped++; continue; }
-        const res = await STORE.saveDaily(account.id, it.kind, it.records, {
-          rawRows: it.rawRows, fileHash: it.fileHash, fileName: it.file,
-          sourceRows: it.sourceRows, duplicates: it.duplicates, period: it.period,
-        });
-        added += res.added; updated += res.updated;
-        if (res.skipped) skipped++;
-      }
+      const items = (replacement ? plan.items.filter(item => replacement.ranges.some(range => range.kind === item.kind)) : plan.items)
+        .map(item => ({ ...item, fileName: item.file }));
+      const result = await STORE.saveBatch(account.id, items, { replacementRanges: replacement ? replacement.ranges : [] });
+      committed = true;
+      added = result.added; updated = result.updated; skipped = result.skipped;
       if (ACCT !== account || account.name !== shopeeName()) return;
       await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
       $('ingestPlan').classList.add('hidden');
@@ -413,7 +491,7 @@
       $('savedNote').classList.remove('hidden');
       toast('Tersimpan: ' + nf(added) + ' baris baru');
     } catch (e) {
-      toast('Gagal menyimpan: ' + e.message);
+      toast((committed ? 'Data tersimpan, tetapi tampilan gagal diperbarui: ' : 'Gagal menyimpan; seluruh riwayat sebelumnya tetap utuh: ') + e.message);
       if (ACCT === account && account.name === shopeeName()) await run(buildPlan);
     } finally {
       SAVING = false;

@@ -39,6 +39,7 @@ const data = {
     { 'Waktu Klik':'2026-08-02 09:00:00', 'Tag_link':'A----', 'Perujuk':'Websites', 'Wilayah Klik':'Indonesia' },
   ],
   tagMap: {},
+  coverage: { affiliate: { start: '2026-08-01', end: '2026-08-04', confirmed: true } },
 };
 
 const r = E.analyze(data, { ppn:0, minSpend:0, minDays:1, lagDays:3, streakDays:3 });
@@ -78,7 +79,7 @@ assert.equal(r.range.matureUntil, '2026-08-01');
 const r2 = E.analyze(data, { ppn:0, minSpend:0, minDays:1, lagDays:0, streakDays:3 });
 const a2 = r2.tags.find(x => x.tag === 'A');
 assert.ok(a2.streak >= 3, 'without lag the streak should fire, got ' + a2.streak);
-assert.ok(/cek link/.test(a2.reason), 'severe leak should redirect the STOP reason: ' + a2.reason);
+assert.ok(/metode pencatatan berbeda/.test(a2.reason), 'cross-platform comparison must not claim lost clicks: ' + a2.reason);
 
 /* Ad-unit grain */
 assert.equal(r.adUnits.length, 1);
