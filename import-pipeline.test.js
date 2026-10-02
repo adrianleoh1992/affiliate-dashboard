@@ -121,9 +121,61 @@ test('unknown files and headers-only exports return actionable errors', () => {
   assert.ok(hasIssue(I.parseText('  '), 'empty_file'));
 });
 
-test('invalid byte decoding and binary masquerading as CSV fail safely', () => {
-  for (const content of ['abc\0def', 'abc\uFFFDdef']) {
-    assert.ok(hasIssue(I.parseText(content), 'invalid_encoding'));
+test('NUL content masquerading as CSV fails safely', () => {
+  const r = I.parseText('abc\0def');
+  assert.equal(r.fatal, true);
+  assert.ok(hasIssue(r, 'invalid_encoding'));
+});
+
+test('literal replacement characters in product and shop labels keep all commission rows with a warning', () => {
+  for (const column of ['Nama Barange', 'Nama Barang', 'Nama Toko']) {
+    const content = '\uFEFF' + csv([
+      aff({ [column]: 'Label biasa' }),
+      aff({ 'ID Pemesanan': '002', [column]: 'Label \uFFFD asli' }),
+    ]);
+    const r = I.parseText(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(content)));
+    assert.equal(r.ok, true, column);
+    assert.equal(r.fatal, false);
+    assert.equal(r.stats.accepted, 2);
+    assert.equal(r.stats.rejected, 0);
+    assert.equal(r.stats.errors, 0);
+    assert.equal(r.rows[1][column], 'Label \uFFFD asli');
+    assert.equal(r.rows.reduce((sum, row) => sum + row['Total Komisi per Produk(Rp)'], 0), 2401);
+    const warning = r.issues.find(issue => issue.code === 'replacement_character');
+    assert.equal(warning.severity, 'warning');
+    assert.equal(warning.row, 3);
+    assert.equal(warning.column, column);
+  }
+});
+
+test('replacement characters in IDs, tags, dates and amounts reject only affected rows', () => {
+  for (const column of ['ID Pemesanan', 'Tag_link1', 'Waktu Pemesanan', 'Total Komisi per Produk(Rp)']) {
+    const r = parse([aff(), aff({ 'ID Pemesanan': '002', [column]: '12\uFFFD34' })]);
+    assert.equal(r.ok, true, column);
+    assert.equal(r.fatal, false);
+    assert.equal(r.stats.accepted, 1);
+    assert.equal(r.stats.rejected, 1);
+    assert.equal(r.rows[0]['ID Pemesanan'], '001');
+    const problem = r.issues.find(issue => issue.code === 'replacement_character');
+    assert.equal(problem.severity, 'error');
+    assert.equal(problem.row, 3);
+    assert.equal(problem.column, column);
+  }
+});
+
+test('replacement characters cannot be normalized away in headers or used to match ads and clicks', () => {
+  const header = I.parseText(csv([aff()]).replace('Tag_link1', 'Tag_\uFFFDlink1'));
+  assert.equal(header.fatal, true);
+  assert.equal(header.stats.accepted, 0);
+  assert.ok(hasIssue(header, 'invalid_encoding'));
+  for (const rows of [
+    [ads(), ads({ 'Ad name': 'sample\uFFFD' })],
+    [{ 'Waktu Klik': '2026-08-01', Tag_link: 'sample' }, { 'Waktu Klik': '2026-08-01', Tag_link: 'sample\uFFFD' }],
+  ]) {
+    const r = parse(rows);
+    assert.equal(r.stats.accepted, 1);
+    assert.equal(r.stats.rejected, 1);
+    assert.ok(r.issues.some(issue => issue.code === 'replacement_character' && issue.severity === 'error'));
   }
 });
 
