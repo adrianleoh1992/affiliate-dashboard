@@ -111,6 +111,24 @@ const CloudStore = (() => {
       }
       return this.user;
     }
+    // Self sign-up. Signing up grants nothing: the daily_* functions refuse
+    // anyone an admin has not added to dashboard.team_members. With email
+    // confirmation on, Supabase answers without a session until the link in
+    // the email is opened.
+    async signUp(email, password) {
+      let data;
+      try {
+        data = await this.request('/auth/v1/signup', { body: { email, password } });
+      } catch (error) {
+        if (error.code === 'user_already_exists' || /already registered/i.test(error.message)) throw new CloudError('Email ini sudah terdaftar. Pakai Masuk.', error.status, 'auth');
+        if (error.code === 'weak_password' || /password/i.test(error.message)) throw new CloudError('Kata sandi terlalu lemah (minimal 6 karakter).', error.status, 'auth');
+        if (error.code === 'signup_disabled' || /signups? not allowed/i.test(error.message)) throw new CloudError('Pendaftaran ditutup. Minta admin membuatkan akun.', error.status, 'auth');
+        if (error.status === 429) throw new CloudError('Terlalu banyak pendaftaran atau email konfirmasi. Coba lagi nanti.', 429, 'auth');
+        throw error;
+      }
+      if (data && data.access_token) { this.remember(data); return { confirm: false }; }
+      return { confirm: true };
+    }
     // One refresh at a time. If another tab already rotated the tokens, use
     // its session instead of replaying a refresh token Supabase has retired.
     // Only an answer that the refresh token itself is invalid signs out; a
@@ -260,7 +278,8 @@ const CloudStore = (() => {
         }
         this.checked.set(name, Date.now());
       } catch (error) {
-        this.setStatus(name, { state: 'error', message: error.message });
+        // Signed in but not (yet) added to the team by an admin.
+        this.setStatus(name, error.code === 'PT403' ? { state: 'pending' } : { state: 'error', message: error.message });
       }
       return this.status(name);
     }
@@ -342,6 +361,7 @@ const CloudStore = (() => {
       const status = this.status(name);
       if (status.state === 'conflict') throw new Error('Riwayat di browser ini berbeda dengan database bersama. Buka Data Tersimpan → Database bersama dan pilih data yang dipakai. Belum ada yang disimpan.');
       if (status.state === 'error') throw new Error(status.message + ' Belum ada yang disimpan.');
+      if (status.state === 'pending') throw new Error('Akun Anda belum disetujui admin untuk database bersama. Belum ada yang disimpan.');
       if (status.state === 'local') throw new Error('Sesi database bersama berakhir. Masuk lagi; belum ada yang disimpan.');
       if (status.state === 'unlinked') {
         if (!create) return null;

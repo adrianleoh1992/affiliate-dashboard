@@ -101,10 +101,18 @@ Token Meta Ads tidak pernah disimpan di database.
 1. Di Supabase, buka project lalu **SQL Editor**, jalankan isi
    `supabase/migrations/20261018000000_shared_daily_store.sql` (atau
    `supabase db push` dengan Supabase CLI).
-2. **Authentication → Sign In / Providers**: matikan *Allow new users to sign up*.
-   **Authentication → Users → Add user**: buat pengguna untuk setiap anggota
-   dengan email dan kata sandi (centang *Auto confirm*).
-3. Daftarkan anggota tim di SQL Editor:
+2. Pilih cara membuat akun:
+   - **Anggota mendaftar sendiri** lewat tombol *Daftar* di kartu Database
+     bersama. Biarkan *Allow new users to sign up* menyala. Akun baru tidak bisa
+     membaca atau menulis apa pun (kartu menampilkan "Menunggu persetujuan")
+     sampai admin menyetujuinya di langkah 3. Paket gratis Supabase hanya
+     mengirim sedikit email konfirmasi per jam; mematikan *Confirm email* di
+     **Authentication → Sign In / Providers → Email** menghindarinya dan tetap
+     aman karena persetujuan admin yang membuka akses.
+   - **Admin membuat akun**: matikan *Allow new users to sign up*, lalu
+     **Authentication → Users → Add user** untuk setiap anggota (centang
+     *Auto confirm*).
+3. Setujui anggota tim di SQL Editor:
    ```sql
    insert into dashboard.team_members (user_id)
    select id from auth.users where email in ('anda@contoh.com', 'tim@contoh.com');

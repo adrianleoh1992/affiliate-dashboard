@@ -38,6 +38,7 @@ const literal = value => { const tag = '$j' + Math.random().toString(36).slice(2
 
 const USERS = { 'admin@example.com': '00000000-0000-0000-0000-000000000001',
   'tim@example.com': '00000000-0000-0000-0000-000000000002', 'luar@example.com': '00000000-0000-0000-0000-000000000003' };
+const SIGNUPS = { 'baru@example.com': '00000000-0000-0000-0000-000000000004', 'konfirmasi@example.com': '00000000-0000-0000-0000-000000000005' };
 const TYPES = { p_account_id: 'bigint', p_kind: 'text', p_expected_revision: 'bigint', p_since: 'bigint', p_date: 'date', p_name: 'text',
   p_records: 'jsonb', p_hashes: 'jsonb', p_upload: 'jsonb', p_backup: 'jsonb' };
 
@@ -67,6 +68,16 @@ function fakeFetch(log) {
     if (pathname === '/auth/v1/token' && searchParams.get('grant_type') === 'password') {
       const id = USERS[body.email];
       if (!id || body.password !== 'rahasia') return reply(400, { error_description: 'Invalid login credentials' });
+      return reply(200, { access_token: id, refresh_token: 'r-' + id, expires_in: 3600, user: { id, email: body.email } });
+    }
+    if (pathname === '/auth/v1/signup') {
+      if (USERS[body.email]) return reply(422, { code: 422, error_code: 'user_already_exists', msg: 'User already registered' });
+      if (String(body.password).length < 6) return reply(422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 6 characters.' });
+      const id = SIGNUPS[body.email];
+      if (!id) return reply(400, { msg: 'unexpected test email' });
+      psql(DB_URL, `insert into auth.users values ('${id}', '${body.email}') on conflict do nothing`);
+      // Email confirmation on: Supabase returns the user but no session.
+      if (body.email.startsWith('konfirmasi')) return reply(200, { id, email: body.email, confirmation_sent_at: new Date().toISOString() });
       return reply(200, { access_token: id, refresh_token: 'r-' + id, expires_in: 3600, user: { id, email: body.email } });
     }
     if (pathname === '/auth/v1/logout') return reply(204, null);
@@ -534,7 +545,7 @@ test('sessions survive a busy login service and follow other tabs', async () => 
 test('RLS: non-members, anon and direct writes are refused', async () => {
   const outsider = await browser('luar@example.com');
   await outsider.store.ensureAccount('shopee', NAME);
-  assert.equal((await outsider.store.sync(NAME)).state, 'error');
+  assert.equal((await outsider.store.sync(NAME)).state, 'pending');
   await assert.rejects(outsider.client.rpc('daily_export_account', { p_account_id: 1 }), { code: 'PT403' });
   // Tables sit in the unexposed "dashboard" schema: even members read them only through functions.
   for (const sql of ['select count(*) from dashboard.daily_affiliate', `insert into dashboard.accounts (name) values ('x')`,
@@ -543,6 +554,27 @@ test('RLS: non-members, anon and direct writes are refused', async () => {
     assert.throws(() => asUser(USERS['tim@example.com'], sql), { code: '42501' }, sql);
   assert.throws(() => psql(DB_URL, `begin; set local role anon; select count(*) from dashboard.daily_ads; commit;`), { code: '42501' });
   assert.throws(() => psql(DB_URL, `begin; set local role anon; select public.daily_list_accounts(); commit;`), { code: '42501' });
+});
+
+test('self sign-up waits for an admin before any shared data is readable or writable', async () => {
+  const fresh = await browser();
+  await assert.rejects(fresh.client.signUp('tim@example.com', 'rahasia'), /sudah terdaftar/);
+  await assert.rejects(fresh.client.signUp('baru@example.com', '123'), /terlalu lemah/);
+  assert.deepEqual(await fresh.client.signUp('konfirmasi@example.com', 'rahasia'), { confirm: true });
+  assert.ok(!fresh.client.signedIn, 'no session before the email is confirmed');
+
+  assert.deepEqual(await fresh.client.signUp('baru@example.com', 'rahasia'), { confirm: false });
+  assert.ok(fresh.client.signedIn);
+  await fresh.store.ensureAccount('shopee', NAME);
+  assert.deepEqual(await fresh.store.sync(NAME), { state: 'pending' });
+  await assert.rejects(fresh.store.ready(NAME, { create: true }), /belum disetujui admin/);
+  await assert.rejects(fresh.client.rpc('daily_list_accounts'), { code: 'PT403' });
+
+  psql(DB_URL, `insert into dashboard.team_members (user_id) values ('${SIGNUPS['baru@example.com']}')`);
+  try {
+    assert.notEqual((await fresh.store.sync(NAME)).state, 'pending');
+    assert.ok(Array.isArray(await fresh.client.rpc('daily_list_accounts')));
+  } finally { psql(DB_URL, `delete from dashboard.team_members where user_id = '${SIGNUPS['baru@example.com']}'`); }
 });
 
 test('database stores no raw order IDs or buyer fields', async () => {

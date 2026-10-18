@@ -10,7 +10,7 @@
   const shared = () => window.__cloudStore || null;
   const name = () => (window.DailyLayer && window.DailyLayer.account()) || '';
   const toast = message => window.toast && window.toast(message);
-  let BUSY = false, EMAIL = '';
+  let BUSY = false, EMAIL = '', SIGNUP = false;
 
   function mount() {
     let card = $('cloudCard');
@@ -33,6 +33,8 @@
     conflict: s => ['Perlu dipilih', `Browser ini punya ${nf(s.localRows)} agregat yang belum pernah tersinkron, sedangkan database bersama sudah berisi data akun ini. `
       + 'Penyimpanan dihentikan agar tidak ada yang tertimpa diam-diam. Disarankan: Unduh backup, pakai data database bersama, lalu unggah ulang CSV yang disimpan saat offline (baris yang sudah ada otomatis dilewati).'],
     error: s => ['Tidak terhubung', s.message + ' Data tidak disimpan ke mana pun sampai koneksi pulih.'],
+    pending: () => ['Menunggu persetujuan', 'Akun ini sudah terdaftar tetapi belum disetujui admin, jadi belum bisa membaca atau menyimpan ke database bersama. '
+      + 'Minta admin menambahkan Anda sebagai anggota tim, lalu tekan Periksa ulang. Sampai saat itu, data hanya tersimpan di browser ini.'],
   };
 
   function render() {
@@ -43,18 +45,29 @@
     const client = store.client;
     if (!client.signedIn) {
       card.innerHTML = `<div class="card-head"><h2>Database bersama</h2><span class="sub">belum masuk</span></div>
-        <p class="hint">Masuk untuk memakai riwayat harian yang sama dengan tim untuk semua akun. Akun login dibuat oleh admin di Supabase.
+        <p class="hint">${SIGNUP
+          ? 'Buat akun dengan email dan kata sandi. Setelah mendaftar, minta admin menyetujui akun Anda; sebelum itu database bersama belum bisa dipakai.'
+          : 'Masuk untuk memakai riwayat harian yang sama dengan tim untuk semua akun. Belum punya akun? Daftar, lalu minta admin menyetujuinya.'}
           Tanpa masuk, data hanya tersimpan di browser ini.</p>
         <form id="cloudLogin" class="ctrls ctrls-inline">
           <div class="field"><label for="cloudEmail">Email</label><input id="cloudEmail" type="email" autocomplete="username" value="${esc(EMAIL)}" required></div>
-          <div class="field"><label for="cloudPass">Kata sandi</label><input id="cloudPass" type="password" autocomplete="current-password" required></div>
-          <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit" ${BUSY ? 'disabled' : ''}>Masuk</button></div>
+          <div class="field"><label for="cloudPass">Kata sandi</label><input id="cloudPass" type="password" minlength="6" autocomplete="${SIGNUP ? 'new-password' : 'current-password'}" required></div>
+          <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit" ${BUSY ? 'disabled' : ''}>${SIGNUP ? 'Daftar' : 'Masuk'}</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" id="cloudMode" ${BUSY ? 'disabled' : ''}>${SIGNUP ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}</button></div>
         </form>`;
+      $('cloudMode').onclick = () => { EMAIL = $('cloudEmail').value.trim(); SIGNUP = !SIGNUP; render(); };
       $('cloudLogin').onsubmit = event => {
         event.preventDefault();
         // Read before act() re-renders the form.
         const email = $('cloudEmail').value.trim(), password = $('cloudPass').value;
         EMAIL = email;
+        if (SIGNUP) return act(async () => {
+          const { confirm } = await client.signUp(email, password);
+          SIGNUP = false;
+          if (confirm) return toast('Pendaftaran terkirim. Buka link konfirmasi di email ' + email + ', lalu Masuk.');
+          await store.sync(name());
+          toast('Akun ' + email + ' terdaftar. Minta admin menyetujuinya.');
+        });
         act(async () => {
           await client.signIn(email, password);
           await store.sync(name());
