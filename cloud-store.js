@@ -106,6 +106,8 @@ const CloudStore = (() => {
       try {
         this.remember(await this.request('/auth/v1/token?grant_type=password', { body: { email, password } }));
       } catch (error) {
+        if (error.code === 'email_not_confirmed' || /not confirmed/i.test(error.message))
+          throw new CloudError('Email belum dikonfirmasi. Buka link konfirmasi dari Supabase di email Anda, lalu Masuk lagi.', error.status, 'auth');
         if (error.status === 400) throw new CloudError('Email atau kata sandi salah', 400, 'auth');
         throw error;
       }

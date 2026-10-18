@@ -66,6 +66,7 @@ function fakeFetch(log) {
     const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
     log && log.push(pathname);
     if (pathname === '/auth/v1/token' && searchParams.get('grant_type') === 'password') {
+      if (body.email === 'konfirmasi@example.com') return reply(400, { code: 400, error_code: 'email_not_confirmed', msg: 'Email not confirmed' });
       const id = USERS[body.email];
       if (!id || body.password !== 'rahasia') return reply(400, { error_description: 'Invalid login credentials' });
       return reply(200, { access_token: id, refresh_token: 'r-' + id, expires_in: 3600, user: { id, email: body.email } });
@@ -562,6 +563,7 @@ test('self sign-up waits for an admin before any shared data is readable or writ
   await assert.rejects(fresh.client.signUp('baru@example.com', '123'), /terlalu lemah/);
   assert.deepEqual(await fresh.client.signUp('konfirmasi@example.com', 'rahasia'), { confirm: true });
   assert.ok(!fresh.client.signedIn, 'no session before the email is confirmed');
+  await assert.rejects(fresh.client.signIn('konfirmasi@example.com', 'rahasia'), /belum dikonfirmasi/);
 
   assert.deepEqual(await fresh.client.signUp('baru@example.com', 'rahasia'), { confirm: false });
   assert.ok(fresh.client.signedIn);
