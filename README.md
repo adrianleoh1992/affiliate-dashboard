@@ -108,12 +108,15 @@ Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan iz
   iklan lain pada tanggal yang sama ditambahkan, bukan ditolak.
 - CSV Meta yang diunggah dan tarikan untuk tanggal yang sama ditolak di kedua
   arah agar biaya tidak terhitung dua kali, kecuali kolom `Ad ID` di CSV
-  menunjukkan akun iklan yang berbeda. Hapus salah satunya terlebih dahulu.
-- Status penayangan dan tiga peringkat adalah kondisi iklan saat ini, sama seperti
-  kolom ekspor Ads Manager. Keduanya hanya diisi di baris tanggal terakhir tiap
-  iklan dan tidak dihitung sebagai isi baris, sehingga hari yang ditarik ulang
-  dengan angka yang sama dikenali sebagai duplikat saat **Simpan**, apa pun
-  statusnya sekarang.
+  menunjukkan akun iklan yang berbeda. Ad ID yang sudah dibulatkan spreadsheet
+  (notasi E+ atau berakhiran 000) tidak dipercaya; nama iklan yang menentukan.
+  Hapus salah satunya terlebih dahulu, atau tarik akun iklan lain itu juga.
+- Nama iklan, ad set dan kampanye, status penayangan, dan tiga peringkat adalah
+  kondisi iklan saat ini (Meta melaporkan nama dan status terkini untuk tanggal
+  lama juga), sama seperti kolom ekspor Ads Manager. Kolom-kolom itu tidak
+  dihitung sebagai isi baris; Ad ID yang membedakan baris. Hari yang ditarik ulang
+  dengan angka yang sama dikenali sebagai duplikat saat **Simpan**, walaupun
+  iklannya sudah diganti nama atau statusnya berubah.
 - Penggantian hanya berlaku untuk data di layar. Riwayat yang sudah **Disimpan**
   menambahkan setiap baris yang angkanya berbeda, jadi hari yang angkanya
   direvisi Meta sejak disimpan akan terhitung dua kali bila disimpan lagi.

@@ -32,6 +32,13 @@
     BELOW_AVERAGE_10: 'Below average - Bottom 10% of ads',
   };
 
+  /* Columns that describe the ad as it is now, not as it was that day: Insights
+     reports the current name and status for every past date. The dashboard
+     keeps them readable but out of each row's fingerprint (meta-connect.js),
+     so a re-pulled day is recognized by its numbers, not by today's labels. */
+  const VOLATILE_COLUMNS = ['Ad name', 'Ad set name', 'Campaign name', 'Ad delivery',
+    'Quality ranking', 'Engagement rate ranking', 'Conversion rate ranking'];
+
   class MetaApiError extends Error {
     constructor(message, info) { super(message); this.name = 'MetaApiError'; Object.assign(this, info || {}); }
   }
@@ -234,18 +241,13 @@
     const rows = (result && result.rows) || [];
     const currency = String((rows[0] && rows[0].account_currency) || currencyHint || '').toUpperCase();
     const spendHeader = currency === 'IDR' ? 'Amount spent (IDR)' : 'Amount spent';
+    // Current status on every row, as in an Ads Manager export, so a narrower
+    // dashboard date range still knows whether an ad is running.
     const delivery = (result && result.delivery) || new Map();
-    // Delivery status and rankings describe the ad now, not that day. Writing
-    // them on every historical row would change those rows' fingerprints on
-    // every re-pull, and the daily store would add the same spend again. They
-    // go on each ad's latest row only, which is also the row engine.js reads
-    // the current status from.
-    const latest = new Map();
-    rows.forEach(r => { const k = String(r.ad_id || r.ad_name || ''); if (!latest.has(k) || r.date_start > latest.get(k)) latest.set(k, r.date_start); });
-    const isLatest = r => latest.get(String(r.ad_id || r.ad_name || '')) === r.date_start;
-    // A row with no ad name and no delivery carries nothing the dashboard can
-    // use, and an empty name would make the importer reject the whole pull.
-    const data = rows.filter(r => r.ad_name || Number(r.spend) > 0 || Number(r.impressions) > 0).map(r => ({
+    // A placeholder row with no ad ID and no delivery carries nothing the
+    // dashboard can use, and an empty name would make the importer reject the
+    // whole pull. Days an ad did not deliver are simply absent and count as 0.
+    const data = rows.filter(r => r.ad_id || Number(r.spend) > 0 || Number(r.impressions) > 0).map(r => ({
       'Reporting starts': r.date_start, 'Reporting ends': r.date_stop,
       'Ad ID': r.ad_id || '', 'Ad name': r.ad_name || '', 'Ad set name': r.adset_name || '', 'Campaign name': r.campaign_name || '',
       'Account currency': r.account_currency || currency,
@@ -258,10 +260,9 @@
       'CTR (link click-through rate)': r.inline_link_click_ctr || '',
       'CPM (cost per 1,000 impressions) (IDR)': currency === 'IDR' ? (r.cpm || '') : '',
       'Landing page views': action(r, 'landing_page_view'),
-      'Ad delivery': isLatest(r) ? deliveryLabel(delivery.get(String(r.ad_id || ''))) : '',
-      'Quality ranking': isLatest(r) ? ranking(r.quality_ranking) : '',
-      'Engagement rate ranking': isLatest(r) ? ranking(r.engagement_rate_ranking) : '',
-      'Conversion rate ranking': isLatest(r) ? ranking(r.conversion_rate_ranking) : '',
+      'Ad delivery': deliveryLabel(delivery.get(String(r.ad_id || ''))),
+      'Quality ranking': ranking(r.quality_ranking), 'Engagement rate ranking': ranking(r.engagement_rate_ranking),
+      'Conversion rate ranking': ranking(r.conversion_rate_ranking),
     }));
     const fields = ['Reporting starts', 'Reporting ends', 'Ad ID', 'Ad name', 'Ad set name', 'Campaign name', 'Account currency', spendHeader,
       'Impressions', 'Reach', 'Frequency', 'Link clicks', 'Clicks (all)', 'CTR (link click-through rate)',
@@ -285,5 +286,5 @@
     return shift(day, -1);
   }
 
-  return { VERSION, CHUNK_DAYS, MAX_DAYS, ALL_STATUSES, MetaApiError, accountYesterday, create, splitRange, normalizeAccountId, describeError, toCsv, fileName, shift, isDate };
+  return { VERSION, CHUNK_DAYS, MAX_DAYS, ALL_STATUSES, VOLATILE_COLUMNS, MetaApiError, accountYesterday, create, splitRange, normalizeAccountId, describeError, toCsv, fileName, shift, isDate };
 });

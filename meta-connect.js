@@ -12,7 +12,7 @@
   const M = window.MetaApi, E = window.Engine, toast = window.toast, esc = E.escapeHtml;
   const api = M.create();
   const PREFIX = 'adash_meta_v1_', KEY = acct => PREFIX + acct;
-  const PULLED = /^meta-api_(act_\d+)_/;
+  const PULLED = /^meta-api_(act_\d+)_/, PULLED_RANGE = /_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.csv$/;
   // OWNER is the dashboard account the token and ad-account list were entered
   // under. Creating an account with "+" fires no change event, so open() and
   // every pull compare it with active() instead of relying on that event.
@@ -130,32 +130,41 @@
   }
 
   /* Ads files already loaded, with their date span. adAccount is set only for
-     files this dialog pulled. */
+     files this dialog pulled; their span also covers the requested range in
+     the file name, which can reach days with account spend but no ad rows. */
   function adsSpans() {
     return FILES.map(f => {
       if (f.type !== 'ads') return null;
-      let min = '', max = '';
+      const adAccount = (PULLED.exec(f.name) || [])[1] || null, asked = adAccount ? PULLED_RANGE.exec(f.name) : null;
+      let min = asked ? asked[1] : '', max = asked ? asked[2] : '';
       (f.rowsData || []).forEach(r => { const d = E.dayOnly(r['Reporting starts']); if (E.isDate(d)) { if (!min || d < min) min = d; if (!max || d > max) max = d; } });
-      return { file: f, start: min, end: max, adAccount: (PULLED.exec(f.name) || [])[1] || null };
+      return { file: f, start: min, end: max, adAccount };
     }).filter(x => x && x.start);
   }
   const idOf = r => String(r['Ad ID'] == null ? '' : r['Ad ID']).trim();
-  const nameOf = r => String(r['Ad name'] == null ? '' : r['Ad name']).trim().toLowerCase();
+  // The CSV formula guard puts "'" before a pulled name starting with = + - @;
+  // an export of the same ad has no such prefix.
+  const nameOf = r => String(r['Ad name'] == null ? '' : r['Ad name']).trim().replace(/^'(?=[=+\-@\t\r])/, '').toLowerCase();
   const dayIn = (start, end) => r => { const d = E.dayOnly(r['Reporting starts']); return d >= start && d <= end; };
+  /* Ad IDs that went through a spreadsheet come back rounded: scientific
+     notation, or 18 digits ending in 000. Only intact IDs can prove anything. */
+  const trustedIds = ids => ids.every(id => /^\d{6,}$/.test(id)) && !ids.every(id => id.length >= 16 && id.endsWith('000'));
   /* An uploaded export and a pull covering the same dates double count only
-     when they come from the same ad account. They are treated as different
-     accounts only on positive evidence: every export row on those dates has an
-     Ad ID, and neither an Ad ID nor an ad name matches the pull. IDs alone are
-     not enough, because a spreadsheet round trip rounds 18-digit IDs. */
+     when they come from the same ad account. Different accounts need positive
+     evidence: every export row on those dates has an Ad ID, and none matches
+     the pull. When the IDs look rounded, ad names decide instead. */
   function sameAccount(exportRows, pulledRows, start, end) {
     const mine = exportRows.filter(dayIn(start, end)), theirs = pulledRows.filter(dayIn(start, end));
     if (!mine.length || !theirs.length) return false;
     if (mine.some(r => !idOf(r))) return true;
-    const ids = new Set(theirs.map(idOf)), names = new Set(theirs.map(nameOf).filter(Boolean));
-    return mine.some(r => ids.has(idOf(r)) || names.has(nameOf(r)));
+    const ids = new Set(theirs.map(idOf));
+    if (mine.some(r => ids.has(idOf(r)))) return true;
+    if (trustedIds(mine.map(idOf))) return false;
+    const names = new Set(theirs.map(nameOf).filter(Boolean));
+    return mine.some(r => names.has(nameOf(r)));
   }
-  const spanName = (rows, account) => {
-    const days = rows.map(r => E.dayOnly(r['Reporting starts'])).filter(E.isDate).sort();
+  const spanName = (rows, account, gaps) => {
+    const days = rows.map(r => E.dayOnly(r['Reporting starts'])).concat((gaps || []).map(g => g.date)).filter(E.isDate).sort();
     return M.fileName({ account, since: days[0], until: days[days.length - 1] });
   };
   // parseText refuses text with U+FFFD as a broken encoding, and a lone
@@ -229,10 +238,10 @@
       // back with revised numbers and be added to saved history a second time.
       const before = FILES.slice(), outside = r => !dayIn(since, until)(r);
       const trimmed = new Map(overlapping.filter(x => x.adAccount === account).map(x => {
-        const rowsData = x.file.rowsData.filter(outside);
+        const rowsData = x.file.rowsData.filter(outside), gaps = (x.file.metaGaps || []).filter(g => g.date < since || g.date > until);
         if (!rowsData.length) return [x.file, null];
-        const copy = Object.assign({}, x.file, { rowsData, rows: rowsData.length, name: spanName(rowsData, account) });
-        return [x.file, withGaps(copy, (x.file.metaGaps || []).filter(g => g.date < since || g.date > until))];
+        const copy = Object.assign({}, x.file, { rowsData, rows: rowsData.length, name: spanName(rowsData, account, gaps) });
+        return [x.file, withGaps(copy, gaps)];
       }));
       if (trimmed.size) { FILES = FILES.map(f => trimmed.has(f) ? trimmed.get(f) : f).filter(Boolean); rebuildData(); renderChips(); }
       setStatus('Memuat ke dashboard…');
@@ -241,6 +250,7 @@
       if (!added) {
         const report = IMPORT_REPORTS.find(r => r.name === name), why = report && report.message ? ': ' + report.message : '.';
         if (BUSY === controller) setBusy(null);
+        setStatus('');
         // Put the earlier pull back, but never into data that changed while
         // the file was being imported.
         if (acct === active() && epoch === IMPORT_EPOCH) {
@@ -256,6 +266,9 @@
       store(patch, acct);
       withGaps(added, result.gaps);
       if (BUSY === controller) setBusy(null);
+      // Importing a large file blocks the page; an Escape pressed meanwhile is
+      // handled first, so a warning is not written into a dialog about to close.
+      await new Promise(resolve => setTimeout(resolve, 0));
       const loaded = `${added.rows} baris iklan harian dimuat dari ${label} (${since} — ${until}).`;
       if (result.gaps.length) {
         // Spend the ad rows do not explain would make ROAS look better than it
@@ -273,16 +286,16 @@
     } finally { if (BUSY === controller) setBusy(null); }
   }
   function overlapMessage(list) {
-    return `Tanggal ini sudah ada dari ${list.map(x => x.file.name).join(', ')}. Hapus file itu dari kotak Meta Ads dulu agar biaya tidak terhitung dua kali, atau pilih tanggal lain.`;
+    return `Tanggal ini sudah ada dari ${list.map(x => x.file.name).join(', ')}. Hapus file itu dari kotak Meta Ads dulu agar biaya tidak terhitung dua kali, atau pilih tanggal lain. Jika file itu dari akun iklan lain, sertakan kolom Ad ID saat mengekspornya, atau tarik akun itu juga dari Ads Manager.`;
   }
 
-  /* Delivery status and rankings describe the ad today. On a pulled file they
-     stay readable (engine.js and daily-agg.js read them by name) but are not
-     enumerable, so they are not part of the row fingerprint: a re-pulled day
-     whose numbers did not change is recognized as a duplicate by the in-memory
-     dedupe and by saved history, whatever the status is now. */
-  const VOLATILE = ['Ad delivery', 'Quality ranking', 'Engagement rate ranking', 'Conversion rate ranking'];
-  const settle = rows => rows.forEach(r => VOLATILE.forEach(k => {
+  /* Names, delivery status and rankings describe the ad today (Insights reports
+     current values for past dates). On a pulled file they stay readable
+     (engine.js and daily-agg.js read them by name) but are not enumerable, so
+     they are not part of the row fingerprint; Ad ID keeps rows distinct. A
+     re-pulled day whose numbers did not change is then a duplicate in memory
+     and in saved history, even after a rename or a status change. */
+  const settle = rows => rows.forEach(r => M.VOLATILE_COLUMNS.forEach(k => {
     if (!Object.prototype.propertyIsEnumerable.call(r, k)) return;
     const value = r[k];
     delete r[k];

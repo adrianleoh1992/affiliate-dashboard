@@ -6,11 +6,11 @@
 const assert = require('node:assert/strict');
 const { createHarness, aff, ad, upload, saveDaily, storedRows } = require('./browser.regression.test');
 
-const insight = (name, date, spend) => ({
+const insight = (name, date, spend, extra) => Object.assign({
   ad_id: String(100 + name.length), ad_name: name, adset_name: 'Set', campaign_name: 'Camp', account_currency: 'IDR',
   spend: String(spend), impressions: '1000', reach: '800', inline_link_clicks: '10', clicks: '12',
   date_start: date, date_stop: date,
-});
+}, extra || {});
 
 function graph(state) {
   return async route => {
@@ -252,7 +252,7 @@ async function main() {
     assert.equal(await page.locator('#metaSaved').isHidden(), true);
   });
 
-  test('re-saving a re-pulled day whose numbers did not change adds nothing, even after a status change', async (page, state) => {
+  test('re-saving a re-pulled day whose numbers did not change adds nothing, even after a status change or rename', async (page, state) => {
     // Alpha's ad_id is 105 ('Alpha'.length + 100).
     state.rows = [insight('Alpha', '2026-08-01', 100), insight('Alpha', '2026-08-02', 50)];
     state.status = { 105: 'ACTIVE' };
@@ -261,7 +261,9 @@ async function main() {
     await pull(page, '2026-08-01', '2026-08-02');
     await page.locator('#metaModal').waitFor({ state: 'hidden' });
     await saveDaily(page);
-    state.rows.push(insight('Alpha', '2026-08-03', 70));
+    // Paused and its campaign renamed: Insights reports today's name for past days too.
+    state.rows = state.rows.map(r => Object.assign({}, r, { campaign_name: 'Camp renamed' }));
+    state.rows.push(insight('Alpha', '2026-08-03', 70, { campaign_name: 'Camp renamed' }));
     state.status = { 105: 'PAUSED' };
     await page.locator('#btnMeta').click();
     await pull(page, '2026-08-02', '2026-08-03');
@@ -283,6 +285,18 @@ async function main() {
     await page.locator('#metaModal').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => RESULT && RESULT.kpi.spend === 130);
     assert.deepEqual(await metaFiles(page), ['other-account.csv', 'meta-api_act_555_2026-08-01_2026-08-01.csv']);
+  });
+
+  test('intact Ad IDs that differ from the pull prove another account even when an ad name repeats', async (page, state) => {
+    state.rows = [insight('Alpha', '2026-08-01', 100)];
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
+    await openMeta(page);
+    await pull(page, '2026-08-01', '2026-08-01');
+    await page.locator('#metaModal').waitFor({ state: 'hidden' });
+    await upload(page, [{ name: 'account-b.csv', rows: [Object.assign(ad('Alpha', 30), { 'Ad ID': '120253309147120616' })] }]);
+    await page.waitForFunction(() => RESULT && RESULT.kpi.spend === 130);
+    assert.deepEqual(await metaFiles(page), ['meta-api_act_555_2026-08-01_2026-08-01.csv', 'account-b.csv']);
   });
 
   test('an export whose Ad IDs were rounded by a spreadsheet still counts as the same account', async (page, state) => {

@@ -219,20 +219,23 @@ test('spend the ad rows do not explain is reported per day', async () => {
   assert.equal(totals.searchParams.get('time_increment'), '1');
 });
 
-test('current status and rankings sit on each ad\'s latest row only, so earlier rows hash the same on every re-pull', () => {
+test('current status sits on every row, and rows hash the same across re-pulls once the volatile columns are set aside', () => {
   const Daily = require('./daily-agg');
-  const rows = status => ({ account: 'act_1', since: '2026-08-01', until: '2026-08-03', delivery: new Map([['95', status]]),
-    rows: [insight('Alpha', '2026-08-01', 100), insight('Alpha', '2026-08-02', 100), insight('Alpha', '2026-08-03', 100)] });
-  const first = Imp.parseText(M.toCsv(rows('ACTIVE')), { fileName: 'a.csv' }).rows;
-  const again = Imp.parseText(M.toCsv(rows('PAUSED')), { fileName: 'b.csv' }).rows;
-  assert.deepEqual(first.map(r => r['Ad delivery']), ['', '', 'active']);
-  assert.deepEqual(first.map(r => r['Quality ranking']), ['', '', 'Above average']);
-  assert.equal(again[2]['Ad delivery'], 'inactive');
-  assert.equal(Daily.hashRow(first[0]), Daily.hashRow(again[0]));
-  assert.equal(Daily.hashRow(first[1]), Daily.hashRow(again[1]));
+  const pull = (status, campaign) => ({ account: 'act_1', since: '2026-08-01', until: '2026-08-03', delivery: new Map([['95', status]]),
+    rows: ['2026-08-01', '2026-08-02', '2026-08-03'].map(d => insight('Alpha', d, 100, { campaign_name: campaign })) });
+  const first = Imp.parseText(M.toCsv(pull('ACTIVE', 'Camp')), { fileName: 'a.csv' }).rows;
+  const again = Imp.parseText(M.toCsv(pull('PAUSED', 'Camp renamed')), { fileName: 'b.csv' }).rows;
+  assert.deepEqual(first.map(r => r['Ad delivery']), ['active', 'active', 'active']);
+  assert.deepEqual(again.map(r => r['Ad delivery']), ['inactive', 'inactive', 'inactive']);
+  // What meta-connect.js does on commit: the columns stay readable, but not enumerable.
+  const settle = rows => rows.forEach(r => M.VOLATILE_COLUMNS.forEach(k => { const v = r[k]; delete r[k]; Object.defineProperty(r, k, { value: v, enumerable: false }); }));
+  settle(first); settle(again);
+  first.forEach((r, i) => assert.equal(Daily.hashRow(r), Daily.hashRow(again[i])));
+  assert.equal(again[0]['Campaign name'], 'Camp renamed');
   const aff = { 'ID Pemesanan': '1', 'Status Pesanan': 'Selesai', 'Waktu Pemesanan': '2026-08-01 10:00:00', 'Total Komisi per Produk(Rp)': '500', 'Tag_link1': 'Alpha' };
-  const unit = E.analyze({ affiliate: [aff], ads: again, clicks: [] }, { ppn: 0 }).adUnits.find(u => u.adName === 'Alpha');
-  assert.equal(unit.delivery, 'inactive');
+  const narrow = E.analyze({ affiliate: [aff], ads: again, clicks: [] }, { ppn: 0, dateStart: '2026-08-01', dateEnd: '2026-08-01' });
+  const unit = narrow.adUnits.find(u => u.adName === 'Alpha');
+  assert.equal(unit.delivery, 'inactive', 'a narrower date range still sees the status');
   assert.equal(unit.active, false);
 });
 
