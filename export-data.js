@@ -5,9 +5,9 @@
   'use strict';
   const DATASETS={
     tags:{label:'Keputusan per tag',key:'tags',columns:[['Tag','tag'],['Keputusan','label'],['Alasan','reason'],['Biaya + PPN','spend'],['Komisi','comm'],['Komisi efektif','commEff'],['Laba efektif','netEff'],['ROAS efektif','roasEff'],['ROI (%)','roi'],['Klik Meta','clicks'],['Klik Shopee','shopeeClicks'],['CPC Meta','cpc'],['CPC ideal','cpcIdeal'],['Order','orders'],['Hari produksi matang','matureDaysProd'],['Biaya matang','matureSpend'],['ROAS matang','matureRoasEff']]},
-    units:{label:'Performa per iklan',key:'adUnits',columns:[['Nama iklan','adName'],['Tag','tag'],['Keputusan','label'],['Biaya + PPN','spend'],['Komisi efektif (alokasi)','commEff'],['Laba efektif','netEff'],['Klik Meta','clicks'],['Impresi','impr'],['CPC','cpc'],['CTR (%)','ctr'],['Order (alokasi)','orders']]},
+    units:{label:'Performa per iklan',key:'adUnits',columns:[['Nama iklan','adName'],['Ad ID','adId'],['Kampanye','campaign'],['Tag','tag'],['Keputusan','label'],['Biaya + PPN','spend'],['Komisi efektif (alokasi)','commEff'],['Laba efektif','netEff'],['Klik Meta','clicks'],['Impresi','impr'],['CPC','cpc'],['CTR (%)','ctr'],['Order (alokasi)','orders']]},
     daily:{label:'Rincian per tanggal',key:'daily',columns:[['Tanggal','date'],['Komisi','comm'],['Biaya + PPN','spend'],['Laba','net'],['ROAS','roas'],['Order','orders'],['Klik Meta','clicks'],['Klik Shopee','shopeeClicks'],['Data matang','mature']]},
-    matching:{label:'Pencocokan iklan dan tag',key:'matchLog',columns:[['Nama iklan','adName'],['Tag','tag'],['Kandidat tag','candidateTag'],['Metode','method'],['Keyakinan (0-1)','confidence'],['Biaya + PPN','spend'],['Klik','clicks']]},
+    matching:{label:'Pencocokan iklan dan tag',key:'matchLog',columns:[['Nama iklan','adName'],['Ad ID','adId'],['Kampanye','campaign'],['Tag','tag'],['Kandidat tag','candidateTag'],['Metode','method'],['Keyakinan (0-1)','confidence'],['Biaya + PPN','spend'],['Klik','clicks']]},
   };
   function filenamePart(value){return String(value||'akun').normalize('NFKC').replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g,'-').replace(/\s+/g,'-').replace(/^\.+|\.+$/g,'').slice(0,90)||'akun'}
   function cell(value){

@@ -59,6 +59,44 @@ async function main() {
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default')).atasan), 'AtasanRebecca');
   });
 
+  test('ads sharing a name stay apart, a renamed ad keeps its tag, and a leaky link is flagged', async page => {
+    const id1 = '120212345678901234', id2 = '120212345678905678', id3 = '120212345678909999';
+    await page.evaluate(id => {
+      document.getElementById('ppn').value = '0';
+      localStorage.setItem('adash_admap_v1_default', JSON.stringify({ [id]: 'Bantal' }));
+    }, id3);
+    const days = Array.from({ length: 7 }, (_, i) => `2026-08-0${i + 1}`), ads = [], clicks = [];
+    days.forEach(d => {
+      ads.push({ ...ad('Bantal', 100, d), 'Ad ID': id1, 'Campaign name': '100826 | TST | Bantal', 'Link clicks': '60' });
+      ads.push({ ...ad('Bantal', 50, d), 'Ad ID': id2, 'Campaign name': '270926 | TST | Bantal', 'Link clicks': '0' });
+      for (let i = 0; i < 5; i++) clicks.push({ ...click('Bantal', d), 'Klik ID': d + '-' + i });
+    });
+    ads.push({ ...ad('Bantal lama', 30, '2026-08-01'), 'Ad ID': id3, 'Campaign name': 'Lama' });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Bantal')] },
+      { name: 'ads.csv', rows: ads }, { name: 'clicks.csv', rows: clicks }]);
+    const units = await page.evaluate(() => RESULT.adUnits.map(u => ({ key: u.key, adId: u.adId, spend: u.spend, tag: u.tag, method: u.method })));
+    assert.equal(units.length, 3, 'one unit per Ad ID');
+    assert.deepEqual(units.map(u => u.tag), ['Bantal', 'Bantal', 'Bantal']);
+    assert.equal(units.find(u => u.adId === id3).method, 'Ad ID', 'the renamed ad keeps its remembered tag');
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('adash_admap_v1_default')));
+    assert.deepEqual(stored, { [id1]: 'Bantal', [id2]: 'Bantal', [id3]: 'Bantal' }, 'exact names are remembered per Ad ID');
+
+    // The unit table names the campaign when a name repeats, and opens each ad's own days.
+    await page.evaluate(() => document.querySelector('[data-tab="units"], [data-tab="unit"]') && document.querySelector('[data-tab="units"], [data-tab="unit"]').click());
+    const rows = page.locator('#tblUnit tbody tr.dayrow');
+    assert.equal(await rows.count(), 3);
+    const texts = await rows.allInnerTexts();
+    assert.ok(texts.some(t => t.includes('100826 | TST | Bantal')) && texts.some(t => t.includes('270926 | TST | Bantal')));
+    const second = rows.filter({ hasText: '270926' });
+    await second.evaluate(tr => tr.click());
+    assert.match(await page.locator('#tblUnit tr.daydetail').innerText(), /Rp50/);
+
+    // 35 Shopee clicks for 430 Meta link clicks over 7 days: the mapping is flagged.
+    await page.locator('#btnMap').click();
+    assert.match(await page.locator('#tblMatch').innerText(), /Klik masuk rendah: klik Shopee di tag ini hanya 8% dari klik Meta/);
+    assert.equal(await page.locator('#mapAlert').innerText(), '3');
+  });
+
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {
     await upload(page, [{ name: 'existing.csv', rows: [aff('1')] }]);
     await upload(page, [{ name: 'mixed.csv', rows: [aff('2'), { ...aff('3'), 'Total Komisi per Pesanan(Rp)': 'Rp oops' }] }]);
