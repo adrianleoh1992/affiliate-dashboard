@@ -8,7 +8,7 @@
 --
 -- How a later upload meets saved history (DailyAgg, "merge_version"):
 --   2  revisions replace: a commission record holds one part per order, and
---      an order in a new file replaces its saved part (Tertunda → Selesai
+--      an order in a new file replaces its saved part (Tertunda -> Selesai
 --      updates instead of adding); an ad row with a Meta Ad ID replaces the
 --      saved (date, Ad ID) row.
 --   1  unseen rows add: clicks and Meta exports without IDs are deduplicated
@@ -35,7 +35,7 @@
 create schema if not exists dashboard;
 revoke all on schema dashboard from public, anon, authenticated;
 
--- ── Value checks (mirror DailyStore.validateBackup) ────────────────────────
+-- -- Value checks (mirror DailyStore.validateBackup) ------------------------
 -- A label as validateBackup's string(): at most max UTF-16 units, no control
 -- characters other than tab/LF/CR, and not only whitespace unless allowed.
 create or replace function dashboard._label_ok(t text, max_units int, allow_empty boolean default false) returns boolean
@@ -43,10 +43,10 @@ language sql immutable set search_path = pg_catalog, pg_temp as $$
   select t is not null
     and char_length(t) + char_length(t) - char_length(regexp_replace(t, '[\U00010000-\U0010FFFF]', '', 'g')) <= max_units
     and t !~ '[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]'
-    and (allow_empty or t ~ '[^\t\n\u000b\f\r    -     　﻿]')
+    and (allow_empty or t ~ '[^\t\n\u000b\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]')
 $$;
 
--- abs() of NaN and ±Infinity is never <= the bound, so this also rejects them.
+-- abs() of NaN and +/-Infinity is never <= the bound, so this also rejects them.
 create or replace function dashboard._num_ok(x double precision) returns boolean
 language sql immutable set search_path = pg_catalog, pg_temp as $$
   select x is not null and abs(x) <= 9007199254740991
@@ -248,7 +248,7 @@ create index daily_affiliate_rev on dashboard.daily_affiliate (account_id, rev);
 create index daily_ads_rev on dashboard.daily_ads (account_id, rev);
 create index daily_clicks_rev on dashboard.daily_clicks (account_id, rev);
 
--- ── Access ─────────────────────────────────────────────────────────────────
+-- -- Access -----------------------------------------------------------------
 create or replace function dashboard.is_member() returns boolean
 language sql stable security definer set search_path = dashboard, pg_temp as $$
   select exists (select 1 from dashboard.team_members where user_id = auth.uid())
@@ -266,7 +266,7 @@ alter table dashboard.day_deletions enable row level security;
 -- No policies: with RLS on and no grants, direct table access is denied.
 revoke all on all tables in schema dashboard from public, anon, authenticated;
 
--- ── Helpers ────────────────────────────────────────────────────────────────
+-- -- Helpers ----------------------------------------------------------------
 create or replace function dashboard._iso(ts timestamptz) returns text
 language sql immutable set search_path = pg_catalog, pg_temp as $$
   select to_char(ts at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -336,7 +336,7 @@ begin
   end if;
 end $$;
 
--- ── Reads ──────────────────────────────────────────────────────────────────
+-- -- Reads ------------------------------------------------------------------
 -- Account list with enough to decide whether a browser cache is current.
 create or replace function public.daily_list_accounts()
 returns table (id bigint, kind text, name text, revision bigint, aggregates bigint, created_at text)
@@ -426,7 +426,7 @@ begin
   return result || jsonb_build_object('reset', false);
 end $$;
 
--- ── Writes ─────────────────────────────────────────────────────────────────
+-- -- Writes -----------------------------------------------------------------
 create or replace function public.daily_ensure_account(p_name text) returns jsonb
 language plpgsql security definer set search_path = dashboard, pg_temp as $$
 declare a dashboard.accounts;

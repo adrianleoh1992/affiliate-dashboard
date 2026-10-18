@@ -426,6 +426,7 @@ test('the database refuses history a browser could not load back', async () => {
   const emoji = '\u{1F600}'.repeat(1025);
   const broken = {
     'whitespace tag': d => { d.affiliate[0].tag = ' \t '; },
+    'Unicode whitespace tag': d => { d.affiliate[0].tag = '\u3000\u00a0\ufeff'; },
     'control character': d => { d.affiliate[0].tag = 'a\u0007'; },
     'label longer than 2048 UTF-16 units': d => { d.affiliate[0].tag = emoji; },
     'unsafe number': d => { d.affiliate[0].gmv = 2 ** 60; },
