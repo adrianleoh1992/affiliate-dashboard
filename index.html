@@ -65,7 +65,7 @@
           <div><b>Meta Ads</b><small>Ads Manager → Export, breakdown per hari</small></div>
           <button class="btn ghost sm zone-del hidden" data-zdel="ads">Hapus</button></div>
         <div class="zone-body"><div class="chips" data-zchips="ads"></div>
-          <button class="btn sm zone-pick" data-zpick="ads" type="button">+ Pilih file</button></div>
+          <div class="button-row"><button class="btn sm zone-pick" data-zpick="ads" type="button">+ Pilih file</button><button class="btn sm" id="btnMeta" type="button">Tarik dari Ads Manager</button></div></div>
       </div>
       <div class="zone" data-zone="clicks">
         <div class="zone-head"><span class="zn">3</span>
@@ -429,6 +429,24 @@
   </div>
 </div>
 
+<div class="modal" id="metaModal">
+  <div class="modal-box narrow">
+    <div class="card-head"><h2>Tarik dari Meta Ads Manager</h2><button class="btn ghost" data-close>Tutup</button></div>
+    <p class="export-context" id="metaContext"></p>
+    <p class="hint">Data iklan harian per iklan ditarik langsung dari Marketing API, lalu diperiksa seperti file ekspor. Token hanya dikirim ke Meta, tidak ke server lain. Cara membuat token ada di README bagian <b>Koneksi Meta Ads Manager</b>.</p>
+    <div class="field"><label for="metaToken">Token akses (izin ads_read)</label><input id="metaToken" type="password" autocomplete="off" spellcheck="false" placeholder="EAAB…"></div>
+    <label class="check-row"><input type="checkbox" id="metaRemember"> Ingat token di browser ini</label>
+    <p class="hint">Tanpa centang, token hilang saat halaman dimuat ulang. Dengan centang, token tersimpan di localStorage perangkat ini; jangan centang di komputer bersama.</p>
+    <div class="button-row"><button class="btn sm" id="btnMetaAccounts" type="button">Muat akun iklan</button><button class="btn ghost sm" id="btnMetaForget" type="button">Hapus token</button></div>
+    <div class="field"><label for="metaAccount">Akun iklan</label><select id="metaAccount"><option value="">Muat akun iklan dulu</option></select></div>
+    <div class="ctrls"><div class="field"><label for="metaSince">Dari</label><input type="date" id="metaSince"></div><div class="field"><label for="metaUntil">Sampai</label><input type="date" id="metaUntil"></div></div>
+    <p class="hint">Default 7 hari sampai kemarin. Angka hari ini masih berubah; jika ditarik lagi, tarikan lama dari akun iklan yang sama diganti, bukan ditambahkan.</p>
+    <p class="inline-error hidden" id="metaError" role="alert"></p>
+    <p class="hint" id="metaStatus" role="status" aria-live="polite"></p>
+    <div class="button-row"><button class="btn primary" id="btnMetaPull" type="button" disabled>Tarik data</button><button class="btn ghost hidden" id="btnMetaCancel" type="button">Batalkan</button></div>
+  </div>
+</div>
+
 <div class="modal" id="setModal">
   <div class="modal-box">
     <div class="card-head"><h2>Setelan Analisis</h2>
@@ -490,6 +508,8 @@
 <script src="import-pipeline.js"></script>
 <script src="export-data.js"></script>
 <script src="app.js"></script>
+<script src="meta-api.js"></script>
+<script src="meta-connect.js"></script>
 <script src="daily-layer.js"></script>
 </body>
 </html>

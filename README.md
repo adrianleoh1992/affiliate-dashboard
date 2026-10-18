@@ -15,7 +15,8 @@ npm start
 ```
 
 Pustaka PapaParse, Chart.js, jsPDF, dan AutoTable tersedia di `vendor/`; halaman aplikasi tidak
-meminta skrip, font, atau data dari pihak ketiga. `index-daily.html` mengarah ke
+meminta skrip, font, atau data dari pihak ketiga, kecuali `graph.facebook.com` saat Anda
+sendiri menekan **Tarik dari Ads Manager**. `index-daily.html` mengarah ke
 halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai
 arsip pembanding dan tidak disertakan dalam build produksi. Pustaka dan font PDF
 baru dimuat saat membuat PDF agar pembukaan dashboard tetap ringan.
@@ -57,6 +58,63 @@ dan contoh baris, sementara kesalahan selalu ditampilkan lebih dahulu.
 Rentang tanggal pilihan sendiri dipertahankan saat menambah file; pilihan
 semua tanggal mengikuti cakupan data terbaru. Pencarian tag dan filter keputusan
 membantu mempersempit tabel. Tombol metrik menampilkan kolom tambahan.
+
+## Koneksi Meta Ads Manager
+
+Di kotak **Meta Ads**, tombol **Tarik dari Ads Manager** mengambil laporan harian
+per iklan langsung dari Meta Marketing API (Graph API `v24.0`), tanpa ekspor CSV.
+Hasilnya diubah ke kolom yang sama dengan ekspor Ads Manager (breakdown
+Waktu → Hari) dan melewati pemeriksaan, pencocokan tag, serta alur **Simpan**
+yang sama dengan file unggahan. Kolom yang terisi: tanggal, nama iklan/ad set/
+kampanye, biaya, impresi, jangkauan, frekuensi, klik tautan, klik semua, CTR, CPM,
+landing page view, status penayangan iklan saat ini, dan tiga peringkat kualitas.
+
+Browser memanggil `graph.facebook.com` langsung. Tidak ada backend, jadi token
+hanya dikirim ke Meta. Token disimpan di memori tab; jika **Ingat token di browser
+ini** dicentang, token disimpan di localStorage perangkat itu per akun dashboard.
+Jangan mencentangnya di komputer bersama. **Hapus token** menghapusnya.
+
+### Yang perlu Anda siapkan sekali
+
+Disarankan token **System User** karena dapat dibuat tanpa kedaluwarsa:
+
+1. Di [developers.facebook.com](https://developers.facebook.com/apps), buat aplikasi
+   tipe Bisnis dan hubungkan ke portofolio bisnis yang memiliki akun iklan. Tambahkan
+   produk/kasus penggunaan Marketing API. Mode pengembangan sudah cukup untuk membaca
+   akun iklan milik bisnis sendiri; App Review tidak diperlukan untuk itu.
+2. Di Meta Business Suite → Pengaturan Bisnis → Pengguna → **Pengguna sistem**, buat
+   pengguna sistem, lalu **Tetapkan aset**: akun iklan (cukup akses melihat performa)
+   dan aplikasi tadi.
+3. Pada pengguna sistem itu, pilih **Buat token**, pilih aplikasi, masa berlaku
+   **Tidak pernah**, dan centang izin `ads_read` saja. Salin token, lalu tempel di
+   dialog dashboard dan tekan **Muat akun iklan**.
+
+Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan izin
+`ads_read`. Token ini kedaluwarsa dalam hitungan jam (token jangka panjang sekitar
+60 hari), sehingga perlu ditempel ulang.
+
+### Perilaku dan batasan
+
+- Default rentang adalah 7 hari sampai kemarin, karena angka hari berjalan masih
+  berubah. Satu tarikan maksimum 400 hari dan dipecah per 14 hari.
+- Menarik ulang dari akun iklan yang sama **mengganti** tarikan sebelumnya yang
+  tanggalnya bertumpuk (rentang diperluas agar hari lain tidak hilang), bukan
+  menambahkannya. Jika tanggal itu sudah ada dari CSV Meta yang diunggah, penarikan
+  ditolak agar biaya tidak terhitung dua kali; hapus file itu terlebih dahulu.
+- Untuk riwayat yang sudah **Disimpan**, aturan revisi tetap sama dengan CSV: bila
+  angka hari yang sudah tersimpan berubah, hapus tanggal itu di Data Tersimpan lalu
+  simpan ulang. Menyimpan tarikan revisi langsung dapat menggandakan biaya hari itu.
+- Hanya akun iklan bermata uang IDR yang diterima.
+- Aplikasi dalam mode pengembangan memiliki batas permintaan yang lebih rendah.
+  Jika muncul pesan batas permintaan, tunggu beberapa menit atau persempit rentang.
+- Jika pengaturan aplikasi **Require App Secret** aktif, panggilan dari browser
+  ditolak karena app secret tidak boleh berada di browser. Biarkan nonaktif.
+- Nama iklan yang diawali `=`, `+`, `-`, atau `@` diberi awalan `'` oleh pengaman
+  formula CSV, sehingga mapping manual untuk nama tersebut perlu ditulis ulang.
+- Status penayangan adalah status iklan saat ini, sama seperti kolom ekspor Ads
+  Manager, bukan status pada tanggal historis.
+- Pengujian memakai respons Graph API tiruan. Belum ada uji terhadap akun Meta asli
+  dari repositori ini.
 
 ## Ekspor analisis dan PDF
 
@@ -197,6 +255,8 @@ format ekspor dan kondisi browser telah tercakup.
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
 | `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
 | `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
+| `meta-api.js` | Klien Marketing API dan konversi ke format ekspor Meta |
+| `meta-connect.js` | Dialog Tarik dari Ads Manager |
 | `pdf-export.js` | Susunan laporan visual PDF dan tabel multi halaman |
 | `pdf-charts.js` | Grafik tren, perbandingan tag, dan peta keputusan vektor |
 | `app.js`, `index.html`, `styles.css` | Antarmuka, impor, snapshot, grafik, ekspor |
