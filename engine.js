@@ -1062,9 +1062,18 @@ function analyze(data, options) {
       : verdictFor(spend, commEff, daysProd, dailyRows, false);
     /* Kept apart from reason, so the real STOP/SCALE reason stays visible. Not
        stored in snapshots: validSnapshot accepts no extra string fields. */
-    const linkNote = !leak || !leak.reliable ? ''
-      : leak.severity === 'bad' ? `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link${v.status === 'stop' ? ' sebelum dimatikan' : ''}`
-      : leak.severity === 'over' ? `klik Shopee ${Math.round(leak.pct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas` : '';
+    /* Period totals (leak) can look healthy while the days the ad ran do not:
+       organic clicks on no-spend days fill the gap. capture counts only those
+       days, so its "Klik masuk rendah" also earns the cek-link note, ahead of
+       'over', which those same organic clicks would explain. Notes only; the
+       money on the action cards stays on leak. */
+    const checkFirst = v.status === 'stop' ? ' sebelum dimatikan' : '';
+    const linkTone = leak && leak.reliable && leak.severity === 'bad' || capture && capture.low ? 'bad'
+      : leak && leak.reliable && leak.severity === 'over' ? 'over' : '';
+    const linkNote = linkTone === 'over' ? `klik Shopee ${Math.round(leak.pct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas`
+      : linkTone !== 'bad' ? ''
+      : leak && leak.reliable && leak.severity === 'bad' ? `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link${checkFirst}`
+      : `klik masuk rendah: hanya ${Math.round(capture.pct)}% klik iklan sampai Shopee selama iklan jalan — cek link${checkFirst}`;
 
     let bidHint = '';
     if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
@@ -1090,7 +1099,7 @@ function analyze(data, options) {
       shopeeClicks, cpcShopee, winSpend, winClicks,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
-      leak, capture, status: v.status, label: v.label, reason: v.reason, linkNote, streak: v.streak, borderAt: v.borderAt, bidHint,
+      leak, capture, status: v.status, label: v.label, reason: v.reason, linkNote, linkTone, streak: v.streak, borderAt: v.borderAt, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
@@ -1326,8 +1335,9 @@ function analyze(data, options) {
       commShare: paidComm > 0 ? cm / paidComm * 100 : 0, roasEff: sp > 0 ? cm / sp : 0 };
   };
   // Paid ad names absent from the commission report count as commission 0;
-  // some are naming mismatches, so the tail ROAS is a lower bound.
-  const affSet = new Set(affiliateTags);
+  // some are naming mismatches, so the tail ROAS is a lower bound. commTags,
+  // not affiliateTags: a sub_id seen only in the click report has no commission.
+  const affSet = new Set(commTags);
   const noCommTags = paidSorted.filter(t => !affSet.has(t.tag));
   const noCommSpend = noCommTags.reduce((s, t) => s + t.spend, 0);
   const concentration = paidSorted.length ? {

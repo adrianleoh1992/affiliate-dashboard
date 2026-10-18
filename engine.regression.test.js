@@ -631,6 +631,24 @@ near(noClick.byClick.missingEff, 150);
     clicks: days.flatMap(d => clicksOn(60, d, 'Varo')) });
   assert.equal(healthy.tags.find(t => t.tag === 'Varo').capture.low, false);
   assert.equal(analyze({ affiliate: [aff('o1')], ads }).tags.find(t => t.tag === 'A').capture, null, 'no click report, no verdict');
+  // The period total looks fine (organic clicks on the no-spend day), yet the
+  // tag row still says to check the link, with capture's number.
+  const lowTag = low.tags.find(t => t.tag === 'Varo');
+  assert.equal(lowTag.leak.severity, 'ok');
+  assert.match(lowTag.linkNote, /^klik masuk rendah: hanya 10% klik iklan sampai Shopee selama iklan jalan — cek link/);
+  assert.equal(lowTag.linkTone, 'bad', 'shown as a warning, not as extra traffic');
+  assert.equal(low.kpi.leakTags, 0, 'the money on the action cards stays on leak');
+  assert.equal(healthy.tags.find(t => t.tag === 'Varo').linkNote, '');
+}
+{
+  // A paid tag the click report knows but the commission report does not
+  // still counts as "not in the commission report".
+  const data = { affiliate: [aff('o1', 3000, { 'Tag_link1': 'Alpha' })],
+    ads: [ad('2026-08-01', 1000, { 'Ad name': 'Alpha' }), ad('2026-08-01', 500, { 'Ad name': 'Bravo' }), ad('2026-08-01', 300, { 'Ad name': 'Charlie' })] };
+  const without = analyze(data).actions.concentration.noComm;
+  const withClicks = analyze({ ...data, clicks: [click('2026-08-01', { 'Tag_link': 'Bravo----' })] }).actions.concentration.noComm;
+  assert.deepEqual([without.n, without.spend], [2, 800]);
+  assert.deepEqual([withClicks.n, withClicks.spend], [2, 800]);
 }
 
 /* ── Review round 1 ────────────────────────────────────────────────────── */
