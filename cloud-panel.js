@@ -10,7 +10,7 @@
   const shared = () => window.__cloudStore || null;
   const name = () => (window.DailyLayer && window.DailyLayer.account()) || '';
   const toast = message => window.toast && window.toast(message);
-  let BUSY = false;
+  let BUSY = false, EMAIL = '';
 
   function mount() {
     let card = $('cloudCard');
@@ -46,7 +46,7 @@
         <p class="hint">Masuk untuk memakai riwayat harian yang sama dengan tim untuk semua akun. Akun login dibuat oleh admin di Supabase.
           Tanpa masuk, data hanya tersimpan di browser ini.</p>
         <form id="cloudLogin" class="ctrls ctrls-inline">
-          <div class="field"><label for="cloudEmail">Email</label><input id="cloudEmail" type="email" autocomplete="username" required></div>
+          <div class="field"><label for="cloudEmail">Email</label><input id="cloudEmail" type="email" autocomplete="username" value="${esc(EMAIL)}" required></div>
           <div class="field"><label for="cloudPass">Kata sandi</label><input id="cloudPass" type="password" autocomplete="current-password" required></div>
           <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit" ${BUSY ? 'disabled' : ''}>Masuk</button></div>
         </form>`;
@@ -54,6 +54,7 @@
         event.preventDefault();
         // Read before act() re-renders the form.
         const email = $('cloudEmail').value.trim(), password = $('cloudPass').value;
+        EMAIL = email;
         act(async () => {
           await client.signIn(email, password);
           await store.sync(name());
@@ -62,7 +63,10 @@
       };
       return;
     }
-    const status = store.status(name());
+    const account = name();
+    const status = store.status(account);
+    // Signed in from another tab, or statuses were reset: check this account.
+    if (account && status.state === 'checking' && !store.pending.has(account)) store.sync(account).catch(() => {});
     const [title, detail] = (TEXT[status.state] || TEXT.checking)(status);
     const buttons = [];
     if (status.state === 'unlinked' && status.localRows) buttons.push('<button class="btn sm primary" data-cloud="push">Kirim riwayat lokal</button>');
@@ -89,9 +93,16 @@
       return act(async () => { await store.usePulled(account); toast('Memakai data database bersama'); });
     }
     if (action === 'push') {
-      const conflict = store.status(account).state === 'conflict';
-      if (conflict && !confirm(`Ganti seluruh riwayat "${account}" di database bersama dengan data browser ini?\n\nData yang disimpan anggota tim lain untuk akun ini akan hilang.`)) return;
-      return act(async () => { await store.push(account); window.DailyLayer && window.DailyLayer.refresh(); toast('Riwayat lokal terkirim ke database bersama'); });
+      // The revision on screen is the one the user decides on; the database
+      // refuses the replacement if anyone saved after it.
+      const status = store.status(account);
+      if (!['unlinked', 'conflict'].includes(status.state)) return;
+      const expected = status.remote ? status.remote.revision : 0;
+      const question = status.state === 'conflict'
+        ? `Ganti seluruh riwayat "${account}" di database bersama dengan data browser ini?\n\nData yang disimpan anggota tim lain untuk akun ini akan hilang.`
+        : `Kirim ${nf(status.localRows)} agregat riwayat "${account}" dari browser ini ke database bersama?\n\nSetelah itu seluruh tim memakai riwayat ini.`;
+      if (!confirm(question)) return;
+      return act(async () => { await store.push(account, expected); window.DailyLayer && window.DailyLayer.refresh(); toast('Riwayat lokal terkirim ke database bersama'); });
     }
   }
 

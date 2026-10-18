@@ -14,11 +14,15 @@ for (const file of assets) fs.cpSync(path.join(root, file), path.join(out, file)
 const supabase = { url: (process.env.SUPABASE_URL || '').trim(), anonKey: (process.env.SUPABASE_ANON_KEY || '').trim() };
 if (supabase.url || supabase.anonKey) {
   if (!/^https:\/\/[^/\s]+$/.test(supabase.url) || !supabase.anonKey) throw new Error('SUPABASE_URL (https://…) dan SUPABASE_ANON_KEY harus diisi bersama');
-  if (/service_role|^sb_secret_/.test(supabase.anonKey) || /"role"\s*:\s*"service_role"/.test(jwtPayload(supabase.anonKey)))
-    throw new Error('SUPABASE_ANON_KEY berisi kunci service_role/secret; pakai anon atau publishable key');
+  // Allowlist: a publishable key, or a legacy JWT whose role is anon. Anything
+  // else (service_role, sb_secret_, a typo) would end up in public JavaScript.
+  if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(supabase.anonKey) && jwtRole(supabase.anonKey) !== 'anon')
+    throw new Error('SUPABASE_ANON_KEY harus publishable key (sb_publishable_…) atau anon key; kunci service_role/secret tidak boleh dipakai');
   fs.writeFileSync(path.join(out, 'supabase-config.js'), `window.SUPABASE_CONFIG = ${JSON.stringify(supabase)};\n`);
 }
-function jwtPayload(token) {
-  try { return Buffer.from(token.split('.')[1] || '', 'base64url').toString('utf8'); } catch (_) { return ''; }
+function jwtRole(token) {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')).role || null; } catch (_) { return null; }
 }
 console.log('Static application built in dist/.' + (supabase.url ? ' Database bersama: ' + supabase.url : ''));

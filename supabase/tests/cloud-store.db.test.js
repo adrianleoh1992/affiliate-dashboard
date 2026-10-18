@@ -38,7 +38,7 @@ const literal = value => { const tag = '$j' + Math.random().toString(36).slice(2
 
 const USERS = { 'admin@example.com': '00000000-0000-0000-0000-000000000001',
   'tim@example.com': '00000000-0000-0000-0000-000000000002', 'luar@example.com': '00000000-0000-0000-0000-000000000003' };
-const TYPES = { p_account_id: 'bigint', p_kind: 'text', p_expected_revision: 'bigint', p_date: 'date', p_name: 'text',
+const TYPES = { p_account_id: 'bigint', p_kind: 'text', p_expected_revision: 'bigint', p_since: 'bigint', p_date: 'date', p_name: 'text',
   p_records: 'jsonb', p_hashes: 'jsonb', p_upload: 'jsonb', p_backup: 'jsonb' };
 
 function asUser(uid, sql) {
@@ -85,16 +85,19 @@ class MemoryStorage {
   removeItem(key) { this.map.delete(key); }
 }
 
-// One "browser": its own IndexedDB, localStorage and session.
+// One "browser": its own IndexedDB, localStorage and session. log lists the
+// endpoints it called.
 async function browser(email) {
   global.indexedDB = new IDBFactory();
   const local = await DailyStore.open();
-  const storage = new MemoryStorage(), changes = [];
-  const client = new CloudStore.Client({ url: 'https://test.supabase.co', anonKey: 'anon', storage, fetch: fakeFetch() });
+  const storage = new MemoryStorage(), changes = [], log = [];
+  const client = new CloudStore.Client({ url: 'https://test.supabase.co', anonKey: 'anon', storage, fetch: fakeFetch(log) });
   if (email) await client.signIn(email, 'rahasia');
   const store = CloudStore.attach(local, { client, storage, onChange: change => changes.push(change) });
-  return { local, store, client, changes };
+  return { local, store, client, changes, log };
 }
+const remoteRows = (name, kind) => Number(psql(DB_URL, `select count(*) from dashboard.daily_${kind} x
+  join dashboard.accounts a on a.id = x.account_id where a.name = '${name}'`));
 const NAME = 'Beautyisus';
 async function account(b, name = NAME) {
   const acct = await b.store.ensureAccount('shopee', name);
@@ -229,7 +232,7 @@ test('local history uploads into an empty shared account', async () => {
   await c.client.signIn('admin@example.com', 'rahasia');
   await c.store.sync('Rizqie');
   assert.equal(c.store.status('Rizqie').state, 'unlinked');
-  await c.store.push('Rizqie');
+  await c.store.push('Rizqie', 0);
   const b = await browser('tim@example.com');
   const acctB = await account(b, 'Rizqie');
   assert.deepEqual(await snapshot(b.local, acctB), await snapshot(c.local, acct));
@@ -261,6 +264,170 @@ test('restoring a backup while signed in replaces the shared account', async () 
   assert.equal((await a.local.range(acctA.id, 'ads', '2026-09-02', '2026-09-02')).length, 0);
 });
 
+test('later syncs download only what changed', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a), acctB = await account(b);
+  await save(b, acctB, 'clicks', [click('08:00:00', '2026-09-07')]);
+  await b.store.deleteDay(acctB.id, 'ads', '2026-09-01');
+  a.log.length = 0;
+  await a.store.sync(NAME);
+  assert.ok(a.log.includes('/rest/v1/rpc/daily_changes'));
+  assert.ok(!a.log.includes('/rest/v1/rpc/daily_export_account'), 'no full download');
+  assert.deepEqual(await snapshot(a.local, acctA), await snapshot(b.local, acctB));
+  assert.deepEqual(await a.local.counts(acctA.id), await b.local.counts(acctB.id));
+  // A cache whose counts disagree with the database reloads everything.
+  await a.local.transaction(['clicks'], 'readwrite', async tx => { tx.objectStore('clicks').clear(); });
+  await b.store.deleteDay(acctB.id, 'ads', '2026-09-02');
+  a.log.length = 0;
+  await a.store.sync(NAME);
+  assert.ok(a.log.includes('/rest/v1/rpc/daily_export_account'));
+  assert.deepEqual(await snapshot(a.local, acctA), await snapshot(b.local, acctB));
+});
+
+test('an emptied shared account is never refilled from an old copy', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a, 'Kosong');
+  await save(a, acctA, 'ads', [ad('2026-09-11')]);
+  const acctB = await account(b, 'Kosong');
+  assert.equal((await b.local.range(acctB.id, 'ads')).length, 1);
+  await a.store.deleteDay(acctA.id, 'ads', '2026-09-11');
+  await b.store.sync('Kosong');
+  assert.equal(b.store.status('Kosong').state, 'synced');
+  assert.equal((await b.local.range(acctB.id, 'ads')).length, 0, 'a mirrored cache follows the deletion');
+  // A copy saved while signed out is not a revision of the shared account.
+  const c = await browser(null);
+  const acctC = await account(c, 'Kosong');
+  await save(c, acctC, 'ads', [ad('2026-09-11')]);
+  await c.client.signIn('tim@example.com', 'rahasia');
+  await c.store.sync('Kosong');
+  const seen = c.store.status('Kosong');
+  assert.equal(seen.state, 'conflict');
+  await assert.rejects(save(c, acctC, 'ads', [ad('2026-09-12')]), /berbeda dengan database bersama/);
+  assert.equal(remoteRows('Kosong', 'ads'), 0);
+  // Replacing checks the revision the user decided on.
+  await save(a, acctA, 'ads', [ad('2026-09-13')]);
+  await assert.rejects(c.store.push('Kosong', seen.remote.revision), /berubah sejak diperiksa/);
+  assert.equal(remoteRows('Kosong', 'ads'), 1, "the teammate's newer save is kept");
+  assert.equal(c.store.status('Kosong').state, 'conflict');
+  await c.store.push('Kosong', c.store.status('Kosong').remote.revision);
+  await a.store.sync('Kosong');
+  assert.deepEqual(await snapshot(a.local, acctA), await snapshot(c.local, acctC));
+});
+
+test('history from before mergeable aggregates is refused, not shared', async () => {
+  const c = await browser(null);
+  const acct = await account(c, 'Lama');
+  await c.local.transaction(['ads'], 'readwrite', async tx => {
+    tx.objectStore('ads').add({ account_id: acct.id, date: '2026-08-01', ad_unit: 'Lama', spend: 1, impressions: 1, reach: 1,
+      clicks: 0, shop_clicks: 0, lpv: 0, results: 0, rows: 1, cpm: 0, cpc: 0, ctr: 0, delivery: '' });
+  });
+  await c.client.signIn('admin@example.com', 'rahasia');
+  await c.store.sync('Lama');
+  assert.equal(c.store.status('Lama').state, 'unlinked');
+  await assert.rejects(c.store.push('Lama', 0), /format penggabungan baru: 2026-08-01/);
+  await assert.rejects(save(c, acct, 'ads', [ad('2026-09-01')]), /format penggabungan baru/);
+  assert.ok(!(await c.client.rpc('daily_list_accounts')).some(row => row.name === 'Lama'));
+  await c.store.deleteDay(acct.id, 'ads', '2026-08-01');
+  await save(c, acct, 'ads', [ad('2026-09-01')]);
+  assert.equal(c.store.status('Lama').state, 'synced');
+});
+
+test('the database refuses history a browser could not load back', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a);
+  const { data } = DailyStore.validateBackup(await a.local.exportAccount(acct.id));
+  const link = () => a.store.state.get(NAME);
+  const emoji = '\u{1F600}'.repeat(1025);
+  const broken = {
+    'whitespace tag': d => { d.affiliate[0].tag = ' \t '; },
+    'control character': d => { d.affiliate[0].tag = 'a\u0007'; },
+    'label longer than 2048 UTF-16 units': d => { d.affiliate[0].tag = emoji; },
+    'unsafe number': d => { d.affiliate[0].gmv = 2 ** 60; },
+    'order identity': d => { d.affiliate[0].order_keys = ['nothex'.padEnd(16, 'x')]; d.affiliate[0].orders = 1; },
+    'order count': d => { d.affiliate[0].orders += 1; },
+    'clicks map': d => { d.clicks[0].by_region = [d.clicks[0].clicks]; },
+    'fractional clicks map': d => { const [key] = Object.keys(d.clicks[0].by_source); d.clicks[0].by_source[key] += 0.5; },
+    'undated fingerprint': d => { d.rowhashes[0].date = null; },
+    'missing fingerprint': d => { d.rowhashes.pop(); },
+    'file name control character': d => { d.uploads[0].file_name = 'x\u0001.csv'; },
+    'ad delivery control character': d => {
+      d.ads.push({ account_id: d.account.id, date: '2026-09-30', ad_unit: 'X', spend: 1, impressions: 1, reach: 1, clicks: 0,
+        shop_clicks: 0, lpv: 0, results: 0, rows: 1, cpm: 0, cpc: 0, ctr: 0, delivery: 'a\u0002', merge_version: 1 });
+      d.rowhashes.push({ account_id: d.account.id, kind: 'ads', hash: 'h-ad-ctrl', date: '2026-09-30' });
+    },
+  };
+  assert.ok(data.affiliate.length && data.clicks.length && data.uploads.length);
+  for (const [label, mutate] of Object.entries(broken)) {
+    const bad = JSON.parse(JSON.stringify(data));
+    mutate(bad);
+    assert.throws(() => DailyStore.validateBackup(bad), Error, 'browser rejects: ' + label);
+    await assert.rejects(a.client.rpc('daily_replace_account', { p_account_id: link().remoteId,
+      p_expected_revision: link().revision, p_backup: bad }), Error, 'database rejects: ' + label);
+  }
+  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: 'clicks',
+    p_expected_revision: link().revision, p_records: [{ date: '2026-09-29', tag: 'x\u0003', clicks: 1, by_region: { a: 1 }, by_source: { b: 1 } }],
+    p_hashes: [{ hash: 'h-ctrl', date: '2026-09-29' }], p_upload: { file_hash: 'f-ctrl', rows: 1 } }));
+  const snapshot = await a.client.rpc('daily_export_account', { p_account_id: link().remoteId });
+  assert.equal(snapshot.revision, link().revision, 'nothing was written');
+  const { revision, reset_revision, totals, ...backup } = snapshot;
+  DailyStore.validateBackup(backup);
+});
+
+test('a save that committed is reported even when the refresh after it fails', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a, 'Tarik');
+  await save(a, acct, 'clicks', [click('07:00:00', '2026-09-08')]);
+  const real = a.client.fetch;
+  let failures = 0;
+  a.client.fetch = async (url, init) => {
+    if (/daily_changes|daily_export_account/.test(url)) { failures++; return { ok: false, status: 503, text: async () => '{"message":"Service Unavailable"}' }; }
+    return real(url, init);
+  };
+  const result = await save(a, acct, 'clicks', [click('07:30:00', '2026-09-08')], 'clicks-2.csv');
+  assert.deepEqual(result, { added: 0, updated: 1, duplicates: 0 });
+  assert.ok(failures > 0);
+  assert.equal(a.store.status('Tarik').state, 'error');
+  assert.match(a.store.status('Tarik').message, /Tersimpan di database bersama/);
+  await assert.rejects(save(a, acct, 'clicks', [click('08:30:00', '2026-09-08')], 'clicks-3.csv'), /Belum ada yang disimpan/);
+  a.client.fetch = real;
+  await a.store.sync('Tarik');
+  assert.equal(a.store.status('Tarik').state, 'synced');
+  const [row] = await a.local.range(acct.id, 'clicks', '2026-09-08', '2026-09-08');
+  assert.equal(row.clicks, 2);
+});
+
+test('sessions survive a busy login service and follow other tabs', async () => {
+  const storage = new MemoryStorage(), calls = [];
+  let answer = { status: 503, body: { message: 'upstream' } };
+  const client = new CloudStore.Client({ url: 'https://test.supabase.co', anonKey: 'anon', storage,
+    fetch: async (url, init) => {
+      calls.push(new URL(url).pathname + ' ' + (init.headers.Authorization || ''));
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const { status, body } = typeof answer === 'function' ? answer(url, init) : answer;
+      return { ok: status < 300, status, text: async () => JSON.stringify(body) };
+    } });
+  const now = Math.floor(Date.now() / 1000), user = { id: 'u1', email: 'tim@example.com' };
+  const put = session => storage.setItem(CloudStore.SESSION_KEY, JSON.stringify(session));
+  put({ access_token: 'old', refresh_token: 'r1', expires_at: now - 10, user });
+  // Two requests share one refresh; a 503 keeps the session.
+  const results = await Promise.allSettled([client.token(), client.token()]);
+  assert.deepEqual(results.map(r => r.status), ['rejected', 'rejected']);
+  assert.equal(results[0].reason.code, 'network');
+  assert.equal(calls.filter(c => c.startsWith('/auth/v1/token')).length, 1);
+  assert.ok(client.signedIn, 'session kept after 503');
+  // Another tab rotated the tokens: use them, no refresh.
+  put({ access_token: 'fresh', refresh_token: 'r2', expires_at: now + 3600, user });
+  calls.length = 0;
+  assert.equal(await client.token(), 'fresh');
+  assert.deepEqual(calls, []);
+  // A rejected token refreshes once; a revoked refresh token signs out.
+  answer = url => url.includes('/auth/') ? { status: 400, body: { error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' } }
+    : { status: 401, body: { message: 'JWT expired' } };
+  await assert.rejects(client.rpc('daily_list_accounts'), /Sesi berakhir/);
+  assert.ok(!client.signedIn);
+  assert.equal(storage.getItem(CloudStore.SESSION_KEY), null);
+});
+
 test('RLS: non-members, anon and direct writes are refused', async () => {
   const outsider = await browser('luar@example.com');
   await outsider.store.ensureAccount('shopee', NAME);
@@ -268,7 +435,8 @@ test('RLS: non-members, anon and direct writes are refused', async () => {
   await assert.rejects(outsider.client.rpc('daily_export_account', { p_account_id: 1 }), { code: 'PT403' });
   // Tables sit in the unexposed "dashboard" schema: even members read them only through functions.
   for (const sql of ['select count(*) from dashboard.daily_affiliate', `insert into dashboard.accounts (name) values ('x')`,
-    'update dashboard.daily_ads set spend = 0', 'select dashboard._bump(1)', 'select dashboard.is_member()'])
+    'update dashboard.daily_ads set spend = 0', 'select dashboard._lock_account(1, null)', 'select dashboard.is_member()',
+    'select dashboard._snapshot(1, null)'])
     assert.throws(() => asUser(USERS['tim@example.com'], sql), { code: '42501' }, sql);
   assert.throws(() => psql(DB_URL, `begin; set local role anon; select count(*) from dashboard.daily_ads; commit;`), { code: '42501' });
   assert.throws(() => psql(DB_URL, `begin; set local role anon; select public.daily_list_accounts(); commit;`), { code: '42501' });

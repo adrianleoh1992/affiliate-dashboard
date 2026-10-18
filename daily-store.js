@@ -20,7 +20,11 @@ const DailyStore = (() => {
 
   // Backups are untrusted input. Build new records from the supported schema,
   // never spread imported objects into IndexedDB records or account settings.
-  function validateBackup(input) {
+  // options.maxRecords raises the record cap for the shared-database cache;
+  // options.partial validates a set of changed rows, so the whole-account
+  // day checks (one fingerprint per aggregated row) are skipped.
+  function validateBackup(input, options = {}) {
+    const maxRecords = options.maxRecords || MAX_BACKUP_RECORDS;
     const bad = message => { throw new Error('Cadangan tidak valid: ' + message); };
     const object = (value, keys, label) => {
       if (!value || typeof value !== 'object' || Array.isArray(value) ||
@@ -58,7 +62,7 @@ const DailyStore = (() => {
     let total = 0, duplicates = 0;
     const list = (key, fields, validate, identity) => {
       const rows = input[key];
-      if (!Array.isArray(rows) || (total += rows.length) > MAX_BACKUP_RECORDS) bad('jumlah record terlalu besar atau daftar ' + key + ' hilang');
+      if (!Array.isArray(rows) || (total += rows.length) > maxRecords) bad('jumlah record terlalu besar atau daftar ' + key + ' hilang');
       const records = new Map(), ids = new Set();
       for (const row of rows) {
         object(row, ['id', 'account_id', ...fields], key);
@@ -135,7 +139,7 @@ const DailyStore = (() => {
     }, row => JSON.stringify([row.kind, row.file_hash]));
     // Dated fingerprints must belong to an existing aggregate date. Keeping
     // orphan guards would silently suppress a later valid CSV upload.
-    for (const kind of KINDS) {
+    if (!options.partial) for (const kind of KINDS) {
       const dates = new Set(result[kind].map(row => row.date));
       if (result.rowhashes.some(row => row.kind === kind && row.date && !dates.has(row.date))) bad('fingerprint tanpa data harian');
       const guarded = new Set(result.rowhashes.filter(row => row.kind === kind && row.date).map(row => row.date));
@@ -443,7 +447,7 @@ const DailyStore = (() => {
     }
     async importAccount(accountId, input, options = {}) {
       if (options.replace !== true) throw new Error('Konfirmasi penggantian riwayat akun diperlukan');
-      const { data, summary } = validateBackup(input);
+      const { data, summary } = validateBackup(input, { maxRecords: options.maxRecords });
       return this.transaction(['accounts', ...KINDS, 'uploads', 'rowhashes'], 'readwrite', async tx => {
         const account = await rq(tx.objectStore('accounts').get(accountId));
         if (!account || account.kind !== 'shopee') throw new Error('Akun tujuan tidak ditemukan');
@@ -465,6 +469,52 @@ const DailyStore = (() => {
           }
         }
         return { ...summary, target: account.name };
+      });
+    }
+    // Shared-database cache: apply the rows changed after the cached revision.
+    // Deleted days go first, exactly as deleteDay removes them; then changed
+    // rows replace the cached row with the same key. One transaction.
+    async applyChanges(accountId, input, deletions = []) {
+      const { data } = validateBackup(input, { partial: true, maxRecords: Number.MAX_SAFE_INTEGER });
+      for (const d of deletions) { kindOf(d && d.kind); if (!agg().isDate(d.date)) throw new Error('Tanggal tidak valid'); }
+      return this.transaction(['accounts', ...KINDS, 'uploads', 'rowhashes'], 'readwrite', async tx => {
+        if (!await rq(tx.objectStore('accounts').get(accountId))) throw new Error('Akun tidak ditemukan');
+        const hs = tx.objectStore('rowhashes'), ups = tx.objectStore('uploads');
+        for (const { kind, date } of deletions) {
+          const s = tx.objectStore(kind);
+          (await rq(s.index('acct_date').getAllKeys([accountId, date]))).forEach(key => s.delete(key));
+          (await rq(hs.index('acct_kind').getAll([accountId, kind])))
+            .filter(h => h.date === date || !h.date).forEach(h => hs.delete(h.id));
+          (await rq(ups.index('acct').getAll(accountId))).filter(u => u.kind === kind && (!u.period_start || !u.period_end ||
+            (u.period_start <= date && u.period_end >= date))).forEach(u => ups.delete(u.id));
+        }
+        for (const kind of KINDS) {
+          const field = kind === 'ads' ? 'ad_unit' : 'tag';
+          const s = tx.objectStore(kind), idx = s.index(kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag');
+          for (const row of data[kind]) {
+            const found = await rq(idx.get([accountId, row.date, row[field]]));
+            await rq(s.put({ ...row, account_id: accountId, ...(found ? { id: found.id } : {}) }));
+          }
+        }
+        for (const row of data.rowhashes) {
+          const found = await rq(hs.index('acct_kind_hash').get([accountId, row.kind, row.hash]));
+          await rq(hs.put({ ...row, account_id: accountId, ...(found ? { id: found.id } : {}) }));
+        }
+        for (const row of data.uploads) {
+          const found = await rq(ups.index('acct_kind_hash').get([accountId, row.kind, row.file_hash]));
+          await rq(ups.put({ ...row, account_id: accountId, ...(found ? { id: found.id } : {}) }));
+        }
+      });
+    }
+    // Record counts per list, compared with the database after applyChanges.
+    async counts(accountId) {
+      return this.transaction([...KINDS, 'uploads', 'rowhashes'], 'readonly', async tx => {
+        const result = {};
+        for (const kind of KINDS) result[kind] = await rq(tx.objectStore(kind).index('acct_date').count(bounds(accountId)));
+        result.uploads = await rq(tx.objectStore('uploads').index('acct').count(accountId));
+        result.rowhashes = 0;
+        for (const kind of KINDS) result.rowhashes += await rq(tx.objectStore('rowhashes').index('acct_kind').count([accountId, kind]));
+        return result;
       });
     }
     async estimate() {

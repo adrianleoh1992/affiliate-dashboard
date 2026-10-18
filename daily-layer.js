@@ -409,7 +409,9 @@
       $('ingestPlan').classList.add('hidden');
       $('savedNote').innerHTML = `<b>Tersimpan ke ${esc(account.name)}</b> — ${nf(added)} baris baru, ${nf(updated)} diperbarui`
         + (skipped ? `, ${skipped} file dilewati karena sudah pernah diunggah` : '')
-        + `. Buka tab <b>Data Tersimpan</b> untuk melihat trennya.`;
+        + `. Buka tab <b>Data Tersimpan</b> untuk melihat trennya.`
+        + (window.__cloudStore ? (STORE.enabled ? ' Tercatat juga di database bersama untuk seluruh tim.'
+          : ' <b>Hanya tersimpan di browser ini</b>: masuk ke Database bersama di tab Data Tersimpan agar tim ikut melihatnya.') : '');
       $('savedNote').classList.remove('hidden');
       toast('Tersimpan: ' + nf(added) + ' baris baru');
     } catch (e) {
@@ -484,7 +486,7 @@
       const validated = DailyStore.validateBackup(parsed);
       const coverage = await STORE.coverage(account.id);
       if (!current()) return;
-      BACKUP = { account, revision, ...validated };
+      BACKUP = { account, revision, shared: !!STORE.enabled, ...validated };
       const s = validated.summary;
       const existing = Object.values(coverage).reduce((sum, value) => sum + value.rows, 0);
       $('backupPreviewSummary').textContent = `Cadangan dari akun “${s.source}” akan dipulihkan ke akun aktif “${account.name}”. `
@@ -504,6 +506,8 @@
     const backup = BACKUP;
     if (RESTORING || SAVING || !backup || backup.account !== ACCT ||
         backup.revision !== BACKUP_REV || backup.account.name !== shopeeName()) return;
+    // The preview was written before signing in: say once that this now replaces the team's copy.
+    if (STORE.enabled && !backup.shared && !confirm(`Anda sekarang masuk ke database bersama. Pemulihan akan mengganti riwayat "${backup.account.name}" untuk seluruh tim, bukan hanya browser ini. Lanjutkan?`)) return;
     const button = $('btnRestoreAcct'), oldText = button.textContent;
     RESTORING = true;
     let committed = false;
