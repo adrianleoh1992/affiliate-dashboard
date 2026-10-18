@@ -256,7 +256,7 @@ function renderPeriod(){
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
 function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map()},o);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
-function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts();renderPpnSwitch()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -301,7 +301,7 @@ function renderCalibration(){
 }
 function renderOpportunity(){
   const A=RESULT.actions,C=A.concentration;
-  $('tblOrganic').querySelector('thead').innerHTML='<tr>'+['Tag','Komisi','Order','Komisi/Order','Maks Biaya/Order','Kanal Utama'].map((h,i)=>`<th class="${i&&i<5?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblOrganic').querySelector('thead').innerHTML='<tr>'+['Tag','Komisi Total','Order','Komisi/Order','Maks Biaya/Order','Kanal Utama'].map((h,i)=>`<th class="${i&&i<5?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblOrganic').querySelector('tbody').innerHTML=A.organicCandidates.length
     ? A.organicCandidates.map(c=>`<tr><td><b>${esc(c.tag)}</b></td>
       <td class="num">${rp(c.comm)}</td><td class="num">${nf(c.orders)}</td>
@@ -405,7 +405,8 @@ function placementSplit(){
     // part of the label or the two silently merge into one meaningless row.
     const pl=(a.Placement||'').trim()||'Tanpa placement',pf=(a.Platform||'').trim();
     const key=pf&&!pl.toLowerCase().startsWith(pf.toLowerCase())?`${pf} ${pl}`:pl;
-    out[key]=(out[key]||0)+(parseFloat(a['Amount spent (IDR)']||a['Amount spent']||0)||0);
+    // Parsed like the engine and with PPN, so the rows add up to the card's headline.
+    out[key]=(out[key]||0)+E.num(E.pick(a,E.COL.ads.spend))*(1+RESULT.options.ppn/100);
   });
   const rows=Object.entries(out).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
   const tot=rows.reduce((s,x)=>s+x[1],0);
@@ -429,29 +430,39 @@ function renderKpi(){
   const share=k.commEff?org/k.commEff*100:0;
   const pl=placementSplit();
   const pct=v=>k.commEff?` · ${(v/k.commEff*100).toFixed(0)}%`:'';
+  // Profit at the other candidate PPN, from the same pre-PPN spend. Which one is
+  // true is on the Meta invoice, so both stay in view.
+  const base=spendBase(),alt=PPN_COMPARE.filter(p=>p!==o.ppn),flip=alt.some(p=>(netAtPpn(p)>=0)!==(k.netEff>=0));
   $('kpis').innerHTML=[
-    // Selesai plus weighted Tertunda adds up to the headline; the share still
-    // pending is what moves the verdicts, so it sits right under it.
-    kpiCard('','Komisi Total',rp(k.commEff),`${nf(k.orders)} pesanan · ${nf(k.qty)} produk`,[
+    // The headline is effective, so Komisi − Spend = Laba holds across the row;
+    // the total sits beside it. Selesai plus weighted Tertunda adds up to the
+    // headline; the share still pending is what moves the verdicts.
+    kpiCard('','Komisi Efektif',rp(k.commEff),`total ${rp(k.comm)} · ${nf(k.orders)} pesanan`,[
+      ['Komisi Total (Selesai + Tertunda)',rp(k.comm)],
       ['Sudah Selesai',rp(k.commDone)],
       ['Tertunda × '+dec(o.pendingFactor,2),`${rp(k.commPending)} → ${rp(k.commPending*o.pendingFactor)}`],
       ['Komisi Organik',rp(org)+pct(org)],
-      ['Komisi Iklan',rp(paidComm)+pct(paidComm)]]),
-    kpiCard('','Spend Iklan',rp(k.spend),`PPN ${RESULT.options.ppn}%`,
-      pl||(DATA.ads.length?[
+      ['Komisi Iklan',rp(paidComm)+pct(paidComm)],
+      ['Produk terjual',nf(k.qty)]]),
+    // One PPN row, so the placement rows stay the only list that adds up to the headline.
+    kpiCard('','Spend Iklan',rp(k.spend),o.ppn?`termasuk PPN ${o.ppn}%`:'tanpa PPN (0%)',
+      [k.spend&&o.ppn?[`Meta (sebelum PPN) + PPN ${o.ppn}%`,`${rp(base)} + ${rp(k.spend-base)}`]:null].concat(pl||(DATA.ads.length?[
         ['Klik Meta',nf(k.clicks)],
         ['CPM',rp(k.cpm)],
         ['CPC',k.clicks?full(k.cpc):'—'],
         ['Rincian placement','ekspor tanpa breakdown',1]
-      ]:[['Laporan Meta belum dimuat','—']])),
-    kpiCard(k.netEff>=0?'good':'bad','Laba Bersih',rp(k.netEff),k.netEff>=0?'setelah biaya iklan':'rugi',[
+      ]:[['Laporan Meta belum dimuat','—']]))),
+    kpiCard(k.netEff>=0?'good':'bad','Laba Bersih',rp(k.netEff),
+      (o.ppn?`komisi efektif − biaya termasuk PPN ${o.ppn}%`:'komisi efektif − biaya (PPN 0%)')
+      +(k.spend?`<span class="ppn-alt${flip?' flip':''}">${alt.map(p=>`bila PPN ${p}%: ${rp(netAtPpn(p))}`).join(' · ')}</span>`:''),[
       ['Laba Organik',rp(org)],
-      ['Laba Iklan',rp(paidNet)]]),
+      ['Laba Iklan',rp(paidNet)],
+      ...(k.spend?PPN_COMPARE.concat(PPN_COMPARE.includes(o.ppn)?[]:[o.ppn]).map(p=>[`Laba bila PPN ${p}%`+(p===o.ppn?' (dipakai)':''),rp(netAtPpn(p))]):[])]),
     // ROAS Organik divides organic commission by the SAME total spend, so the
     // two parts add up to the total exactly. Dividing by organic spend would
     // be dividing by zero; this way the card is a decomposition, not a ratio
     // with a missing denominator.
-    kpiCard('','ROAS Total',rx(k.roasEff),
+    kpiCard('','ROAS Gabungan',rx(k.roasEff),
       k.paidRoas<1?`iklan sendiri ${rx(k.paidRoas)} — di bawah impas`:'iklan dan organik digabung',[
       ['ROAS Iklan',rx(k.paidRoas)],
       ['ROAS Organik',k.spend?rx(org/k.spend):'—'],
@@ -585,16 +596,17 @@ function renderSynth(){
   const k=RESULT.kpi,st=k.counts.stop||0,A=RESULT.actions;
   $('synth').innerHTML=k.spend?`Periode ini menghasilkan ${k.netEff>=0?'laba':'rugi'} <b>${rp(Math.abs(k.netEff))}</b>. `
     +(k.organicComm>0?`Komisi organik efektif <b>${rp(k.organicComm)}</b>. `:'')
+    +ppnFlipText()
     +`ROAS iklan berbayar <b>${rx(k.paidRoas)}</b>. `
     +(st?`${st} tag berstatus STOP berdasarkan data matang.`:'Belum ada tag berstatus STOP.')
     // Unjudged paid tags are not neutral; their combined net is real money.
     +(A.evalCount?` ${A.evalCount} tag berbiaya belum cukup data untuk divonis; gabungannya ${A.evalNet>=0?'laba':'rugi'} <b>${rp(Math.abs(A.evalNet))}</b> dari biaya ${rp(A.evalSpend)}.`:''):'';
 }
-function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[],evaluasi:[]};RESULT.tags.forEach(t=>{if(g[t.status]&&(t.status!=='evaluasi'||t.spend>0))g[t.status].push(t)});g.evaluasi.sort((a,b)=>b.spend-a.spend);g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty,head='')=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}" role="button" tabindex="0" aria-pressed="${FILTER===key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${head}${it}</div>`};const A=RESULT.actions,evHead=A.evalCount?`<p class="dtotal" title="Komisi efektif dikurangi biaya + PPN selama periode, sama dengan kolom Laba di tabel. Termasuk iklan yang namanya belum cocok ke tag (komisinya bisa tercatat di tag lain) dan hari terakhir yang komisinya masih menyusul."><span>Laba bersih</span><b class="${A.evalNet>=0?'pos':'neg'}">${rp(A.evalNet)}</b><span>dari biaya ${rp(A.evalSpend)}</span></p>`:'';$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${String(RESULT.options.thScale).replace('.',',')}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada')+box('evaluasi','Belum cukup data','laba',t=>rp(t.netEff),'Semua tag berbiaya sudah divonis',evHead);$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()});$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
+function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[],evaluasi:[]};RESULT.tags.forEach(t=>{if(g[t.status]&&(t.status!=='evaluasi'||t.spend>0))g[t.status].push(t)});g.evaluasi.sort((a,b)=>b.spend-a.spend);g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty,head='')=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}" role="button" tabindex="0" aria-pressed="${FILTER===key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${head}${it}</div>`};const A=RESULT.actions,evHead=A.evalCount?`<p class="dtotal" title="Komisi efektif dikurangi biaya + PPN selama periode, sama dengan kolom Laba di tabel. Termasuk iklan yang namanya belum cocok ke tag (komisinya bisa tercatat di tag lain) dan hari terakhir yang komisinya masih menyusul."><span>Laba bersih</span><b class="${A.evalNet>=0?'pos':'neg'}">${rp(A.evalNet)}</b><span>dari biaya ${rp(A.evalSpend)}</span></p>`:'';$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${String(RESULT.options.thScale).replace('.',',')}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi total',t=>rp(t.comm),'Tidak ada')+box('evaluasi','Belum cukup data','laba',t=>rp(t.netEff),'Semua tag berbiaya sudah divonis',evHead);$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()});$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
 
 /* Rows in Semua Tag and Per Ad Unit open into their own day-by-day history.
    The totals answer "is this working"; the days answer "since when". */
-const BDCOLS=['Tanggal','Biaya','Komisi','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','Order','Biaya/Order','Nilai/Order'];
+const BDCOLS=['Tanggal','Biaya','Komisi Efektif','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','Order','Biaya/Order','Nilai/Order'];
 function breakdownRows(byDate){
   const r=RESULT.range;
   return Object.keys(byDate||{}).filter(d=>d>=r.start&&d<=r.end).sort().reverse()
@@ -603,11 +615,11 @@ function breakdownRows(byDate){
 function breakdownHTML(title,byDate,note){
   const rows=breakdownRows(byDate);
   const body=rows.length?rows.map(v=>{
-    const net=v.comm-v.spend,sh=v.shopeeClicks||0;
+    const net=v.commEff-v.spend,sh=v.shopeeClicks||0;
     return `<tr><td><b>${v.date}</b></td>
-      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
+      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.commEff)}</td>
       <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
-      <td class="num">${v.spend?dec(v.comm/v.spend,2):'—'}</td>
+      <td class="num">${v.spend?dec(v.commEff/v.spend,2):'—'}</td>
       <td class="num">${nf(v.clicks)}</td>
       <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
       <td class="num">${sh?nf(sh):'—'}</td>
@@ -658,7 +670,7 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
     +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};bindBreakdown('tblMain',tag=>{const t=RESULT.tags.find(x=>x.tag===tag);return t?{byDate:t.byDate}:null},MC.length);
   $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
-const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
+const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 function renderUnit(){
   const u=RESULT.adUnits;
   const r=RESULT.range;
@@ -724,12 +736,13 @@ function renderDaily(){
     tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleDay(tr.dataset.day,tr)}};
   });
 }
-const DAYCOLS=['','Tanggal','Biaya','Komisi','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee',
+const DAYCOLS=['','Tanggal','Biaya','Komisi Efektif','Laba','ROAS','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee',
   'Order','Biaya/Order','Nilai/Order','Komisi/Order'];
 // Averages per order sit next to the per-click costs. Cost per order says what
 // a sale costs to buy; value and commission per order say what it is worth.
 // A cost per click with no spend behind it is not zero, it is absent — organic
-// tags print "—" rather than a Rp0 that reads like a bargain.
+// tags print "—" rather than a Rp0 that reads like a bargain. Commission per
+// order is effective, like the Komisi column beside it.
 function orderCells(v,orders){
   return `<td class="num">${nf(v.clicks)}</td>
     <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
@@ -738,15 +751,15 @@ function orderCells(v,orders){
     <td class="num">${nf(orders)}</td>
     <td class="num">${orders&&v.spend?rp(v.spend/orders):'—'}</td>
     <td class="num">${orders?rp(v.gmv/orders):'—'}</td>
-    <td class="num">${orders?rp(v.comm/orders):'—'}</td>`;
+    <td class="num">${orders?rp((v.commEff!=null?v.commEff:v.comm)/orders):'—'}</td>`;
 }
 function dayRow(x){
   return `<tr class="dayrow" data-day="${x.date}" tabindex="0" role="button" aria-expanded="false"${x.mature?'':' style="opacity:.6"'}>
     <td class="expcell"><span class="exp">▸</span></td>
     <td><b>${x.date}</b>${x.mature?'':' <span class="pill">belum matang</span>'}</td>
-    <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.comm)}</td>
-    <td class="num ${x.net>=0?'pos':'neg'}">${rp(x.net)}</td>
-    <td class="num">${x.spend?dec(x.roas,2):'—'}</td>
+    <td class="num">${rp(x.spend)}</td><td class="num" title="Total ${full(x.comm)}">${rp(x.commEff)}</td>
+    <td class="num ${x.netEff>=0?'pos':'neg'}">${rp(x.netEff)}</td>
+    <td class="num">${x.spend?dec(x.roasEff,2):'—'}</td>
     ${orderCells(x,x.orders)}</tr>`;
 }
 function toggleDay(date,tr){
@@ -756,11 +769,11 @@ function toggleDay(date,tr){
   const rows=RESULT.tags.map(t=>({tag:t.tag,status:t.status,label:t.label,d:t.byDate&&t.byDate[date]}))
     .filter(x=>x.d).sort((a,b)=>b.d.spend-a.d.spend||b.d.comm-a.d.comm);
   const body=rows.length?rows.map(x=>{
-    const v=x.d,net=v.comm-v.spend;
+    const v=x.d,net=v.commEff-v.spend;
     return `<tr><td><b>${esc(x.tag)}</b> <span class="badge ${x.status}">${x.label}</span></td>
-      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
+      <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.commEff)}</td>
       <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
-      <td class="num">${v.spend?dec(v.comm/v.spend,2):'—'}</td>
+      <td class="num">${v.spend?dec(v.commEff/v.spend,2):'—'}</td>
       ${orderCells(v,v.orders)}</tr>`;
   }).join(''):`<tr><td colspan="${DAYCOLS.length-1}" style="color:var(--text-mute);padding:14px">Tidak ada tag yang aktif pada tanggal ini.</td></tr>`;
   const det=document.createElement('tr');
@@ -846,6 +859,9 @@ function renderTrend(){
   const pct=v=>dec(n(v),2);
   $('trendRange').textContent=tr.series.length+' snapshot · '+tr.series[0].period+' — '+last.period;
   $('trendBase').innerHTML=prev?`Perubahan dibanding periode <b>${esc(prev.period)}</b>.`:'';
+  // A PPN switch between saves moves Laba, Biaya and ROAS by itself.
+  const ppns=[...new Set(tr.series.map(s=>s.ppn).filter(v=>v!=null))];
+  if(ppns.length>1)$('trendBase').innerHTML+=` <b>PPN berbeda antar snapshot (${ppns.map(v=>v+'%').join(', ')})</b>: laba, biaya dan ROAS tidak sebanding.`;
   $('trendStrip').innerHTML=[
     ['Laba',rp(n(last.netEff))+dl(d.netEff,rp)],
     ['ROAS Berbayar',rx(n(last.paidRoas))+dl(d.paidRoas,pct)],
@@ -900,9 +916,9 @@ document.querySelectorAll('[data-prod]').forEach(b=>b.onclick=()=>{
 // The daily table below answers "how much"; this answers "which days".
 let CALVIEW='net';
 const CALDEF={
-  net:{label:'Laba',val:d=>d.net,signed:true},
-  roas:{label:'ROAS',val:d=>d.spend?d.roas-1:null,signed:true},
-  comm:{label:'Komisi',val:d=>d.comm,signed:false},
+  net:{label:'Laba',val:d=>d.netEff,signed:true},
+  roas:{label:'ROAS',val:d=>d.spend?d.roasEff-1:null,signed:true},
+  comm:{label:'Komisi',val:d=>d.commEff,signed:false},
   spend:{label:'Biaya',val:d=>d.spend,signed:false},
 };
 function renderCalendar(){
@@ -931,10 +947,10 @@ function renderCalendar(){
       // The lead number sits on its own line at full size; the three below drop
       // the "Rp" so "Komisi 1,1jt" fits a 90px square without being cut off.
       const lines=[
-        ['Laba',rp(d.net),d.net>=0?'up':'down',rpShort(d.net)],
-        ['Komisi',rp(d.comm),'',rpShort(d.comm)],
+        ['Laba',rp(d.netEff),d.netEff>=0?'up':'down',rpShort(d.netEff)],
+        ['Komisi',rp(d.commEff),'',rpShort(d.commEff)],
         ['Biaya',rp(d.spend),'',rpShort(d.spend)],
-        ['ROAS',d.spend?dec(d.roas,2)+'x':'—',''],
+        ['ROAS',d.spend?dec(d.roasEff,2)+'x':'—',''],
       ];
       const lead=lines.splice({net:0,comm:1,spend:2,roas:3}[CALVIEW],1)[0];
       cells.push(`<span class="cday ${cls}${d.mature?'':' raw'}" style="--i:${op.toFixed(3)}"
@@ -1005,12 +1021,12 @@ function renderCharts(){
 
   mk('chDaily',{type:'line',data:{labels:lbl,datasets:[
     // The band between the two lines is the day's profit: green above, red below.
-    {label:'Komisi',data:d.map(x=>x.comm),borderColor:ok,backgroundColor:ok,fill:{target:1,above:ok+'2e',below:bad+'2e'},fmt:'money',...fresh(ok)},
+    {label:'Komisi Efektif',data:d.map(x=>x.commEff),borderColor:ok,backgroundColor:ok,fill:{target:1,above:ok+'2e',below:bad+'2e'},fmt:'money',...fresh(ok)},
     {label:'Biaya Iklan',data:d.map(x=>x.spend),borderColor:acc,backgroundColor:acc,fill:false,fmt:'money',...fresh(acc)}]},
     options:{scales:{y:CT.axis('money',{beginAtZero:true})}}});
   const thScale=R.options&&Number.isFinite(R.options.thScale)?R.options.thScale:2;
-  mk('chRoas',{type:'bar',data:{labels:lbl,datasets:[{label:'ROAS',data:d.map(x=>x.roas),fmt:'ratio',order:1,
-    backgroundColor:d.map(x=>{const c=x.roas>=thScale?ok:x.roas>=1?warn:bad;return x.mature?c:c+'55'})},
+  mk('chRoas',{type:'bar',data:{labels:lbl,datasets:[{label:'ROAS',data:d.map(x=>x.roasEff),fmt:'ratio',order:1,
+    backgroundColor:d.map(x=>{const c=x.roasEff>=thScale?ok:x.roasEff>=1?warn:bad;return x.mature?c:c+'55'})},
     CT.reference('Impas 1x',1,d.length,mute),
     CT.reference('Target scale '+CT.ratio(thScale),thScale,d.length,ok)]},
     options:{scales:{y:CT.axis('ratio',{beginAtZero:true})}}});
@@ -1116,7 +1132,7 @@ function runPrint(mode){
   const M=PDFMODE[mode]; if(!M||!RESULT||document.body.classList.contains('printing'))return;
   const r=RESULT.range;
   $('phAcct').textContent=active();
-  $('phRange').textContent=`Periode ${r.start} — ${r.end}`;
+  $('phRange').textContent=`Periode ${r.start} — ${r.end} · PPN biaya iklan ${RESULT.options.ppn}%`;
   $('phMade').textContent='Dibuat '+new Date().toLocaleString('id-ID',{dateStyle:'long',timeStyle:'short'});
   closeModal($('pdfModal'));
   $('pdfBusy').classList.remove('hidden');$('pdfBusy').style.display='';
@@ -1199,19 +1215,21 @@ $('btnSave').onclick=()=>{
     renderTrend();renderHistory();requestAnimationFrame(()=>renderCharts());
   }catch(e){toast('Penyimpanan browser penuh')}
 };
+// Older or imported snapshots may carry no options; a missing PPN is unknown, not 0%.
+function snapPpn(x){return x.options&&Number.isFinite(x.options.ppn)?x.options.ppn:null}
 function renderHistory(){
   const s=snaps();
   $('histAcct').textContent=active()+' · '+s.length+' snapshot';
   $('histRows').innerHTML=s.length?s.map(x=>`<div class="snaprow">
     <div class="meta"><div class="d">${esc(x.range.start)} — ${esc(x.range.end)}</div>
-    <div class="t">disimpan ${esc(x.saved)} · ROAS berbayar ${rx(x.kpi.paidRoas)} · laba ${rp(x.kpi.netEff)}</div></div>
+    <div class="t">disimpan ${esc(x.saved)} · PPN ${snapPpn(x)!=null?snapPpn(x)+'%':'?'} · ROAS berbayar ${rx(x.kpi.paidRoas)} · laba ${rp(x.kpi.netEff)}</div></div>
     <button class="btn sm" data-view="${esc(x.id)}">Lihat</button>
     <button class="btn sm danger" data-del="${esc(x.id)}">Hapus</button></div>`).join('')
     :'<p class="hint">Belum ada snapshot untuk akun ini.</p>';
   $('histRows').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
     const x=snaps().find(y=>y.id===+b.dataset.view); if(!x)return;
     const lines=x.tags.filter(t=>t.spend>0).map(t=>`${t.tag} — ${t.label} · ROAS ${rx(t.roasEff)} · ${t.reason}`).join('\n');
-    alert(`${esc(x.range.start)} — ${esc(x.range.end)}\nDisimpan ${x.saved}\n\nBiaya ${full(x.kpi.spend)}\nKomisi efektif ${full(x.kpi.commEff)}\nLaba ${full(x.kpi.netEff)}\nROAS berbayar ${rx(x.kpi.paidRoas)}\n\n${lines}`);
+    alert(`${esc(x.range.start)} — ${esc(x.range.end)}\nDisimpan ${x.saved}\nPPN biaya iklan ${snapPpn(x)!=null?snapPpn(x)+'%':'tidak tercatat'}\n\nBiaya ${full(x.kpi.spend)}\nKomisi efektif ${full(x.kpi.commEff)}\nLaba ${full(x.kpi.netEff)}\nROAS berbayar ${rx(x.kpi.paidRoas)}\n\n${lines}`);
   });
   $('histRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
     try{saveSnaps(snaps().filter(y=>y.id!==+b.dataset.del));renderHistory();renderTrend();renderCharts();toast('Snapshot dihapus')}catch(e){toast('Snapshot gagal dihapus')}});
@@ -1292,12 +1310,42 @@ async function downloadPdf(mode){
   }catch(e){$('pdfError').textContent=e.message;$('pdfError').classList.remove('hidden')}
   finally{PDF_BUSY=false;document.querySelectorAll('[data-pdf]').forEach(b=>b.disabled=false);$('pdfBusy').classList.add('hidden')}
 }
+/* PPN is a fact on the Meta invoice, not a strategy knob. The switch mirrors the
+   Setelan select and goes through its change event, so recalc, saveOpts and the
+   stored tab follow without new wiring. A pick is remembered per account; until
+   then the value is only the default, and the switch says so. */
+const PPN_COMPARE=[0,11],LS_PPN_OK='adash_ppnok_v3_';
+function spendBase(){const k=RESULT.kpi;return Number.isFinite(k.spendBase)?k.spendBase:k.spend/(1+RESULT.options.ppn/100)}
+function netAtPpn(p){return RESULT.kpi.commEff-spendBase()*(1+p/100)}
+function ppnConfirmed(){return readStorage(LS_PPN_OK+active())==='1'}
+function confirmPpn(){try{localStorage.setItem(LS_PPN_OK+active(),'1')}catch(e){}}
+// Said only when PPN alone turns a profit into a loss or back.
+function ppnFlipText(){const k=RESULT.kpi,o=RESULT.options;if(!k.spend)return'';const p=PPN_COMPARE.find(q=>q!==o.ppn&&(netAtPpn(q)>=0)!==(k.netEff>=0));if(p==null)return'';const v=netAtPpn(p);return `Dengan PPN ${p}% hasilnya ${v>=0?'laba':'rugi'} <b>${rp(Math.abs(v))}</b> — pastikan PPN dari invoice Meta. `}
+function renderPpnSwitch(){
+  const sel=$('ppn'),cur=Number(sel.value),ok=ppnConfirmed();
+  document.querySelectorAll('[data-ppn-switch]').forEach(box=>{
+    const compact=box.hasAttribute('data-compact'),focus=box.contains(document.activeElement)?document.activeElement.dataset.ppn:null;
+    box.setAttribute('role','group');box.setAttribute('aria-label','PPN biaya iklan');
+    box.innerHTML=(compact?'':'<span class="pb-label">PPN biaya iklan</span>')
+      +[...sel.options].map(x=>{const v=Number(x.value);return `<button type="button" class="ptab${v===cur?' active':''}" aria-pressed="${v===cur}" data-ppn="${v}">${v}%</button>`}).join('')
+      +(ok?'':'<span class="pill ppn-unconfirmed" title="PPN akun ini belum pernah dipilih. Cocokkan dengan invoice Meta.">belum dikonfirmasi</span>')
+      +(compact?'':'<span class="ppn-note">Fakta tagihan, bukan setelan: cocokkan dengan invoice Meta.</span>');
+    box.querySelectorAll('[data-ppn]').forEach(b=>b.onclick=()=>{
+      if(sel.value!==b.dataset.ppn){sel.value=b.dataset.ppn;sel.dispatchEvent(new Event('change'))}else{confirmPpn();renderPpnSwitch()}
+      toast('PPN '+b.dataset.ppn+'% dipakai untuk akun '+active());
+    });
+    // Redrawing replaces the buttons; keep keyboard focus on the one just pressed.
+    if(focus!=null){const b=box.querySelector(`[data-ppn="${focus}"]`);if(b)b.focus()}
+  });
+}
+// Any deliberate pick counts, from the switch or from Setelan.
+$('ppn').addEventListener('change',()=>{confirmPpn();renderPpnSwitch()});
 // Settings are per account: two Shopee accounts can bill different VAT and
 // tolerate different risk. The old global key was read but never written, so
 // nothing carries over from it.
 function loadOpts(){
   let saved={};try{const o=JSON.parse(readStorage(LS.opts+'_'+active()));if(o&&typeof o==='object'&&!Array.isArray(o))saved=o}catch(e){}
-  const o=E.normalizeOptions({...UI_DEFAULTS,...saved});if(![...$('ppn').options].some(x=>Number(x.value)===o.ppn))o.ppn=UI_DEFAULTS.ppn;O.forEach(k=>$(k).value=o[k]);
+  const o=E.normalizeOptions({...UI_DEFAULTS,...saved});if(![...$('ppn').options].some(x=>Number(x.value)===o.ppn))o.ppn=UI_DEFAULTS.ppn;O.forEach(k=>$(k).value=o[k]);renderPpnSwitch();
 }
 function saveOpts(){
   const o={};O.forEach(k=>{if($(k))o[k]=$(k).value});

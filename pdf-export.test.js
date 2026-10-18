@@ -158,15 +158,25 @@ async function main() {
       }
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
-      for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
+      for (const label of ['01  Dashboard utama', 'Komisi Efektif', 'Spend Iklan', 'Laba Bersih', 'ROAS Gabungan',
         'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Rugi di Tag STOP', 'Potensi perbaikan laba', 'Tag belum cukup data']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
       assert.equal(report.cards.filter(card => card.page === 1).length, 16, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      // The headline is effective; the total sits in its note. The PPN used is on page 1 and every footer.
+      const at = (label, offset) => front[front.indexOf(label) + offset];
+      assert.match(at('Komisi Efektif', 2), /^Total Rp [\d.]+,\d\d \| [\d.]+ pesanan$/);
+      assert.equal(at('Spend Iklan', 2), 'Termasuk PPN 11% | cek di invoice Meta');
+      assert.equal(at('Laba Bersih', 2), 'Komisi efektif - (biaya + PPN 11%)');
+      assert.ok(front.some(label => label.startsWith('Periode ') && label.endsWith('|  PPN biaya iklan 11%')), 'header names the PPN');
+      for (let page = 1; page <= report.pages; page++) assert.ok(report.labels.some(label => label.page === page
+        && label.value.endsWith(' | PPN biaya iklan 11% | Semua nilai uang dalam IDR')), mode + ': footer of page ' + page + ' names the PPN');
       // Page 2: completed commission, its floor ROAS and the cancellation rate, untruncated in 4 columns.
       const second = report.labels.filter(label => label.page === 2).map(label => label.value);
-      for (const [label, note] of [['Komisi organik efektif', 'Termasuk dalam Komisi Total'], ['Komisi tertunda', '20,00% dari komisi laporan'],
-        ['Komisi selesai', 'ROAS hanya selesai 1,19x'], ['Pesanan batal', 'Menurut nilai 0,00%']]) {
+      for (const [label, note] of [['Komisi organik efektif', 'Termasuk Komisi Efektif'], ['Komisi tertunda', '20,00% dari komisi laporan'],
+        ['Komisi selesai', 'ROAS hanya selesai 1,19x'], ['Pesanan batal', 'Menurut nilai 0,00%'],
+        // Both candidate PPN rates, the one in use named.
+        ['Laba bila PPN 0%', 'Pembanding; PPN mengikuti invoice Meta'], ['Laba bila PPN 11%', 'Dipakai di laporan ini']]) {
         const at = second.indexOf(label);
         assert.ok(at >= 0, 'Page 2 must include ' + label);
         assert.equal(second[at + 2], note, label + ' note must fit its card');
@@ -372,6 +382,25 @@ async function main() {
     assert.ok(cancelText.includes('Dikecualikan: 3 baris batal (2 pesanan, nilai pesanan Rp 105.000,00; terbesar Rp 80.000,00) dan 1 baris belum dibayar.'), cancelText);
     assert.ok(cancelText.includes('Pesanan batal 66,67% Menurut nilai 99,06%'), 'page 2 shows the cancellation rate by order and by value');
     console.log('PASS PDF cancelled orders carry their order value and rate');
+    // Without ads there is no cost to put PPN on, so no what-if cards; at 0% the notes say so plainly.
+    const ppnText = await page.evaluate(results => {
+      const OriginalPDF = window.jspdf.jsPDF;
+      let lines;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { lines.push([].concat(value).join(' ')); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { return results.map(result => { lines = []; DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); return lines; }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+    }, [{ ads: [] }, {}].map(extra => Engine.analyze({ ...clickSource, ...extra }, { ppn: 0, lagDays: 0 })));
+    assert.ok(!ppnText[0].some(line => line.startsWith('Laba bila PPN')), 'no ads: no PPN what-if cards');
+    assert.deepEqual(ppnText[1].filter(line => line.startsWith('Laba bila PPN')), ['Laba bila PPN 0%', 'Laba bila PPN 11%']);
+    assert.ok(ppnText[1].includes('Tanpa PPN (0%) | cek di invoice Meta'));
+    assert.ok(ppnText[1].includes('Komisi efektif - (biaya + PPN 0%)'));
+    assert.ok(ppnText[1].some(line => line.endsWith(' | PPN biaya iklan 0% | Semua nilai uang dalam IDR')));
+    console.log('PASS PDF names the PPN on every page and compares profit at 0% and 11%');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);

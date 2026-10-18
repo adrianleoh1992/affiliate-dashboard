@@ -233,17 +233,19 @@
     });
 
     const sum = f => days.reduce((s, d) => s + (d[f] || 0), 0);
-    const totComm = sum('commEff'), totSpend = sum('spendPpn');
+    const totComm = sum('commEff'), totSpend = sum('spendPpn'), totReported = sum('comm');
     $('storedNote').textContent = `${days.length} hari · ${days[0].date} — ${days[days.length - 1].date}`;
     // Empty range inputs mean all history, including later uploads.
 
     const paidDays = days.filter(d => d.spendPpn > 0);
     $('storedStrip').innerHTML = [
       ['Hari Tersimpan', nf(days.length)],
-      ['Komisi Total', rp(totComm)],
-      ['Biaya Total', rp(totSpend)],
-      ['Laba Total', rp(totComm - totSpend)],
-      ['ROAS Rata', rx(totSpend > 0 ? totComm / totSpend : 0)],
+      // The headline is effective, as on the main screen; the total sits beside it.
+      ['Komisi Efektif', rp(totComm)],
+      ['Komisi Total', rp(totReported)],
+      [options.ppn ? 'Biaya + PPN ' + options.ppn + '%' : 'Biaya (PPN 0%)', rp(totSpend)],
+      ['Laba Efektif', rp(totComm - totSpend)],
+      ['ROAS Efektif', rx(totSpend > 0 ? totComm / totSpend : 0)],
       ['Hari ROAS < 1', nf(paidDays.filter(d => d.roas < 1).length) + ' / ' + nf(paidDays.length)],
     ].map(x => `<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
 

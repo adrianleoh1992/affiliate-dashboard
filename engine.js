@@ -812,7 +812,7 @@ function analyze(data, options) {
       const sh = dd.shopeeClicks || 0;
       if (!dd.spend && !dd.comm && !dd.clicks && !dd.orders.size && !sh) return;
       byDate[d] = {
-        date: d, comm: dd.comm, spend: dd.spend, gmv: dd.gmv,
+        date: d, comm: dd.comm, commEff: dd.commEff || 0, spend: dd.spend, gmv: dd.gmv,
         orders: dd.orders.size, clicks: dd.clicks, shopeeClicks: sh,
       };
     });
@@ -846,7 +846,8 @@ function analyze(data, options) {
 
     return {
       tag: k, comm: b.comm, commDone: b.commDone, commPending: b.commPending, commEff,
-      spend, net, netEff, roas, roasEff, roi, margin,
+      // Meta's amount before PPN, so a PPN what-if needs no second analysis.
+      spend, spendBase: b.spend, net, netEff, roas, roasEff, roi, margin,
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
@@ -889,6 +890,7 @@ function analyze(data, options) {
       byDate[d] = {
         date: d, spend: ud.spend, clicks: ud.clicks, impr: ud.impr,
         comm: pd ? pd.comm * dayShare : 0,
+        commEff: pd ? (pd.commEff || 0) * dayShare : 0,
         gmv: pd ? pd.gmv * dayShare : 0,
         orders: pd ? Math.round(pd.orders * dayShare) : 0,
         shopeeClicks: pd ? Math.round((pd.shopeeClicks || 0) * dayShare) : 0,
@@ -956,6 +958,7 @@ function analyze(data, options) {
 
   const kpi = {
     spend: totalSpend,
+    spendBase: sum(t => t.spendBase),
     comm: totalComm,
     commEff: totalEff,
     commPending: sum(t => t.commPending),
@@ -1210,6 +1213,8 @@ function buildTrend(snapshots, account) {
       period: s.range && s.range.end ? s.range.end : s.saved, saved: s.saved,
       start: s.range ? s.range.start : '', end: s.range ? s.range.end : '',
       spend: s.kpi.spend || 0,
+      // Strict check: Number(null) is 0, which would print a false "PPN 0%".
+      ppn: s.options && Number.isFinite(s.options.ppn) ? s.options.ppn : null,
       commEff: s.kpi.commEff || 0,
       netEff: s.kpi.netEff || 0,
       roasEff: s.kpi.roasEff || 0,

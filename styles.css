@@ -113,9 +113,18 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 /* One switch for all eight cards, so reading every number is one click and
    not eight. The choice is remembered — someone who wants it all open on
    every visit should not have to say so on every visit. */
-.kpibar{display:flex;justify-content:flex-end;margin-bottom:8px}
+.kpibar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px}
 .kpibar .btn{border:1px solid var(--border-strong)}
 .kpibar .btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+/* PPN is a fact on the Meta invoice, not a strategy knob, so it sits next to
+   the profit it changes instead of inside Setelan. */
+.ppn-switch{display:flex;align-items:center;flex-wrap:wrap;gap:5px;min-width:0}
+.ppn-switch .pb-label{margin-right:3px}
+.ppn-switch .ptab{min-height:28px;padding:6px 11px;font-size:11.5px}
+.ppn-switch .ppn-note{font-size:11px;color:var(--text-dim);font-weight:500;min-width:0}
+.kpi .sub .ppn-alt{display:block;margin-top:2px}
+.kpi .sub .ppn-alt.flip{color:var(--bad);font-weight:700}
+@media(max-width:640px){.ppn-switch .ppn-note{flex-basis:100%}.ppn-switch .ptab{min-height:44px;min-width:52px}}
 
 /* Four main cards: the detail is one click down, not a ninth tile. */
 .kpis{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
@@ -131,13 +140,16 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .kpi.open .chev{background:var(--surface-2);color:var(--text-mute)}
 .kdrill{display:none;margin-top:10px;padding-top:9px;border-top:1px dashed var(--border-strong)}
 .kpi.open .kdrill{display:block}
-.krow{display:flex;justify-content:space-between;gap:12px;font-size:11.5px;padding:4px 0;
+.krow{display:flex;flex-wrap:wrap;justify-content:space-between;column-gap:12px;font-size:11.5px;padding:4px 0;
   font-variant-numeric:tabular-nums}
 .krow+.krow{border-top:1px solid var(--border)}
 /* Tag names are long single words; let the label wrap rather than push the
-   value out of a narrow card. */
+   value out of a narrow card. A number stays whole: when label and value do
+   not fit side by side, the value takes its own line instead of reading
+   "-Rp5,4 / jt". Descriptive (.est) values may still wrap. */
 .krow span:first-child{color:var(--text-dim);font-weight:500;min-width:0;overflow-wrap:anywhere}
-.krow span:last-child{font-weight:700}
+.krow span:last-child{font-weight:700;margin-left:auto;text-align:right}
+.krow:not(.est) span:last-child{white-space:nowrap}
 .krow.est span{opacity:.72;font-style:italic}
 /* Three boxes, one per report, so deleting a whole report is one click and
    not a hunt through one pile of chips. */

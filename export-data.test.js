@@ -23,7 +23,7 @@ test('tags CSV appends the link note after the existing columns',()=>{
 test('tags CSV appends the threshold a verdict sits on, empty when it is clear of it',()=>{
   const data={...result,tags:[{...result.tags[0],borderAt:2},{...result.tags[0],tag:'Jauh',borderAt:null}]};
   const p=Papa.parse(X.csv(data,{account:'Toko'}),{header:true,skipEmptyLines:true});
-  assert.equal(p.meta.fields[p.meta.fields.length-1],'Di batas ambang (x)');
+  assert.equal(p.meta.fields[p.meta.fields.length-2],'Di batas ambang (x)','last of the dataset columns; only the PPN column follows');
   assert.equal(p.meta.fields.indexOf('Catatan link')+1,p.meta.fields.indexOf('Di batas ambang (x)'),'earlier appended columns keep their place');
   assert.deepEqual(p.data.map(row=>row['Di batas ambang (x)']),['2','']);
 });
@@ -46,7 +46,28 @@ test('explicit filtered rows do not leak other tags and empty exports retain hea
 });
 test('daily CSV maps booleans and retains actual source values',()=>{
   const row=Papa.parse(X.csv(result,{dataset:'daily'}),{header:true,skipEmptyLines:true}).data[0];
-  assert.equal(row['Data matang'],'Tidak');assert.equal(row.Laba,'-1250.75');assert.equal(row.Komisi,'0');
+  assert.equal(row['Data matang'],'Tidak');assert.equal(row['Laba dari komisi total'],'-1250.75');assert.equal(row['Komisi total'],'0');
+});
+test('daily CSV says which commission each column uses and appends the effective ones',()=>{
+  const data={...result,daily:[{...result.daily[0],commEff:950.5,netEff:-300.25,roasEff:0.76}]};
+  const p=Papa.parse(X.csv(data,{dataset:'daily'}),{header:true,skipEmptyLines:true});
+  assert.deepEqual(p.meta.fields.slice(3,8),['Tanggal','Komisi total','Biaya + PPN','Laba dari komisi total','ROAS dari komisi total'],'renamed in place');
+  assert.deepEqual(p.meta.fields.slice(-4),['Komisi efektif','Laba efektif','ROAS efektif','PPN biaya iklan (%)']);
+  assert.deepEqual([p.data[0]['Komisi efektif'],p.data[0]['Laba efektif'],p.data[0]['ROAS efektif']],['950.5','-300.25','0.76']);
+  const tags=Papa.parse(X.csv(result,{}),{header:true,skipEmptyLines:true}).meta.fields;
+  assert.equal(tags.indexOf('Komisi total'),tags.indexOf('Biaya + PPN')+1,'tags keep the total in its old place');
+});
+test('every dataset ends with the PPN that produced its money columns',()=>{
+  for(const dataset of Object.keys(X.DATASETS)){
+    const p=Papa.parse(X.csv({...result,options:{ppn:11}},{dataset}),{header:true,skipEmptyLines:true});
+    assert.equal(p.meta.fields[p.meta.fields.length-1],'PPN biaya iklan (%)',dataset);
+    assert.equal(p.meta.fields.length,X.DATASETS[dataset].columns.length+4,dataset+': one column added, at the end');
+    for(const row of p.data)assert.equal(row['PPN biaya iklan (%)'],'11',dataset);
+  }
+  // Unknown is blank, never a false 0.
+  for(const options of [undefined,{},{ppn:null}])
+    assert.equal(Papa.parse(X.csv({...result,options},{}),{header:true,skipEmptyLines:true}).data[0]['PPN biaya iklan (%)'],'');
+  assert.equal(Papa.parse(X.csv({...result,options:{ppn:0}},{}),{header:true,skipEmptyLines:true}).data[0]['PPN biaya iklan (%)'],'0');
 });
 test('JSON is versioned, preserves metadata and represents unavailable ratios honestly',()=>{
   const data=JSON.parse(X.json(result,{account:'A',quality:['Laporan parsial'],generatedAt:'2026-09-07T00:00:00Z'}));

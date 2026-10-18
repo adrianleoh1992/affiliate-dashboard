@@ -394,4 +394,39 @@ near(doneOnly.kpi.roasDone, 300 / 222);
 near(doneOnly.kpi.commDone + doneOnly.kpi.commPending, doneOnly.kpi.comm);
 assert.equal(analyze({ affiliate: [aff('d', 300)] }).kpi.roasDone, 0);
 
+// Pre-PPN spend does not depend on the rate, so a PPN what-if needs no second
+// analysis. It is not stored: snapshot.options.ppn already lets it be derived.
+const ppnRows = { affiliate: [aff('p1', 300)], ads: [ad('2026-08-01', 200), ad('2026-08-02', 100)] };
+const at0 = analyze(ppnRows, { ppn: 0 }), at11 = analyze(ppnRows, { ppn: 11 });
+assert.equal(at0.kpi.spendBase, 300);
+assert.equal(at11.kpi.spendBase, 300);
+near(at11.kpi.spend, at11.kpi.spendBase * 1.11);
+near(at11.tags[0].spend, at11.tags[0].spendBase * 1.11);
+assert.equal(E.toSnapshot(at11).kpi.spendBase, undefined);
+
+// Day rows carry effective commission, so Harian and the KPI cards share one definition.
+const effData = { affiliate: [aff('e1', 300), aff('e2', 100, { 'Status Pesanan': 'Tertunda', 'Waktu Pemesanan': '2026-08-02 10:00:00' })],
+  ads: [ad('2026-08-01', 100, { 'Ad name': 'Iklan satu' }), ad('2026-08-01', 300, { 'Ad name': 'Iklan dua' }),
+    ad('2026-08-02', 200, { 'Ad name': 'Iklan satu' })],
+  tagMap: { [E.normalize('Iklan satu')]: 'A', [E.normalize('Iklan dua')]: 'A' } };
+const eff = analyze(effData, { pendingFactor: 0.5, ppn: 11 });
+const effTag = eff.tags.find(t => t.tag === 'A');
+near(effTag.commEff, 350);
+near(Object.values(effTag.byDate).reduce((sum, d) => sum + d.commEff, 0), effTag.commEff);
+near(eff.daily.reduce((sum, d) => sum + d.netEff, 0), eff.kpi.netEff);
+// A unit's day follows its tag's day by that day's spend share. The unit's
+// period total uses the period share instead, so its days need not add up to it.
+assert.equal(eff.adUnits.length, 2);
+for (const unit of eff.adUnits) for (const d of Object.keys(unit.byDate)) {
+  const day = effTag.byDate[d];
+  near(unit.byDate[d].commEff, day.commEff * unit.byDate[d].spend / day.spend);
+}
+
+// Each trend point names its PPN; one missing from a snapshot is unknown, not 0%.
+const snapAt = (ppn, end, extra = {}) => ({ ...E.toSnapshot(analyze({ affiliate: [aff('t1')], ads: [ad()] }, { ppn }),
+  { id: Date.parse(end), account: 'default', saved: end + ' 12:00:00' }), range: { start: '2026-08-01', end }, ...extra });
+assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01'), snapAt(11, '2026-08-02')], 'default').series.map(s => s.ppn), [0, 11]);
+assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01', { options: undefined }), snapAt(0, '2026-08-02', { options: { ppn: null } })],
+  'default').series.map(s => s.ppn), [null, null]);
+
 console.log('engine regression tests: PASS');
