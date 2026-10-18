@@ -321,6 +321,37 @@ async function main() {
     assert.match(clickTrend.text, /tanggal klik/);
     assert.match(clickTrend.text, /Rp 40,00 tanpa tanggal klik tidak tampil\./);
     console.log('PASS PDF click-date trend keeps gaps for missing sources and names commission it cannot place');
+    // Orders clicked on 09-06 and 09-07 land days later and are still Tertunda: by click date the
+    // trend's unripe band starts two days before the order-date lag cut-off.
+    const ripeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+    const ripeOrder = (id, clicked, placed, status) => ({ 'ID Pemesanan': 'ripe-' + id, 'Status Pesanan': status,
+      'Waktu Pemesanan': placed + ' 10:00:00', 'Waktu Klik': clicked + ' 09:00:00', 'Tag_link1': 'Ripe',
+      'Total Komisi per Produk(Rp)': '100' });
+    const ripeSource = {
+      affiliate: [...ripeDays.slice(0, 5).map((day, i) => ripeOrder(i, day, day, 'Selesai')),
+        ripeOrder(6, '2026-09-06', '2026-09-09', 'Tertunda'), ripeOrder(7, '2026-09-07', '2026-09-10', 'Tertunda')],
+      ads: ripeDays.map(day => ({ 'Ad name': 'Ripe', 'Amount spent (IDR)': '50', 'Reporting starts': day, 'Reporting ends': day })), clicks: [],
+    };
+    const noClickTime = rows => rows.map(row => { const copy = { ...row }; delete copy['Waktu Klik']; return copy; });
+    const ripeResults = [ripeSource, { ...ripeSource, affiliate: noClickTime(ripeSource.affiliate) }]
+      .map(source => Engine.analyze(source, { ppn: 0, lagDays: 3 }));
+    const ripeTrend = await page.evaluate(results => {
+      const originalCharts = DashboardPDFCharts.create;
+      let trend;
+      DashboardPDFCharts.create = function (doc, options) {
+        return Object.fromEntries(Object.entries(originalCharts(doc, options)).map(([name, draw]) => [name, box => {
+          if (name === 'trend') trend = box; return draw(box);
+        }]));
+      };
+      try { return results.map(result => { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-11' }); return trend.matureUntil; }); }
+      finally { DashboardPDFCharts.create = originalCharts; }
+    }, ripeResults);
+    assert.equal(ripeResults[0].range.matureUntil, '2026-09-07');
+    assert.equal(ripeResults[0].byClick.matureUntil, '2026-09-05', 'fixture: the click-date boundary sits before the order-date one');
+    assert.equal(ripeTrend[0], ripeResults[0].byClick.matureUntil, 'a click-date trend shades from the click-date boundary');
+    assert.equal(ripeResults[1].byClick.available, false);
+    assert.equal(ripeTrend[1], ripeResults[1].range.matureUntil, 'without Waktu Klik the trend keeps the order-date boundary');
+    console.log('PASS PDF trend shades unripe days from the boundary of its own date basis');
     const activity = Engine.analyze({
       affiliate: [['Organik tetap', 100, 'Selesai'], ['Refund tetap', -10, 'Selesai'], ['Pending tetap', 50, 'Tertunda']]
         .map(([tag, commission, status], index) => ({ 'ID Pemesanan': 'activity-' + index,

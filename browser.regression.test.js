@@ -527,6 +527,85 @@ async function main() {
     assert.match(ui.cal, /tanggal pesanan/);
   });
 
+  test('Harian shades unripe days from the click-date boundary when it differs from the order-date one', async page => {
+    // The band's start index lives in a closure, so record what renderCharts passes in.
+    await page.evaluate(() => {
+      const original = ChartTheme.recentBand;
+      window.__bands = [];
+      ChartTheme.recentBand = (...args) => { const plugin = original(...args); window.__bands.push({ from: args[0], plugin }); return plugin; };
+    });
+    const days = Array.from({ length: 10 }, (_, i) => '2026-08-' + String(i + 1).padStart(2, '0'));
+    const late = (id, clicked, placed) => ({ ...aff(id, 'Alpha', placed), 'Status Pesanan': 'Tertunda', 'Waktu Klik': clicked + ' 09:00:00' });
+    // With the default 3-day lag the order date is ripe through 08-07. Orders 6 and 7 were clicked on
+    // 08-06 and 08-07, placed days later and are still Tertunda, so by click date those days are unripe too.
+    await upload(page, [{ name: 'affiliate.csv', rows: [...days.slice(0, 5).map((day, i) => aff(String(i + 1), 'Alpha', day)),
+      late('6', '2026-08-06', '2026-08-09'), late('7', '2026-08-07', '2026-08-10')] },
+      { name: 'ads.csv', rows: days.map(day => ad('Alpha', 100, day)) }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chRoas'))));
+    const ui = await page.evaluate(() => {
+      const daily = Chart.getChart(document.getElementById('chDaily')), roas = Chart.getChart(document.getElementById('chRoas'));
+      const shade = (colors, base) => colors.map(c => c === base ? 'ripe' : c === base + '55' ? 'raw' : c);
+      const last = window.__bands[window.__bands.length - 1];
+      return { clickUntil: RESULT.byClick.matureUntil, orderUntil: RESULT.range.matureUntil, dates: RESULT.daily.map(d => d.date),
+        raw: [...document.querySelectorAll('#calendar .cday.raw b')].map(b => b.textContent),
+        points: daily.data.datasets.flatMap(ds => [shade(ds.pointBackgroundColor, ds.borderColor), shade(ds.pointBorderColor, ds.borderColor)]),
+        froms: [...new Set(window.__bands.map(band => band.from))],
+        plugged: [daily, roas].map(chart => chart.config.plugins.includes(last.plugin)) };
+    });
+    assert.equal(ui.orderUntil, '2026-08-07');
+    assert.equal(ui.clickUntil, '2026-08-05', 'fixture: the click-date boundary sits before the order-date one');
+    const rawByClick = ui.dates.map(date => date > ui.clickUntil);
+    assert.deepEqual(ui.raw, ['6', '7', '8', '9', '10'], 'calendar marks the click-date unripe days, not only the last lag days');
+    for (const colors of ui.points) assert.deepEqual(colors, rawByClick.map(raw => raw ? 'raw' : 'ripe'), 'chDaily points fade from the click-date boundary');
+    assert.deepEqual(ui.froms, [5], 'every render starts the band at the first click-date unripe day');
+    assert.equal(ui.dates[ui.froms[0] - 1], ui.clickUntil);
+    assert.deepEqual(ui.plugged, [true, true], 'both Harian charts draw that band');
+  });
+
+  test('without Waktu Klik the Harian chart and calendar weigh Tertunda commission by the pending factor', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const noClick = row => { const copy = { ...row }; delete copy['Waktu Klik']; return copy; };
+    const order = (id, date, comm, status) => noClick({ ...aff(id, 'Alpha', date), 'Total Komisi per Pesanan(Rp)': String(comm), 'Status Pesanan': status });
+    // 08-01: Rp200 Selesai + Rp400 Tertunda × 0,95 = Rp580 effective (Rp600 total); 08-02: Rp100 Tertunda = Rp95.
+    await upload(page, [{ name: 'affiliate.csv', rows: [order('1', '2026-08-01', 200, 'Selesai'), order('2', '2026-08-01', 400, 'Tertunda'),
+      order('3', '2026-08-02', 100, 'Tertunda')] }, { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Alpha', 100, '2026-08-02')] }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chDaily'))));
+    const ui = await page.evaluate(() => {
+      const komisi = day => {
+        const cell = [...document.querySelectorAll('#calendar .cday')].find(c => c.querySelector('b') && c.querySelector('b').textContent === day);
+        const line = [...cell.querySelectorAll('u > span')].find(span => span.querySelector('em').textContent === 'Komisi');
+        return line.textContent.replace('Komisi', '');
+      };
+      return { available: RESULT.byClick.available, total: RESULT.daily.map(d => d.comm), expect: RESULT.daily.map(d => d.commEff),
+        daily: Chart.getChart(document.getElementById('chDaily')).data.datasets[0].data, cal: ['1', '2'].map(komisi) };
+    });
+    assert.equal(ui.available, false);
+    assert.deepEqual(ui.total, [600, 100], 'fixture: total commission differs from effective');
+    assert.deepEqual(ui.daily, ui.expect, 'the chart plots RESULT.daily commEff');
+    assert.ok(Math.abs(ui.daily[0] - 580) < 1e-9 && Math.abs(ui.daily[1] - 95) < 1e-9, `Selesai + 0,95 × Tertunda, got ${ui.daily}`);
+    assert.deepEqual(ui.cal, ['580', '95'], 'calendar Komisi is effective, not total');
+  });
+
+  test('a commission day without spend has no ROAS bar and its calendar ROAS prints a dash', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    // 08-02 has a click-date order but no ad row: ROAS is undefined there, not 0x and not comm ÷ 1.
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1'), aff('2', 'Alpha', '2026-08-02')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chRoas'))));
+    const ui = await page.evaluate(() => {
+      const day2 = [...document.querySelectorAll('#calendar .cday')].find(c => c.querySelector('b') && c.querySelector('b').textContent === '2');
+      return { days: RESULT.daily.map(d => [d.date, d.spend, d.commEffByClick]),
+        roas: Chart.getChart(document.getElementById('chRoas')).data.datasets[0].data, day2: day2.textContent.replace(/\s+/g, '') };
+    });
+    assert.deepEqual(ui.days, [['2026-08-01', 100, 200], ['2026-08-02', 0, 200]], 'fixture: commission on a zero-spend day');
+    assert.deepEqual(ui.roas, [2, null], 'no bar for the zero-spend day');
+    assert.match(ui.day2, /ROAS—$/, 'calendar ROAS for the zero-spend day is a dash');
+    assert.match(ui.day2, /Komisi200/, 'the day still shows its commission');
+  });
+
   test('concentration shows spend share against commission share and warns on a top-3 dependency', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const spends = [['Alpha', 300], ['Bravo', 250], ['Charlie', 200], ['Delta', 50], ['Echo', 50], ['Foxtrot', 50]];
