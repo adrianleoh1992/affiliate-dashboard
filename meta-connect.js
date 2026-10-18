@@ -67,10 +67,11 @@
     savedHint();
   }
 
-  /* Saved history adds every row whose numbers differ from what it holds, so
-     re-saving a re-pulled day that Meta has revised counts it twice. The
-     dialog names saved days in the range before the pull. Saved ads are not
-     kept per ad account, so the hint cannot tell which account they came from. */
+  /* Saved history replaces an ad's numbers per date and Ad ID, so re-saving a
+     re-pulled day takes Meta's revised figures. A day saved from a CSV without
+     Ad IDs cannot take ID rows (an ad would count twice), so the dialog names
+     saved days in the range before the pull. Saved ads are not kept per ad
+     account, so the hint cannot tell which account they came from. */
   async function loadSaved() {
     const acct = active(), history = window.__dailyStore;
     if (!history) return;
@@ -84,7 +85,7 @@
     const since = $('metaSince').value, until = $('metaUntil').value;
     const hit = SAVED.acct === active() && since && until ? SAVED.dates.filter(d => d >= since && d <= until) : [];
     $('metaSaved').textContent = hit.length
-      ? `Data Tersimpan sudah berisi biaya iklan untuk ${hit.length} hari di rentang ini (${hit[0]} — ${hit[hit.length - 1]}). Baris yang tidak berubah dilewati saat Simpan, tetapi angka yang direvisi Meta sejak disimpan akan ditambahkan, bukan diganti. Jika data tersimpan itu dari akun iklan yang sama, analisis tarikan ini di layar saja, atau hapus tanggal itu di Data Tersimpan sebelum Simpan (menghapus tanggal ikut menghapus akun iklan lain pada tanggal itu).`
+      ? `Data Tersimpan sudah berisi biaya iklan untuk ${hit.length} hari di rentang ini (${hit[0]} — ${hit[hit.length - 1]}). Saat Simpan, angka tiap Ad ID pada tanggal itu diganti dengan hasil tarikan ini, jadi revisi Meta tidak terhitung dua kali. Jika tanggal itu disimpan dari CSV tanpa kolom Ad ID, Simpan akan ditolak; hapus dulu tanggal itu di Data Tersimpan (menghapus tanggal ikut menghapus akun iklan lain pada tanggal itu).`
       : '';
     $('metaSaved').classList.toggle('hidden', !hit.length);
   }

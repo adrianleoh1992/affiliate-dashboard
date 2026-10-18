@@ -58,6 +58,7 @@ async function seedV1() {
       if (kind === 'affiliate') {
         const record = A.aggregateAffiliate([affiliate()])[0];
         delete record.order_keys; // v1 kept the count, but not order identities.
+        delete record.order_parts;
         s.add({ ...record, account_id: 1, created_at: '2026-08-01T12:00:00Z' });
       }
     }
@@ -101,7 +102,7 @@ test('fingerprints are deterministic across key order and suppress same-batch du
   assert.equal(dedup.duplicates, 1);
 });
 
-test('overlapping uploads add unseen amounts instead of replacing a partial day', async () => {
+test('overlapping uploads add unseen orders instead of replacing a partial day', async () => {
   const { store, account } = await context();
   const first = affiliate(), second = affiliate('order-2');
   await save(store, account, 'affiliate', [first]);
@@ -112,7 +113,135 @@ test('overlapping uploads add unseen amounts instead of replacing a partial day'
   assert.equal(day.gmv, 2000);
   assert.equal(day.rows, 2);
   assert.equal(day.orders, 2);
-  assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 2);
+  assert.equal(day.merge_version, 2);
+  // Order parts replace fingerprints for commission reports.
+  assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 0);
+  store.close();
+});
+
+test('a revised report replaces order statuses instead of adding them again', async () => {
+  const { store, account } = await context();
+  const pending = { 'Status Pesanan': 'Tertunda' };
+  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', pending), affiliate('order-2', '2026-08-01', pending),
+    affiliate('order-3'), affiliate('order-4', '2026-08-01', { 'Status Pesanan': 'Belum Dibayar' })]);
+  // Same report a week later: one order completed (commission revised), one cancelled, one paid.
+  const result = await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Total Komisi per Produk(Rp)': '180' }),
+    affiliate('order-2', '2026-08-01', { 'Status Pesanan': 'Dibatalkan' }), affiliate('order-3'), affiliate('order-4', '2026-08-01', pending)]);
+  assert.deepEqual(result, { added: 0, updated: 1, duplicates: 1 });
+  const [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.rows, 4);
+  assert.equal(day.excluded, 1);
+  assert.equal(day.orders, 3);
+  assert.equal(day.comm, 180 + 200 + 200);
+  assert.equal(day.comm_done, 380);
+  assert.equal(day.comm_pending, 200);
+  assert.equal(day.gmv, 3000);
+  // Saving the revision again changes nothing.
+  const again = await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Total Komisi per Produk(Rp)': '180' }),
+    affiliate('order-2', '2026-08-01', { 'Status Pesanan': 'Dibatalkan' }), affiliate('order-3'), affiliate('order-4', '2026-08-01', pending)],
+    { fileHash: 'same rows, new export' });
+  assert.deepEqual(again, { added: 0, updated: 0, duplicates: 4 });
+  store.close();
+});
+
+test('a file with only some orders of a saved day keeps the other orders', async () => {
+  const { store, account } = await context();
+  await save(store, account, 'affiliate', [affiliate('order-1'), affiliate('order-2', '2026-08-01', { 'Status Pesanan': 'Tertunda' })]);
+  await save(store, account, 'affiliate', [affiliate('order-2')]);
+  const [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.orders, 2);
+  assert.equal(day.comm, 400);
+  assert.equal(day.comm_done, 400);
+  assert.equal(day.comm_pending, 0);
+  store.close();
+});
+
+test('ad rows with an Ad ID replace the saved day, and two ads sharing a name stay separate', async () => {
+  const { store, account } = await context();
+  const first = ad('120212345678901234'), second = ad('120212345678905678', '2026-08-01', { 'Amount spent (IDR)': '50' });
+  assert.deepEqual(await save(store, account, 'ads', [first, second]), { added: 2, updated: 0, duplicates: 0 });
+  // A re-pull with Meta's corrected spend for one of them.
+  const result = await save(store, account, 'ads', [ad('120212345678901234', '2026-08-01', { 'Amount spent (IDR)': '110' }), second]);
+  assert.deepEqual(result, { added: 0, updated: 1, duplicates: 1 });
+  const days = await store.range(account.id, 'ads');
+  assert.deepEqual(days.map(r => [r.ad_key, r.ad_unit, r.spend, r.merge_version]).sort(),
+    [['id:120212345678901234', 'Alpha', 110, 2], ['id:120212345678905678', 'Alpha', 50, 2]]);
+  assert.equal((await store.knownRowHashes(account.id, 'ads')).size, 0);
+  // A spreadsheet-rounded ID is not trusted as an identity.
+  assert.equal(A.adIdOf(ad('120212345678901000')), '');
+  store.close();
+});
+
+test('one ad saved once without an Ad ID and once with it on the same day is refused', async () => {
+  const { store, account } = await context();
+  await save(store, account, 'ads', [ad('', '2026-08-01')]);
+  await assert.rejects(save(store, account, 'ads', [ad('120212345678901234', '2026-08-01')]), /tanpa Ad ID[\s\S]*2026-08-01/);
+  await save(store, account, 'ads', [ad('120212345678901234', '2026-08-02')]);
+  await assert.rejects(save(store, account, 'ads', [ad('', '2026-08-02', { 'Impressions': '5' })]), /2026-08-02/);
+  // Meta exports the current name for past days: a renamed ad is still the same spend.
+  await save(store, account, 'ads', [ad('', '2026-08-03')]);
+  await assert.rejects(save(store, account, 'ads', [ad('120212345678901234', '2026-08-03', { 'Ad name': 'Alpha v2' })]), /2026-08-03/);
+  assert.equal((await store.range(account.id, 'ads')).length, 3);
+  store.close();
+});
+
+test('fingerprint-format days convert to order parts only when the file holds all their orders', async () => {
+  const { store, account } = await context();
+  const keys = ['order-1', 'order-2'].map(orderId => A.hashRow({ orderId })).sort();
+  const v1 = {
+    format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 2,
+    exported_at: '2026-09-07T00:00:00Z', account: { id: 7, kind: 'shopee', name: 'v1' }, ads: [], clicks: [], uploads: [],
+    affiliate: [{ account_id: 7, date: '2026-08-01', tag: 'Alpha', comm: 400, comm_done: 400, comm_pending: 0, gmv: 2000, qty: 2,
+      refund: 0, orders: 2, order_keys: keys, excluded: 0, rows: 2, merge_version: 1 },
+      { account_id: 7, date: '2026-08-01', tag: 'Beta', comm: 200, comm_done: 200, comm_pending: 0, gmv: 1000, qty: 1,
+        refund: 0, orders: 1, order_keys: [A.hashRow({ orderId: 'order-9' })], excluded: 0, rows: 1, merge_version: 1 }],
+    rowhashes: ['a', 'b', 'c'].map(h => ({ account_id: 7, kind: 'affiliate', hash: h.repeat(16), date: '2026-08-01' })),
+  };
+  await store.importAccount(account.id, v1, { replace: true });
+  await assert.rejects(save(store, account, 'affiliate', [affiliate('order-1')]), /format lama[\s\S]*Alpha/);
+  await assert.rejects(save(store, account, 'affiliate', [affiliate('order-1'), affiliate('order-2')]), /format lama[\s\S]*Beta/);
+  await save(store, account, 'affiliate', [affiliate('order-1'), affiliate('order-2'), affiliate('order-9', '2026-08-01', { 'Tag_link1': 'Beta' })]);
+  const days = await store.range(account.id, 'affiliate');
+  assert.deepEqual(days.map(r => [r.tag, r.merge_version, r.comm, r.orders]).sort(), [['Alpha', 2, 400, 2], ['Beta', 2, 200, 1]]);
+  assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 0);
+  DailyStore.validateBackup(await store.exportAccount(account.id));
+  store.close();
+});
+
+test('version 2 databases move ads to ad keys in place', async () => {
+  const opening = indexedDB.open(DailyStore.DB_NAME, 2);
+  opening.onupgradeneeded = () => {
+    const db = opening.result;
+    db.createObjectStore('accounts', { keyPath: 'id', autoIncrement: true }).createIndex('kind_name', ['kind', 'name'], { unique: true });
+    for (const kind of ['affiliate', 'ads', 'clicks']) {
+      const s = db.createObjectStore(kind, { keyPath: 'id', autoIncrement: true });
+      s.createIndex(kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag', ['account_id', 'date', kind === 'ads' ? 'ad_unit' : 'tag'], { unique: true });
+      s.createIndex('acct_date', ['account_id', 'date']);
+    }
+    const uploads = db.createObjectStore('uploads', { keyPath: 'id', autoIncrement: true });
+    uploads.createIndex('acct', 'account_id');
+    uploads.createIndex('acct_hash', ['account_id', 'file_hash']);
+    uploads.createIndex('acct_kind_hash', ['account_id', 'kind', 'file_hash'], { unique: true });
+    const hashes = db.createObjectStore('rowhashes', { keyPath: 'id', autoIncrement: true });
+    hashes.createIndex('acct_kind_hash', ['account_id', 'kind', 'hash'], { unique: true });
+    hashes.createIndex('acct_kind', ['account_id', 'kind']);
+    hashes.createIndex('acct_kind_date', ['account_id', 'kind', 'date']);
+    opening.transaction.objectStore('accounts').add({ id: 1, kind: 'shopee', name: 'v2' });
+    const [record] = A.aggregateAds([ad('', '2026-08-01')]);
+    delete record.ad_id; delete record.ad_key;
+    opening.transaction.objectStore('ads').add({ ...record, account_id: 1, merge_version: 1 });
+    opening.transaction.objectStore('rowhashes').add({ account_id: 1, kind: 'ads', hash: A.hashRow(ad('', '2026-08-01')), date: '2026-08-01' });
+  };
+  (await req(opening)).close();
+  const store = await DailyStore.open();
+  assert.equal(store.db.version, 3);
+  const [row] = await store.range(1, 'ads');
+  assert.equal(row.ad_key, 'name:Alpha');
+  assert.equal(row.ad_id, '');
+  assert.deepEqual(await save(store, { id: 1 }, 'ads', [ad('', '2026-08-01'), ad('', '2026-08-01', { 'Impressions': '7' })]),
+    { added: 0, updated: 1, duplicates: 1 });
+  assert.equal((await store.range(1, 'ads'))[0].impressions, 1007);
+  DailyStore.validateBackup(await store.exportAccount(1));
   store.close();
 });
 
@@ -135,7 +264,7 @@ test('validated imports preserve old string-row dedup for repeated, overlapping 
     assert.deepEqual(await save(store, account, kind, parsed[kind]), { added: 0, updated: 1, duplicates: 1 });
     const [day] = await store.range(account.id, kind);
     assert.equal(kind === 'clicks' ? day.clicks : day.rows, 2);
-    assert.equal((await store.knownRowHashes(account.id, kind)).size, 2);
+    assert.equal((await store.knownRowHashes(account.id, kind)).size, kind === 'affiliate' ? 0 : 2);
   }
   const backup = await store.exportAccount(account.id);
   DailyStore.validateBackup(backup);
@@ -151,15 +280,101 @@ test('validated imports preserve old string-row dedup for repeated, overlapping 
   store.close();
 });
 
-test('same order spanning uploads and multiple products counts as one order', async () => {
+test('an order with several products counts once; a later file replaces its lines but may not drop any', async () => {
   const { store, account } = await context();
   await save(store, account, 'affiliate', [affiliate()]);
-  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]);
-  const [day] = await store.range(account.id, 'affiliate');
+  await save(store, account, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]);
+  let [day] = await store.range(account.id, 'affiliate');
   assert.equal(day.comm, 400);
   assert.equal(day.rows, 2);
   assert.equal(day.orders, 1);
-  assert.deepEqual(day.order_keys, [A.hashRow({ orderId: 'order-1' })]);
+  assert.deepEqual(Object.keys(day.order_parts), [A.hashRow({ orderId: 'order-1' })]);
+  assert.equal(day.order_keys, undefined);
+  // A later report lists every line of the order again: both are replaced.
+  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Status Pesanan': 'Tertunda' }),
+    affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product', 'Status Pesanan': 'Tertunda' })]);
+  [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.comm, 400);
+  assert.equal(day.comm_pending, 400);
+  assert.equal(day.rows, 2);
+  // Only one of its lines (the reader rejected the other, or a filtered
+  // export) would delete the other product: refused, nothing changes.
+  await assert.rejects(save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]),
+    /sebagian baris produk[\s\S]*2026-08-01 \(Alpha\)/);
+  [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.comm, 400);
+  assert.equal(day.rows, 2);
+  store.close();
+});
+
+test('a replacing file without an optional metric column keeps the saved values', async () => {
+  const { store, account } = await context();
+  const id = '120212345678901234';
+  await save(store, account, 'ads', [ad(id, '2026-08-01', { 'Results': '5' })]);
+  // A Meta pull has no Results column; this preset also leaves out Reach.
+  const pulled = ad(id, '2026-08-01', { 'Amount spent (IDR)': '150' });
+  delete pulled['Reach'];
+  assert.deepEqual(await save(store, account, 'ads', [pulled]), { added: 0, updated: 1, duplicates: 0 });
+  const [row] = await store.range(account.id, 'ads');
+  assert.equal(row.spend, 150);
+  assert.equal(row.results, 5);
+  assert.equal(row.reach, 800);
+  assert.equal(row.cpm, 150);
+  assert.equal(row.keep, undefined);
+  // Nothing new in it beyond the kept columns: a duplicate, not an update.
+  const again = ad(id, '2026-08-01', { 'Amount spent (IDR)': '150' });
+  delete again['Reach'];
+  delete again['Link clicks'];
+  assert.deepEqual(await save(store, account, 'ads', [again], { fileHash: 'again' }), { added: 0, updated: 0, duplicates: 1 });
+
+  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Status Pesanan': 'Tertunda' })]);
+  const revised = [affiliate('order-1'), affiliate('order-2')];
+  revised.forEach(r => delete r['Nilai Pembelian(Rp)']);
+  await save(store, account, 'affiliate', revised);
+  const [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.comm_done, 400);
+  assert.equal(day.gmv, 1000, 'order-1 keeps its saved purchase value; order-2 has none to keep');
+  assert.equal(day.qty, 2);
+  assert.equal(Object.values(day.order_parts).find(p => p[3] === 1000)[1], 200);
+  store.close();
+});
+
+test('a fingerprint-format day converts only with at least as many rows as it saved', () => {
+  const [record] = A.aggregateAffiliate([affiliate()]);
+  const v1 = { ...record, order_parts: undefined, order_keys: Object.keys(record.order_parts), rows: 2, merge_version: 1 };
+  assert.throws(() => A.checkDays('affiliate', [record], new Map([['2026-08-01', [v1]]])), /format lama/);
+  assert.deepEqual(A.checkDays('affiliate', [record], new Map([['2026-08-01', [{ ...v1, rows: 1 }]]])), ['2026-08-01']);
+  // A column the file lacks may not zero a saved total that cannot be split per order.
+  const lacking = { ...record, keep: ['gmv'] };
+  assert.throws(() => A.checkDays('affiliate', [lacking], new Map([['2026-08-01', [{ ...v1, rows: 1 }]]])), /Nilai Pembelian/);
+  assert.deepEqual(A.checkDays('affiliate', [lacking], new Map([['2026-08-01', [{ ...v1, rows: 1, gmv: 0 }]]])), ['2026-08-01']);
+});
+
+test('a save plan refuses history from before mergeable aggregates, like the store', () => {
+  const [record] = A.aggregateAffiliate([affiliate()]);
+  const legacy = { ...record, order_parts: undefined, order_keys: undefined, merge_version: undefined };
+  assert.throws(() => A.checkDays('affiliate', [record], new Map([['2026-08-01', [legacy]]])), /Riwayat lama 2026-08-01/);
+  assert.deepEqual(A.checkDays('affiliate', [record], new Map([['2026-08-01', [{ ...legacy, tag: 'Other' }]]])), []);
+});
+
+test('a synced commission day converted on the server drops its cached fingerprints', async () => {
+  const { store, account } = await context();
+  const backup = {
+    format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 3,
+    exported_at: '2026-09-07T00:00:00Z', account: { id: 7, kind: 'shopee', name: 'v1' }, ads: [], clicks: [], uploads: [],
+    affiliate: [{ account_id: 7, date: '2026-08-01', tag: 'Alpha', comm: 200, comm_done: 200, comm_pending: 0, gmv: 1000, qty: 1,
+      refund: 0, orders: 1, order_keys: [A.hashRow({ orderId: 'order-1' })], excluded: 0, rows: 1, merge_version: 1 },
+      { account_id: 7, date: '2026-08-02', tag: 'Alpha', comm: 200, comm_done: 200, comm_pending: 0, gmv: 1000, qty: 1,
+        refund: 0, orders: 1, order_keys: [A.hashRow({ orderId: 'order-2' })], excluded: 0, rows: 1, merge_version: 1 }],
+    rowhashes: ['a', 'b'].map((h, i) => ({ account_id: 7, kind: 'affiliate', hash: h.repeat(16), date: '2026-08-0' + (i + 1) })),
+  };
+  await store.importAccount(account.id, backup, { replace: true });
+  const [converted] = A.aggregateAffiliate([affiliate()]);
+  await store.applyChanges(account.id, { format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 3,
+    exported_at: '2026-09-08T00:00:00Z', account: { id: 7, kind: 'shopee', name: 'v1' }, ads: [], clicks: [], uploads: [], rowhashes: [],
+    affiliate: [{ ...converted, account_id: 7, merge_version: 2 }] });
+  assert.deepEqual((await contents(store, 'rowhashes')).map(h => h.date), ['2026-08-02']);
+  DailyStore.validateBackup(await store.exportAccount(account.id));
   store.close();
 });
 
@@ -193,7 +408,7 @@ test('two independent connections serialize overlap and account creation', async
   const rows = [affiliate(), affiliate('order-2')];
   await Promise.all([save(one, account, 'affiliate', [rows[0]]), save(two, account, 'affiliate', rows)]);
   assert.equal((await one.range(account.id, 'affiliate'))[0].comm, 400);
-  assert.equal((await one.knownRowHashes(account.id, 'affiliate')).size, 2);
+  assert.equal((await one.range(account.id, 'affiliate'))[0].orders, 2);
   await Promise.all([save(one, account, 'ads', [ad()]), save(two, account, 'ads', [ad()])]);
   assert.equal((await two.range(account.id, 'ads'))[0].spend, 100);
   assert.equal((await one.uploadHistory(account.id)).length, 3);
@@ -249,7 +464,7 @@ test('deleting one day permits full-file reupload without doubling retained days
   await save(store, account, 'ads', [ad()]);
   assert.equal(await store.deleteDay(account.id, 'affiliate', '2026-08-01'), 1);
   assert.equal(await store.seenFile(account.id, A.hashRows(rows), 'affiliate'), null);
-  assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 1);
+  assert.equal((await store.range(account.id, 'affiliate')).length, 1);
   const result = await save(store, account, 'affiliate', rows);
   assert.deepEqual(result, { added: 1, updated: 0, duplicates: 1 });
   assert.deepEqual((await store.range(account.id, 'affiliate')).map(r => [r.date, r.comm]), [['2026-08-01', 200], ['2026-08-02', 200]]);
@@ -299,7 +514,7 @@ test('failed writes roll back daily totals, fingerprints and upload guards toget
 test('v1 migration preserves history and rejects unidentified legacy overlap atomically', async () => {
   await seedV1();
   const store = await DailyStore.open(), account = { id: 1 };
-  assert.equal(store.db.version, 2);
+  assert.equal(store.db.version, 3);
   assert.equal((await store.range(1, 'affiliate'))[0].comm, 200);
   assert.equal((await store.range(1, 'affiliate'))[0].orders, 1);
   assert.ok(await store.seenFile(1, A.hashRows([affiliate()]), 'affiliate'));
@@ -314,7 +529,7 @@ test('v1 migration preserves history and rejects unidentified legacy overlap ato
   const [day] = await store.range(1, 'affiliate');
   assert.equal(day.comm, 400);
   assert.equal(day.orders, 2);
-  assert.equal(day.merge_version, 1);
+  assert.equal(day.merge_version, 2);
   store.close();
 });
 
@@ -330,7 +545,8 @@ test('invalid dates are excluded from stored figures and fingerprints', async ()
   const { store, account } = await context();
   await save(store, account, 'affiliate', [affiliate(), affiliate('bad-date', '2026-02-30')]);
   assert.equal((await store.range(account.id, 'affiliate')).length, 1);
-  assert.equal((await store.knownRowHashes(account.id, 'affiliate')).size, 1);
+  await save(store, account, 'clicks', [click(), click('10:00:00', '2026-02-30')]);
+  assert.equal((await store.knownRowHashes(account.id, 'clicks')).size, 1);
   const [log] = await store.uploadHistory(account.id);
   assert.equal(log.period_start, '2026-08-01');
   assert.equal(log.period_end, '2026-08-01');
@@ -342,6 +558,7 @@ test('invalid dates are excluded from stored figures and fingerprints', async ()
 test('storage retains aggregates and fingerprints without raw rows or clear order IDs', async () => {
   const { store, account } = await context();
   await save(store, account, 'affiliate', [affiliate('private-order', '2026-08-01', { 'Nama Pelanggan': 'Private Person' })]);
+  await save(store, account, 'clicks', [click('10:00:00', '2026-08-01', { 'Nama Pelanggan': 'Private Person' })]);
   const dump = Object.fromEntries(await Promise.all(['affiliate', 'rowhashes'].map(async kind => [kind, await contents(store, kind)])));
   const serialized = JSON.stringify(dump);
   assert.doesNotMatch(serialized, /private-order|Private Person|Nama Pelanggan|rawRows|ID Pemesanan/);
@@ -349,7 +566,7 @@ test('storage retains aggregates and fingerprints without raw rows or clear orde
   const exported = await store.exportAccount(account.id);
   assert.equal(exported.account.id, account.id);
   assert.equal(exported.affiliate.length, 1);
-  assert.equal(exported.uploads.length, 1);
+  assert.equal(exported.uploads.length, 2);
   store.close();
 });
 
@@ -403,8 +620,8 @@ test('versioned backup restores every aggregate, order key, fingerprint and uplo
   const otherBefore = backupRecords(await store.exportAccount(other.id));
   assert.equal(backup.format, DailyStore.BACKUP_FORMAT);
   assert.equal(backup.version, DailyStore.BACKUP_VERSION);
-  assert.equal(backup.database_version, 2);
-  assert.equal(backup.rowhashes.length, 7);
+  assert.equal(backup.database_version, 3);
+  assert.equal(backup.rowhashes.length, 4);
   const validated = DailyStore.validateBackup(clone(backup));
   assert.equal(validated.summary.days, 2);
   assert.deepEqual(validated.data.parameters, backup.parameters);
@@ -420,8 +637,8 @@ test('versioned backup restores every aggregate, order key, fingerprint and uplo
     assert.ok(restored[kind].every(row => !backup[kind].some(source => source.id === row.id)));
   }
   assert.equal((await save(store, target, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'second-product' }), affiliate('order-2', '2026-08-02')])).skipped, true);
-  const next = await save(store, target, 'affiliate', [affiliate(), affiliate('order-3')]);
-  assert.deepEqual(next, { added: 0, updated: 1, duplicates: 1 });
+  const next = await save(store, target, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'second-product' }), affiliate('order-3')]);
+  assert.deepEqual(next, { added: 0, updated: 1, duplicates: 2 });
   assert.equal((await store.range(target.id, 'affiliate'))[0].orders, 2);
   assert.equal((await store.range(target.id, 'affiliate'))[0].comm, 600);
   assert.equal({}.polluted, undefined);
@@ -510,6 +727,15 @@ test('corrupt schema, dates, numbers, revisions and mixed account rows never rep
     data => { data.rowhashes[0].date = '2026-08-30'; },
     data => { data.affiliate[0].order_keys = ['clear-private-order']; },
     data => { data.affiliate[0].merge_version = 9; },
+    data => { data.affiliate[0].comm += 1; },
+    data => { Object.values(data.affiliate[0].order_parts)[0][0] += 1; },
+    data => { Object.values(data.affiliate[0].order_parts)[0][6] = 5; },
+    data => { data.affiliate[0].order_parts = {}; },
+    data => { data.affiliate[0].order_parts = { ['clear-order-id'.padEnd(16, 'x')]: [1, 1, 0, 1, 1, 0, 0, 1] }; },
+    data => { data.affiliate[0].merge_version = 1; },
+    data => { data.ads[0].ad_key = 'name:Other'; },
+    data => { data.ads[0].ad_id = '123456789'; },
+    data => { data.clicks[0].merge_version = 2; },
     data => { data.clicks[0].by_region.Jakarta = 999; },
     data => { data.uploads[0].period_end = '2026-07-01'; },
     data => { data.parameters.ppn = NaN; },

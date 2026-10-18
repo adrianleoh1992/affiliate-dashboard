@@ -2,7 +2,9 @@
 
 Dashboard lokal untuk menggabungkan laporan komisi Shopee Affiliate, Meta Ads,
 dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, kebocoran klik,
-dan riwayat harian per akun. Semua pemrosesan dan penyimpanan berada di browser.
+dan riwayat harian per akun. Semua pemrosesan berada di browser. Riwayat harian
+disimpan di browser, atau di database bersama Supabase bila dikonfigurasi
+([SUPABASE.md](SUPABASE.md)).
 
 ## Menjalankan
 
@@ -234,15 +236,28 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
 
 ## Data revisi dan pemulihan
 
-Deduplikasi memakai seluruh isi baris. Baris yang status, komisi, atau metriknya
-berubah bukan baris identik. Ekspor tidak selalu menyediakan ID unik per item,
-sehingga aplikasi tidak dapat memastikan apakah perubahan itu koreksi atau
-transaksi lain yang sah.
+Laporan komisi disimpan per pesanan (ID Pemesanan di-hash). Menyimpan laporan
+yang direvisi, misalnya status Tertunda menjadi Selesai, **mengganti** angka
+setiap pesanan yang ada di file itu; pesanan yang tidak ada di file tetap seperti
+sebelumnya. Laporan Meta Ads yang membawa **Ad ID** (tarikan API atau ekspor
+dengan kolom Ad ID) mengganti angka per tanggal dan Ad ID, sehingga iklan dengan
+nama sama tetap terpisah. File yang hanya memuat sebagian baris produk dari
+pesanan yang sudah tersimpan (misalnya setelah **Muat baris valid saja**) ditolak,
+agar produk lain pesanan itu tidak terhapus. Kolom pelengkap yang tidak ada di
+file (misalnya Results pada tarikan API) tidak mengubah angka tersimpannya. Simpan
+laporan sesuai urutan waktu: laporan lama yang disimpan setelah laporan baru
+mengembalikan status lama.
 
-Untuk laporan **koreksi**, hapus file lama dari analisis. Pada **Data Tersimpan**,
-hapus tanggal terdampak untuk jenis laporan yang bersangkutan, lalu unggah dan
-simpan kembali laporan lengkap yang benar untuk tanggal tersebut. Jangan
-menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
+Ekspor CSV Meta tanpa Ad ID, laporan klik, dan baris komisi tanpa ID Pemesanan
+masih dideduplikasi dengan seluruh isi baris: baris identik dilewati, baris yang
+berubah ditambahkan. Satu tanggal tidak boleh berisi iklan tanpa Ad ID dan iklan
+dengan Ad ID sekaligus, karena iklan yang sama, termasuk yang berganti nama,
+akan terhitung dua kali; penyimpanan seperti itu ditolak.
+
+Untuk **koreksi** laporan jenis itu, hapus file lama dari analisis. Pada
+**Data Tersimpan**, hapus tanggal terdampak untuk jenis laporan yang
+bersangkutan, lalu unggah dan simpan kembali laporan lengkap yang benar untuk
+tanggal tersebut. Jangan menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
 penanda deduplikasi yang diperlukan agar unggah ulang dapat memulihkan hari itu.
 
 Database versi lama tetap dipertahankan. Agregat lama yang tidak memiliki
@@ -301,6 +316,8 @@ format ekspor dan kondisi browser telah tercakup.
 | File | Fungsi |
 |---|---|
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
+| `cloud-store.js`, `cloud-panel.js` | Database bersama Supabase (opsional), lihat [SUPABASE.md](SUPABASE.md) |
+| `supabase/migrations/` | Skema, RLS, dan fungsi database bersama |
 | `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
 | `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
 | `meta-api.js` | Klien Marketing API dan konversi ke format ekspor Meta |
