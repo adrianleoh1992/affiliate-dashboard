@@ -109,14 +109,17 @@ Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan iz
 - CSV Meta yang diunggah dan tarikan untuk tanggal yang sama ditolak di kedua
   arah agar biaya tidak terhitung dua kali, kecuali kolom `Ad ID` di CSV
   menunjukkan akun iklan yang berbeda. Hapus salah satunya terlebih dahulu.
-- Penggantian hanya berlaku untuk data di layar. Untuk riwayat yang sudah
-  **Disimpan**, aturan revisi sama dengan CSV: panel Simpan menandai
-  **Periode bertumpuk**; hapus tanggal itu di Data Tersimpan lalu simpan ulang.
-  Menyimpan tarikan revisi langsung dapat menggandakan biaya hari itu.
 - Status penayangan dan tiga peringkat adalah kondisi iklan saat ini, sama seperti
-  kolom ekspor Ads Manager, dan hanya diisi di baris tanggal terakhir tiap iklan.
-  Baris lama tidak berubah saat ditarik ulang, sehingga penyimpanan tetap
-  mengenalinya sebagai duplikat.
+  kolom ekspor Ads Manager. Keduanya hanya diisi di baris tanggal terakhir tiap
+  iklan dan tidak dihitung sebagai isi baris, sehingga hari yang ditarik ulang
+  dengan angka yang sama dikenali sebagai duplikat saat **Simpan**, apa pun
+  statusnya sekarang.
+- Penggantian hanya berlaku untuk data di layar. Riwayat yang sudah **Disimpan**
+  menambahkan setiap baris yang angkanya berbeda, jadi hari yang angkanya
+  direvisi Meta sejak disimpan akan terhitung dua kali bila disimpan lagi.
+  Dialog menyebut hari di rentang yang sudah tersimpan, dan panel Simpan
+  menandai **Periode bertumpuk**. Untuk hari itu, analisis di layar saja, atau
+  hapus tanggalnya di Data Tersimpan lalu simpan ulang.
 - Menutup dialog (Esc, Tutup, atau klik di luar) membatalkan tarikan yang sedang
   berjalan. Berganti atau membuat akun dashboard juga membuang hasil tarikan dan
   token di memori.

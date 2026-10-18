@@ -434,7 +434,7 @@
     <div class="card-head"><h2>Tarik dari Meta Ads Manager</h2><button class="btn ghost" data-close>Tutup</button></div>
     <p class="export-context" id="metaContext"></p>
     <p class="hint">Data iklan harian per iklan ditarik langsung dari Marketing API, lalu diperiksa seperti file ekspor. Token hanya dikirim ke Meta, tidak ke server lain.</p>
-    <details class="meta-help"><summary>Cara membuat token yang tidak kedaluwarsa</summary>
+    <details class="meta-help"><summary tabindex="0">Cara membuat token yang tidak kedaluwarsa</summary>
       <ol>
         <li>Di developers.facebook.com, buat aplikasi tipe Bisnis yang terhubung ke portofolio bisnis pemilik akun iklan, lalu tambahkan Marketing API. Mode pengembangan sudah cukup.</li>
         <li>Di Pengaturan Bisnis → Pengguna → Pengguna sistem, buat pengguna sistem, lalu tetapkan akun iklan (lihat performa) dan aplikasi tadi.</li>
@@ -448,7 +448,7 @@
     <p class="hint">Tanpa centang, token hilang saat halaman dimuat ulang. Dengan centang, token tersimpan di localStorage perangkat ini; jangan centang di komputer bersama.</p>
     <div class="button-row"><button class="btn sm" id="btnMetaAccounts" type="button">Muat akun iklan</button><button class="btn ghost sm" id="btnMetaForget" type="button">Hapus token</button></div>
     <div class="field"><label for="metaAccount">Akun iklan</label><select id="metaAccount"><option value="">Muat akun iklan dulu</option></select></div>
-    <div class="ctrls"><div class="field"><label for="metaSince">Dari</label><input type="date" id="metaSince"></div><div class="field"><label for="metaUntil">Sampai</label><input type="date" id="metaUntil"></div></div>
+    <div class="ctrls"><div class="field"><label for="metaSince">Dari</label><input type="date" id="metaSince" autocomplete="off"></div><div class="field"><label for="metaUntil">Sampai</label><input type="date" id="metaUntil" autocomplete="off"></div></div>
     <p class="hint">Default 7 hari sampai kemarin menurut zona waktu akun iklan, karena angka hari berjalan masih berubah. Menarik ulang mengganti tanggal yang sama dari akun iklan yang sama di layar. Tanggal yang sudah <b>Disimpan</b> tidak ikut diganti: hapus dulu tanggal itu di Data Tersimpan sebelum menyimpan tarikan ulang.</p>
     <p class="meta-saved hidden" id="metaSaved" role="status"></p>
     <p class="inline-error hidden" id="metaError" role="alert"></p>

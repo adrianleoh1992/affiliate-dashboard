@@ -4,7 +4,7 @@
 // Synthetic data only; any request outside the local server and the mocked
 // graph.facebook.com fails the test.
 const assert = require('node:assert/strict');
-const { createHarness, aff, ad, upload, saveDaily } = require('./browser.regression.test');
+const { createHarness, aff, ad, upload, saveDaily, storedRows } = require('./browser.regression.test');
 
 const insight = (name, date, spend) => ({
   ad_id: String(100 + name.length), ad_name: name, adset_name: 'Set', campaign_name: 'Camp', account_currency: 'IDR',
@@ -34,7 +34,8 @@ function graph(state) {
       Object.entries(state.unexplained || {}).forEach(([d, v]) => { if (d >= since && d <= until) totals[d] = (totals[d] || 0) + v; });
       return reply({ data: Object.entries(totals).map(([d, spend]) => ({ spend: String(spend), date_start: d, date_stop: d })) });
     }
-    if (u.searchParams.get('ids')) return reply({});
+    if (u.searchParams.get('ids')) return reply(Object.fromEntries(u.searchParams.get('ids').split(',')
+      .filter(id => state.status && state.status[id]).map(id => [id, { id, effective_status: state.status[id] }])));
     return reply({ error: { code: 100, message: 'unexpected ' + u.pathname } }, 400);
   };
 }
@@ -249,6 +250,68 @@ async function main() {
     await page.locator('#metaSince').fill('2026-08-02');
     await page.locator('#metaUntil').fill('2026-08-03');
     assert.equal(await page.locator('#metaSaved').isHidden(), true);
+  });
+
+  test('re-saving a re-pulled day whose numbers did not change adds nothing, even after a status change', async (page, state) => {
+    // Alpha's ad_id is 105 ('Alpha'.length + 100).
+    state.rows = [insight('Alpha', '2026-08-01', 100), insight('Alpha', '2026-08-02', 50)];
+    state.status = { 105: 'ACTIVE' };
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
+    await openMeta(page);
+    await pull(page, '2026-08-01', '2026-08-02');
+    await page.locator('#metaModal').waitFor({ state: 'hidden' });
+    await saveDaily(page);
+    state.rows.push(insight('Alpha', '2026-08-03', 70));
+    state.status = { 105: 'PAUSED' };
+    await page.locator('#btnMeta').click();
+    await pull(page, '2026-08-02', '2026-08-03');
+    await page.locator('#metaModal').waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => DATA.ads.some(r => r['Reporting starts'] === '2026-08-03'));
+    assert.equal(await page.evaluate(() => DATA.ads.find(r => r['Reporting starts'] === '2026-08-03')['Ad delivery']), 'inactive', 'status still reaches the analysis');
+    await saveDaily(page);
+    const stored = Object.fromEntries((await storedRows(page, 'ads')).map(r => [r.date, r.spend]));
+    assert.deepEqual(stored, { '2026-08-01': 100, '2026-08-02': 50, '2026-08-03': 70 });
+  });
+
+  test('an export from another ad account (its own Ad IDs and names) is kept next to a pull', async (page, state) => {
+    state.rows = [insight('Alpha', '2026-08-01', 100)];
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Zulu')] },
+      { name: 'other-account.csv', rows: [Object.assign(ad('Zulu', 30), { 'Ad ID': '999000111222333444' })] }]);
+    await openMeta(page);
+    await pull(page, '2026-08-01', '2026-08-01');
+    await page.locator('#metaModal').waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => RESULT && RESULT.kpi.spend === 130);
+    assert.deepEqual(await metaFiles(page), ['other-account.csv', 'meta-api_act_555_2026-08-01_2026-08-01.csv']);
+  });
+
+  test('an export whose Ad IDs were rounded by a spreadsheet still counts as the same account', async (page, state) => {
+    state.rows = [insight('Alpha', '2026-08-01', 100)];
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'cleaned.csv', rows: [Object.assign(ad('Alpha', 100), { 'Ad ID': '120253694690641000' })] }]);
+    await openMeta(page);
+    await pull(page, '2026-08-01', '2026-08-01');
+    await page.locator('#metaError').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#metaError').innerText(), /cleaned\.csv.*dua kali/s);
+    assert.deepEqual(await metaFiles(page), ['cleaned.csv']);
+  });
+
+  test('a damaged ad name does not block the pull', async (page, state) => {
+    state.rows = [insight('Kipas \uFFFD Mini', '2026-08-01', 100)];
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
+    await openMeta(page);
+    await pull(page, '2026-08-01', '2026-08-01');
+    await page.locator('#metaModal').waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => DATA.ads[0]['Ad name']), 'Kipas ? Mini');
+  });
+
+  test('Tab moves from the help toggle to the token field', async page => {
+    await page.locator('#btnMeta').click();
+    await page.locator('#metaModal [data-close]').focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), 'SUMMARY');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'metaToken');
   });
 
   test('the dialog fits a 360px screen', async page => {

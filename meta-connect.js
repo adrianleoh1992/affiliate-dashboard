@@ -67,8 +67,10 @@
     savedHint();
   }
 
-  /* Saved history adds rows whose content differs, so re-saving a re-pulled day
-     can count its spend twice. The dialog names those days before the pull. */
+  /* Saved history adds every row whose numbers differ from what it holds, so
+     re-saving a re-pulled day that Meta has revised counts it twice. The
+     dialog names saved days in the range before the pull. Saved ads are not
+     kept per ad account, so the hint cannot tell which account they came from. */
   async function loadSaved() {
     const acct = active(), history = window.__dailyStore;
     if (!history) return;
@@ -82,12 +84,13 @@
     const since = $('metaSince').value, until = $('metaUntil').value;
     const hit = SAVED.acct === active() && since && until ? SAVED.dates.filter(d => d >= since && d <= until) : [];
     $('metaSaved').textContent = hit.length
-      ? `${hit.length} hari di rentang ini (${hit[0]} — ${hit[hit.length - 1]}) sudah ada di Data Tersimpan. Tarikan tetap bisa dianalisis di layar, tetapi jangan simpan tanggal itu lagi sebelum menghapusnya di Data Tersimpan, karena biayanya bisa terhitung dua kali.`
+      ? `Data Tersimpan sudah berisi biaya iklan untuk ${hit.length} hari di rentang ini (${hit[0]} — ${hit[hit.length - 1]}). Baris yang tidak berubah dilewati saat Simpan, tetapi angka yang direvisi Meta sejak disimpan akan ditambahkan, bukan diganti. Jika data tersimpan itu dari akun iklan yang sama, analisis tarikan ini di layar saja, atau hapus tanggal itu di Data Tersimpan sebelum Simpan (menghapus tanggal ikut menghapus akun iklan lain pada tanggal itu).`
       : '';
     $('metaSaved').classList.toggle('hidden', !hit.length);
   }
 
   function open() {
+    if (BUSY && BUSY.signal.aborted) setBusy(null);
     if (OWNER !== active()) forgetSession();
     OWNER = active();
     const saved = load();
@@ -136,25 +139,40 @@
       return { file: f, start: min, end: max, adAccount: (PULLED.exec(f.name) || [])[1] || null };
     }).filter(x => x && x.start);
   }
-  const adIds = rows => new Set(rows.map(r => String(r['Ad ID'] == null ? '' : r['Ad ID']).trim()).filter(Boolean));
+  const idOf = r => String(r['Ad ID'] == null ? '' : r['Ad ID']).trim();
+  const nameOf = r => String(r['Ad name'] == null ? '' : r['Ad name']).trim().toLowerCase();
+  const dayIn = (start, end) => r => { const d = E.dayOnly(r['Reporting starts']); return d >= start && d <= end; };
   /* An uploaded export and a pull covering the same dates double count only
-     when they come from the same ad account. Ad IDs are unique across
-     accounts, so an export whose rows on those dates all carry an Ad ID and
-     share none with the pull is another account. Without Ad IDs there is no way
-     to tell, so it is treated as the same account. */
-  function sameAccount(exportRows, pulledIds, start, end) {
-    const inRange = exportRows.filter(r => { const d = E.dayOnly(r['Reporting starts']); return d >= start && d <= end; });
-    if (!inRange.length) return false;
-    if (inRange.some(r => !String(r['Ad ID'] == null ? '' : r['Ad ID']).trim())) return true;
-    return [...adIds(inRange)].some(id => pulledIds.has(id));
+     when they come from the same ad account. They are treated as different
+     accounts only on positive evidence: every export row on those dates has an
+     Ad ID, and neither an Ad ID nor an ad name matches the pull. IDs alone are
+     not enough, because a spreadsheet round trip rounds 18-digit IDs. */
+  function sameAccount(exportRows, pulledRows, start, end) {
+    const mine = exportRows.filter(dayIn(start, end)), theirs = pulledRows.filter(dayIn(start, end));
+    if (!mine.length || !theirs.length) return false;
+    if (mine.some(r => !idOf(r))) return true;
+    const ids = new Set(theirs.map(idOf)), names = new Set(theirs.map(nameOf).filter(Boolean));
+    return mine.some(r => ids.has(idOf(r)) || names.has(nameOf(r)));
   }
-  const spanName = (f, account) => {
-    const days = f.rowsData.map(r => E.dayOnly(r['Reporting starts'])).filter(E.isDate).sort();
+  const spanName = (rows, account) => {
+    const days = rows.map(r => E.dayOnly(r['Reporting starts'])).filter(E.isDate).sort();
     return M.fileName({ account, since: days[0], until: days[days.length - 1] });
   };
-  // A lone surrogate in an ad name passes parseText here but becomes U+FFFD
-  // once the text is encoded into a File; replace it first so both agree.
-  const wellFormed = s => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+  // parseText refuses text with U+FFFD as a broken encoding, and a lone
+  // surrogate becomes U+FFFD once the text is put in a File. Both can only come
+  // from a damaged ad name (a deleted ad cannot be renamed), so they become '?'.
+  const wellFormed = s => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|�/g, '?');
+  // Spend the ad rows do not explain, as a quality note naming the file.
+  const gapNote = (name, gaps) => gaps.length ? `${name}: ${full(gaps.reduce((s, g) => s + g.missing, 0))} biaya akun pada ${gaps.length} hari tidak muncul di baris iklan.` : '';
+  function withGaps(entry, gaps) {
+    const quality = (entry.quality || []).filter(q => q !== entry.metaGapNote), note = gapNote(entry.name, gaps);
+    return Object.assign(entry, { metaGaps: gaps, metaGapNote: note, quality: note ? quality.concat(note) : quality });
+  }
+  // A result that arrives after the dialog was closed is still shown.
+  function tell(message, isError) {
+    if ($('metaModal').classList.contains('show')) return isError ? setError(message) : setStatus(message);
+    toast(message);
+  }
 
   async function pull() {
     setError('');
@@ -164,15 +182,17 @@
     if (since > until) return setError('Tanggal mulai harus sebelum tanggal akhir.');
     const info = ACCOUNTS.find(a => a.id === account);
     if (info && info.currency && info.currency !== 'IDR') return setError(`Akun ini memakai ${info.currency}. Dashboard hanya menghitung biaya dalam IDR.`);
-    // Only uploaded exports are checked before fetching; the full check runs
-    // again on the data loaded at the end of the pull.
-    const early = adsSpans().filter(x => !x.adAccount && x.start <= until && x.end >= since && !adIds(x.file.rowsData || []).size);
+    // An export without Ad IDs can be refused before fetching; the full check
+    // runs again on the data loaded at the end of the pull.
+    const early = adsSpans().filter(x => !x.adAccount && x.start <= until && x.end >= since && !(x.file.rowsData || []).some(idOf));
     if (early.length) return setError(overlapMessage(early));
 
     // The pull belongs to the dashboard account and the loaded data it started
     // from. A switch, Kosongkan, a removed file or a cancel discards it.
     const acct = active(), epoch = IMPORT_EPOCH, controller = new AbortController();
     const stale = () => controller.signal.aborted || acct !== active() || epoch !== IMPORT_EPOCH;
+    const discarded = () => setStatus(controller.signal.aborted ? 'Penarikan dibatalkan. Data lama tidak diubah.' : 'Akun dashboard atau data yang dimuat berubah selama penarikan, jadi hasilnya dibuang. Tarik ulang bila perlu.');
+    const cancelled = new Promise(resolve => controller.signal.addEventListener('abort', resolve, { once: true }));
     setBusy(controller);
     TOKEN = currentToken(); OWNER = acct; rememberToken();
     try {
@@ -181,9 +201,12 @@
         onProgress: p => setStatus(p.step < p.total ? `Menarik ${p.range.since} — ${p.range.until} (${p.step + 1}/${p.total})…` : 'Membaca status iklan…'),
       });
       // Files still being read must be in FILES before overlaps are checked.
-      await IMPORT_QUEUE.catch(() => {});
-      if (stale()) return setStatus(controller.signal.aborted ? 'Penarikan dibatalkan. Data lama tidak diubah.' : 'Akun dashboard atau data yang dimuat berubah selama penarikan, jadi hasilnya dibuang. Tarik ulang bila perlu.');
+      // A cancel while waiting for them takes effect at once.
+      setStatus('Menunggu file lain selesai diperiksa…');
+      await Promise.race([IMPORT_QUEUE.catch(() => {}), cancelled]);
+      if (stale()) return discarded();
       if (!result.rows.length) { setStatus(''); return setError(`Tidak ada data iklan yang tayang pada ${since} — ${until} di akun ini.`); }
+      setStatus('Memeriksa data dari Meta…');
       const name = M.fileName(result), text = wellFormed(M.toCsv(result, info && info.currency));
       const parsed = DashboardImport.parseText(text, { fileName: name });
       if (!parsed.ok || parsed.stats.rejected) {
@@ -193,72 +216,92 @@
       }
       const file = new File([text], name, { type: 'text/csv' });
       if (file.size > 75 * 1024 * 1024) { setStatus(''); return setError('Hasil tarikan melebihi 75 MB. Persempit rentang tanggal lalu tarik per periode.'); }
+      // Checking a large pull blocks the page; a cancel pressed meanwhile is
+      // delivered here, before anything loaded is changed.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (stale()) return discarded();
 
-      const pulledIds = new Set(result.rows.map(r => String(r.ad_id || '')).filter(Boolean));
       const overlapping = adsSpans().filter(x => x.start <= until && x.end >= since);
-      const foreign = overlapping.filter(x => !x.adAccount && sameAccount(x.file.rowsData || [], pulledIds, since, until));
+      const foreign = overlapping.filter(x => !x.adAccount && sameAccount(x.file.rowsData || [], parsed.rows, since, until));
       if (foreign.length) { setStatus(''); return setError(overlapMessage(foreign)); }
       // An earlier pull from this ad account keeps only its days outside the
       // new range. Its other days are not fetched again, so they cannot come
       // back with revised numbers and be added to saved history a second time.
-      const before = FILES.slice(), outside = r => { const d = E.dayOnly(r['Reporting starts']); return d < since || d > until; };
+      const before = FILES.slice(), outside = r => !dayIn(since, until)(r);
       const trimmed = new Map(overlapping.filter(x => x.adAccount === account).map(x => {
         const rowsData = x.file.rowsData.filter(outside);
-        return [x.file, rowsData.length ? Object.assign({}, x.file, { rowsData, rows: rowsData.length, name: spanName({ rowsData }, account) }) : null];
+        if (!rowsData.length) return [x.file, null];
+        const copy = Object.assign({}, x.file, { rowsData, rows: rowsData.length, name: spanName(rowsData, account) });
+        return [x.file, withGaps(copy, (x.file.metaGaps || []).filter(g => g.date < since || g.date > until))];
       }));
-      if (trimmed.size) { FILES = FILES.map(f => trimmed.has(f) ? trimmed.get(f) : f).filter(Boolean); rebuildData(); }
+      if (trimmed.size) { FILES = FILES.map(f => trimmed.has(f) ? trimmed.get(f) : f).filter(Boolean); rebuildData(); renderChips(); }
+      setStatus('Memuat ke dashboard…');
       try { await files([file]); } catch (err) { /* reported below as not loaded */ }
       const added = FILES.find(f => f.name === name && f.type === 'ads' && !before.includes(f));
       if (!added) {
-        const report = IMPORT_REPORTS.find(r => r.name === name);
-        // Put the earlier pull back, but never into a workspace that changed
-        // while the file was being imported.
-        if (acct === active() && epoch === IMPORT_EPOCH && trimmed.size) { FILES = before.concat(FILES.filter(f => !before.includes(f) && ![...trimmed.values()].includes(f))); rebuildData(); finish(); }
-        setStatus('');
-        return setError('Hasil tarikan tidak dapat dimuat' + (report && report.message ? ': ' + report.message : '.') + ' Data lama tetap dipakai.');
+        const report = IMPORT_REPORTS.find(r => r.name === name), why = report && report.message ? ': ' + report.message : '.';
+        if (BUSY === controller) setBusy(null);
+        // Put the earlier pull back, but never into data that changed while
+        // the file was being imported.
+        if (acct === active() && epoch === IMPORT_EPOCH) {
+          if (trimmed.size) { FILES = before.concat(FILES.filter(f => !before.includes(f) && ![...trimmed.values()].includes(f))); rebuildData(); finish(); }
+          return tell('Hasil tarikan tidak dapat dimuat' + why + ' Data lama tetap dipakai.', true);
+        }
+        return tell('Hasil tarikan tidak dimuat karena data di dashboard berubah selama dimuat' + why + ' Tarik ulang rentang ini.', true);
       }
 
       const label = info ? info.name : (load(acct).adAccountName || account);
       const patch = { adAccountId: account, adAccountName: label, lastPull: `${since} — ${until}, ${new Date().toLocaleString('id-ID')}` };
       if (info) patch.adAccountTimezone = info.timezone;
       store(patch, acct);
+      withGaps(added, result.gaps);
+      if (BUSY === controller) setBusy(null);
       const loaded = `${added.rows} baris iklan harian dimuat dari ${label} (${since} — ${until}).`;
       if (result.gaps.length) {
         // Spend the ad rows do not explain would make ROAS look better than it
         // is, so the gap stays on screen and in the export's quality notes.
-        const missing = result.gaps.reduce((s, g) => s + g.missing, 0);
-        const days = result.gaps.map(g => g.date);
-        added.quality = (added.quality || []).concat(`${name}: ${full(missing)} biaya akun pada ${days.length} hari tidak muncul di baris iklan.`);
-        setBusy(null);
+        const days = result.gaps.map(g => g.date), missing = full(result.gaps.reduce((s, g) => s + g.missing, 0));
         setStatus(loaded);
-        setError(`Perhatian: total biaya akun iklan ${full(missing)} lebih besar dari jumlah baris iklan pada ${days.length} hari (${days.slice(0, 3).join(', ')}${days.length > 3 ? ', …' : ''}). Biaya itu tidak ikut dihitung, sehingga ROAS terlihat lebih baik dari kenyataan. Periksa tanggal tersebut di Ads Manager (iklan yang dihapus atau diarsipkan).`);
-        return;
+        return tell(`Perhatian: total biaya akun iklan ${missing} lebih besar dari jumlah baris iklan pada ${days.length} hari (${days.slice(0, 3).join(', ')}${days.length > 3 ? ', …' : ''}). Biaya itu tidak ikut dihitung, sehingga ROAS terlihat lebih baik dari kenyataan. Periksa tanggal tersebut di Ads Manager (iklan yang dihapus atau diarsipkan).`, true);
       }
-      setBusy(null);
       setStatus(loaded);
       closeModal($('metaModal'));
       toast(trimmed.size ? 'Data Meta diperbarui dari Ads Manager' : 'Data Meta dimuat dari Ads Manager');
     } catch (err) {
       if (err.name === 'AbortError') setStatus('Penarikan dibatalkan. Data lama tidak diubah.');
-      else { setError(err.message); setStatus(''); }
+      else { tell(err.message, true); setStatus(''); }
     } finally { if (BUSY === controller) setBusy(null); }
   }
   function overlapMessage(list) {
     return `Tanggal ini sudah ada dari ${list.map(x => x.file.name).join(', ')}. Hapus file itu dari kotak Meta Ads dulu agar biaya tidak terhitung dua kali, atau pilih tanggal lain.`;
   }
 
-  /* The same guard in the other direction: an uploaded Meta export whose
-     dates a pull from the same ad account already covers is refused, also
-     when it is accepted from the review step. */
+  /* Delivery status and rankings describe the ad today. On a pulled file they
+     stay readable (engine.js and daily-agg.js read them by name) but are not
+     enumerable, so they are not part of the row fingerprint: a re-pulled day
+     whose numbers did not change is recognized as a duplicate by the in-memory
+     dedupe and by saved history, whatever the status is now. */
+  const VOLATILE = ['Ad delivery', 'Quality ranking', 'Engagement rate ranking', 'Conversion rate ranking'];
+  const settle = rows => rows.forEach(r => VOLATILE.forEach(k => {
+    if (!Object.prototype.propertyIsEnumerable.call(r, k)) return;
+    const value = r[k];
+    delete r[k];
+    Object.defineProperty(r, k, { value, enumerable: false, writable: true, configurable: true });
+  }));
+
+  /* The same double-count guard in the other direction: an uploaded Meta
+     export whose dates a pull from the same ad account already covers is
+     refused, also when it is accepted from the review step. */
   const commitImport = window.commitImport;
   window.commitImport = function (report) {
     const p = report && report.parsed;
-    if (p && p.type === 'ads' && p.period && !PULLED.test(report.name || '')) {
+    if (p && p.type === 'ads' && PULLED.test(report.name || '')) settle(p.rows || []);
+    else if (p && p.type === 'ads' && p.period) {
       const clash = adsSpans().filter(x => x.adAccount && x.start <= p.period.end && x.end >= p.period.start
-        && sameAccount(p.rows || [], adIds(x.file.rowsData || []), x.start > p.period.start ? x.start : p.period.start, x.end < p.period.end ? x.end : p.period.end));
+        && sameAccount(p.rows || [], x.file.rowsData || [], x.start > p.period.start ? x.start : p.period.start, x.end < p.period.end ? x.end : p.period.end));
       if (clash.length) {
         report.state = 'error';
-        report.message = `Tanggal di file ini sudah ada dari tarikan Ads Manager (${clash.map(x => x.file.name).join(', ')}). Hapus tarikan itu dulu, atau tarik ulang tanggal ini dari Ads Manager, agar biaya tidak terhitung dua kali.`;
+        report.message = `Tanggal di file ini sudah ada dari tarikan Ads Manager (${clash.map(x => x.file.name).join(', ')}). Hapus tarikan itu dulu, atau tarik ulang tanggal ini dari Ads Manager, agar biaya tidak terhitung dua kali. Jika file ini dari akun iklan lain, tarik akun itu juga dari Ads Manager.`;
         return false;
       }
     }
