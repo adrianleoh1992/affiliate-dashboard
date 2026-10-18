@@ -75,7 +75,7 @@
     const charts = root.DashboardPDFCharts.create(doc, { font, text, colors: COLORS });
     const statusColors = { scale: COLORS.accent, pantau: [142, 97, 13], stop: COLORS.danger,
       organik: [77, 113, 157], evaluasi: [85, 104, 115] };
-    const statusNames = { scale: 'Scale', pantau: 'Pantau', stop: 'Stop', organik: 'Organik', evaluasi: 'Evaluasi' };
+    const statusNames = { scale: 'Scale', pantau: 'Pantau', stop: 'Stop', organik: 'Organik', evaluasi: 'Belum cukup data' };
     const account = text(settings.account || 'Akun aktif');
     const title = text(settings.title || 'Laporan kinerja affiliate');
     const generated = settings.generatedAt == null ? new Date() : new Date(settings.generatedAt);
@@ -234,11 +234,17 @@
       ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Shopee / Meta'],
     ], 4);
     section('Prioritas anggaran');
+    // Paid tags not judged yet: same definition as the dashboard card. Their
+    // net is real money, so it gets a card rather than only a count.
+    const unjudged = tags.filter(t => t.status === 'evaluasi' && amount(t.spend) > 0);
+    const unjudgedNet = finite(a.evalNet) ? a.evalNet : unjudged.reduce((sum, t) => sum + amount(t.netEff), 0);
+    const unjudgedSpend = finite(a.evalSpend) ? a.evalSpend : unjudged.reduce((sum, t) => sum + amount(t.spend), 0);
     metricGrid([
       ['Hemat dari Turunkan Bid', money(a.bidSaving), integer(a.overbidCount) + ' tag di atas CPC ideal'],
       ['Rugi di Tag STOP', money(a.stopLoss), integer(a.stopCount) + ' tag | biaya ' + money(a.stopSpend)],
       ['Potensi perbaikan laba', money(a.maxGain), 'Batas atas: bid + rugi STOP'],
-    ], 3);
+      ['Tag belum cukup data', money(unjudgedNet), integer(unjudged.length) + ' tag | laba efektif', unjudgedNet < 0],
+    ], 4);
     section('Keputusan utama');
     decisionBoard();
     y += 2;
@@ -249,7 +255,7 @@
     if (coverage.length) paragraph('Cakupan: ' + coverage.join('; ') + '. Laba memakai data yang tersedia.',
       { size: 7, color: COLORS.ink, bold: true, gap: 1 });
     paragraph('Keputusan sampai ' + (r.matureUntil || '-') + '. '
-      + (tags.some(t => t.status === 'evaluasi') ? integer(tags.filter(t => t.status === 'evaluasi').length) + ' tag perlu evaluasi; lihat tabel. ' : '')
+      + (unjudged.length ? integer(unjudged.length) + ' tag berbiaya belum cukup data (biaya ' + money(unjudgedSpend) + '); lihat tabel. ' : '')
       + 'Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'belum tersedia') + '.', { size: 7, gap: 0 });
 
     nextPage();
@@ -281,9 +287,11 @@
     charts.pairedBars({ x: M, y, width: WIDTH, height: 93, leftLabel: 'Biaya + PPN', rightLabel: 'Komisi efektif',
       rows: topTags.map(t => ({ label: t.tag, left: t.spend, right: t.commEff })) });
     y += 99;
-    section('Keputusan setiap tag', 'ROAS matang = dasar keputusan. Tanda "-" berarti biaya pembagi tidak tersedia.');
+    section('Keputusan setiap tag', 'ROAS matang = dasar keputusan. "di batas" = ROAS matang dalam 10% dari ambang yang menentukan vonis. Tanda "-" berarti biaya pembagi tidak tersedia.');
+    // A few orders could flip a verdict sitting on its threshold; say so beside it.
+    const verdictName = t => (statusNames[t.status] || t.label) + (finite(t.borderAt) ? '\ndi batas' : '');
     table(['Tag', 'Keputusan', 'Biaya + PPN', 'Komisi efektif', 'Laba efektif', 'ROAS matang'], tags.map(t => [
-      t.tag, statusNames[t.status] || t.label, money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
+      t.tag, verdictName(t), money(t.spend), money(t.commEff), money(t.netEff), ratio(t.matureRoasEff, amount(t.matureSpend) > 0),
     ]), [45, 25, 30, 30, 30, 22], { numeric: [2, 3, 4, 5], statuses: tags.map(t => t.status) });
 
     section('Prioritas tindakan');
@@ -337,7 +345,7 @@
 
     if (mode === 'lengkap') {
       section('Alasan keputusan', 'Rincian penjelasan untuk penelusuran setiap tag.');
-      table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, statusNames[t.status] || t.label,
+      table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, verdictName(t),
         [t.reason, t.linkNote, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
       table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).filter(m => !omittedTags.has(m.tag)).map(m => [

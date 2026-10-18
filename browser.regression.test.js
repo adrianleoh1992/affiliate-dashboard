@@ -534,6 +534,40 @@ async function main() {
     assert.match(ui.leakHead, /± Klik/);
   });
 
+  test('unjudged paid tags get their own net on the board, near-threshold verdicts say so, and reach is gone', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const days = Array.from({ length: 10 }, (_, i) => '2026-08-' + String(i + 1).padStart(2, '0'));
+    const order = (tag, date, comm) => ({ ...aff(tag + date, tag, date), 'Total Komisi per Pesanan(Rp)': String(comm) });
+    await upload(page, [
+      // Scale205: ROAS 2,05 on 7 mature days, inside 10% of the Scale threshold.
+      { name: 'affiliate.csv', rows: [...days.map(d => order('Scale205', d, 41000)), order('SmallPaid', '2026-08-01', 4000)] },
+      { name: 'ads.csv', rows: [...days.map(d => ad('Scale205', 20000, d)), ad('SmallPaid', 7500, '2026-08-01'),
+        ad('SmallPaid', 7500, '2026-08-02'), ad('NoSuchTag', 9000, '2026-08-02'),
+        ...days.map(d => ({ ...ad('IdleAd', 0, d), 'Link clicks': '0', 'Impressions': '0', 'Reach': '0', 'Landing page views': '0' }))] },
+      { name: 'clicks.csv', rows: Array.from({ length: 5 }, (_, i) => ({ ...click('ClickOnly', '2026-08-03'), 'Waktu Klik': '2026-08-03 09:0' + i + ':00' })) }]);
+    const read = () => page.evaluate(() => ({
+      card: document.querySelector('#dgrid .dcard.evaluasi').innerText.replace(/\s+/g, ' '),
+      synth: document.getElementById('synth').innerText,
+      rows: document.querySelectorAll('#tblMain tbody tr.dayrow').length,
+      note: document.getElementById('filterNote').textContent,
+      edge: [...document.querySelectorAll('#tblMain .pill.edge')].map(e => ({ text: e.textContent, title: e.title })),
+      counts: RESULT.kpi.counts.evaluasi,
+    }));
+    const before = await read();
+    assert.equal(before.counts, 4, 'idle ad names and click-only sub_ids stay evaluasi');
+    assert.match(before.card, /Belum cukup data \(2\)/i);
+    assert.match(before.card, /Laba bersih -Rp20rb dari biaya Rp24rb/);
+    assert.match(before.synth, /2 tag berbiaya belum cukup data untuk divonis; gabungannya rugi Rp20rb dari biaya Rp24rb\./);
+    assert.deepEqual(before.edge.map(e => e.text), ['di batas']);
+    assert.ok(before.edge[0].title.includes('ROAS matang 2,05x') && before.edge[0].title.includes('ambang Scale 2,00x'), before.edge[0].title);
+    await page.locator('#dgrid [data-filter="evaluasi"]').click();
+    const filtered = await read();
+    assert.equal(filtered.rows, 2, 'the filtered table holds the same tags the card counts');
+    assert.equal(filtered.note, 'Disaring: belum cukup data (berbiaya) · 2 tag');
+    await page.locator('[data-tab="harian"]').click();
+    assert.doesNotMatch(await page.locator('#dailyStrip').innerText(), /reach/i, 'daily reach summed over days is not unique people');
+  });
+
   test('keyboard focus scrolls below the sticky header at every header height', async page => {
     for (const [width, sticky] of [[768, true], [1024, true], [1440, true], [390, false]]) {
       await page.setViewportSize({ width, height: 900 });

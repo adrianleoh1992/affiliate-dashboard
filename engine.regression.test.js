@@ -239,6 +239,60 @@ assert.ok(!healthSnap.tags.some(t => /cek link/.test(t.reason)));
 assert.deepEqual(Object.keys(healthSnap.kpi).filter(k => /^(wastedLow|lostClicks|gainClicks|netLostClicks)$/.test(k)), [],
   'new click totals stay out of snapshots so older trend points do not read as zero');
 
+// "di batas" marks only verdicts a ROAS threshold decided, on the 2-decimal
+// value the reason prints. 10 days x 20.000 spend, lag 3, so 7 mature days.
+const edgeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+const edgeAff = [], edgeAds = [];
+const edgeTag = (tag, comms) => edgeDays.forEach((date, i) => {
+  edgeAds.push(ad(date, 20000, { 'Ad name': tag }));
+  const comm = Array.isArray(comms) ? comms[i] : comms;
+  if (comm) edgeAff.push(aff(tag + date, comm, { 'Tag_link1': tag, 'Waktu Pemesanan': date + ' 10:00:00', 'Waktu Klik': date + ' 09:00:00' }));
+});
+edgeTag('Scale205', 41000);
+edgeTag('Pantau190', 38000);
+edgeTag('Pantau150', 30000);
+edgeTag('Pantau110', 22000);
+edgeTag('Pantau105', 21000);
+edgeTag('RoasStop095', [0, 0, 0, 0, 44333, 44333, 44334, 0, 0, 0]);
+edgeTag('StreakStop095', 19000);
+edgeTag('RoasStop089', [0, 0, 0, 0, 0, 62300, 62300, 0, 0, 0]);
+// Not judged: a small paid tag, an ad name matching no tag, an idle ad name
+// and a click-only sub_id. Only the first two have money at stake.
+edgeAds.push(ad('2026-09-01', 7500, { 'Ad name': 'SmallPaid' }), ad('2026-09-02', 7500, { 'Ad name': 'SmallPaid' }));
+edgeAff.push(aff('small-1', 4000, { 'Tag_link1': 'SmallPaid', 'Waktu Pemesanan': '2026-09-01 10:00:00' }));
+edgeAds.push(ad('2026-09-02', 9000, { 'Ad name': 'NoSuchTag' }));
+edgeDays.forEach(date => edgeAds.push(ad(date, 0, { 'Ad name': 'IdleAd', 'Link clicks': 0, 'Impressions': 0 })));
+const edgeClicks = Array.from({ length: 5 }, (_, i) => click('2026-09-03', { 'Tag_link': 'ClickOnly', 'Waktu Klik': '2026-09-03 09:0' + i + ':00' }));
+const edge = E.analyze({ affiliate: edgeAff, ads: edgeAds, clicks: edgeClicks }, { ppn: 0 });
+const E2 = Object.fromEntries(edge.tags.map(t => [t.tag, t]));
+for (const [tag, status, borderAt] of [
+  ['Scale205', 'scale', 2], ['Pantau190', 'pantau', 2], ['Pantau150', 'pantau', null],
+  ['Pantau110', 'pantau', 1], // exactly 1,10x: inside the band despite floating point
+  ['Pantau105', 'pantau', 1], ['RoasStop095', 'stop', 1],
+  ['StreakStop095', 'stop', null], // decided by the loss streak, not the threshold
+  ['RoasStop089', 'stop', null], ['SmallPaid', 'evaluasi', null], ['NoSuchTag', 'evaluasi', null],
+  ['IdleAd', 'evaluasi', null], ['ClickOnly', 'evaluasi', null],
+]) {
+  assert.equal(E2[tag].status, status, tag);
+  assert.equal(E2[tag].borderAt, borderAt, tag + ' borderAt');
+  assert.ok(!/batas/.test(E2[tag].reason), tag + ': the reason text is unchanged');
+}
+assert.match(E2.StreakStop095.reason, /berturut/);
+const edgeHigh = E.analyze({ affiliate: edgeAff, ads: edgeAds }, { ppn: 0, thScale: 3 });
+assert.equal(edgeHigh.tags.find(t => t.tag === 'Scale205').borderAt, null, 'the band follows the threshold setting');
+assert.equal(edgeHigh.tags.find(t => t.tag === 'Pantau190').borderAt, null);
+// Unjudged money counts paid tags only; kpi.counts keeps its old meaning.
+assert.equal(edge.kpi.counts.evaluasi, 4);
+assert.equal(edge.actions.evalCount, 2);
+near(edge.actions.evalSpend, 24000);
+near(edge.actions.evalComm, 4000);
+near(edge.actions.evalNet, -20000);
+near(edge.actions.evalNet, edge.tags.filter(t => t.status === 'evaluasi' && t.spend > 0).reduce((s, t) => s + t.netEff, 0));
+const edgeSnap = E.toSnapshot(edge, { id: 2, saved: '2026-09-11 00:00:00' });
+assert.ok(edgeSnap.tags.every(t => !('borderAt' in t)), 'borderAt stays out of snapshots');
+assert.deepEqual(Object.keys(edgeSnap.kpi).filter(k => /^eval/.test(k)), []);
+assert.deepEqual(edgeSnap.kpi.counts, edge.kpi.counts);
+
 // Click-only data and dates are meaningful even without affiliate/ads rows.
 const clicksOnly = analyze({ clicks: [click()] });
 assert.equal(clicksOnly.range.start, '2026-08-01');

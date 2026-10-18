@@ -709,7 +709,14 @@ function analyze(data, options) {
     const streakStop = streak >= o.streakDays;
     const roasEff = spend > 0 ? commEff / spend : (commEff > 0 ? Infinity : 0);
 
-    let status = 'evaluasi', label = 'Belum cukup data', reason = '';
+    let status = 'evaluasi', label = 'Belum cukup data', reason = '', borderAt = null;
+    /* "di batas": the ROAS that decided the verdict sits within ±10% of the
+       threshold it was compared with, so a few orders could flip it. Compared
+       on the 2-decimal value the reason prints; the epsilon keeps 1,10x and
+       2,20x inside the band despite binary floating point. */
+    const r2 = Math.round(roasEff * 100) / 100;
+    const nearest = ths => ths.filter(th => th > 0 && Math.abs(r2 - th) <= th * 0.1 + 1e-9)
+      .sort((x, y) => Math.abs(r2 - x) - Math.abs(r2 - y))[0] || null;
     const qualified = spend > 0 && spend >= o.minSpend && daysProd > 0 && daysProd >= o.minDays;
 
     if (!hasPaidSpend && commEff > 0) {
@@ -720,19 +727,20 @@ function analyze(data, options) {
       if (daysProd <= 0 || daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi matang`);
       reason = need.join(', ');
     } else if (streakStop) {
+      // The streak decided this STOP, not a threshold, so it is never "di batas".
       status = 'stop'; label = 'STOP';
       reason = `ROAS di bawah 1 selama ${streak} hari produksi berturut`;
     } else if (roasEff >= o.thScale) {
-      status = 'scale'; label = 'SCALE';
+      status = 'scale'; label = 'SCALE'; borderAt = nearest([o.thScale]);
       reason = `ROAS efektif matang ${ratioText(roasEff)}x di atas target ${String(o.thScale).replace('.', ',')}x`;
     } else if (roasEff >= o.thPantau) {
-      status = 'pantau'; label = 'PANTAU';
+      status = 'pantau'; label = 'PANTAU'; borderAt = nearest([o.thPantau, o.thScale]);
       reason = `ROAS efektif matang ${ratioText(roasEff)}x, belum layak scale`;
     } else {
-      status = 'stop'; label = 'STOP';
+      status = 'stop'; label = 'STOP'; borderAt = nearest([o.thPantau]);
       reason = `ROAS efektif matang ${ratioText(roasEff)}x di bawah titik impas`;
     }
-    return { status, label, reason, streak };
+    return { status, label, reason, streak, borderAt };
   }
 
   const tags = Object.keys(T).map(k => {
@@ -837,7 +845,7 @@ function analyze(data, options) {
       shopeeClicks, cpcShopee, winSpend, winClicks,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
-      leak, status: v.status, label: v.label, reason: v.reason, linkNote, streak: v.streak, bidHint,
+      leak, status: v.status, label: v.label, reason: v.reason, linkNote, streak: v.streak, borderAt: v.borderAt, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
@@ -1016,6 +1024,11 @@ function analyze(data, options) {
   const leakWaste = tags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
   const leakWasteStop = stopTags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
   const leakStopCount = stopTags.filter(linkBad).length;
+  /* Paid tags not judged yet are not neutral: their net is real money. Only
+     tags with spend count, so click-only sub_ids and idle ad names (also
+     evaluasi, nothing at stake) do not inflate it. Same netEff as the table's
+     Laba column, so the filtered table adds up to evalNet. */
+  const evalTags = tags.filter(t => t.status === 'evaluasi' && t.spend > 0);
 
   /* Organic tags earn with zero ad spend — the strongest ad candidates in the
      account, previously shown only as a purple badge with no suggestion. */
@@ -1044,6 +1057,10 @@ function analyze(data, options) {
   const actions = {
     bidSaving, overbidCount: overbid.length,
     stopSpend, stopLoss, stopComm, stopProfitCount, stopLiveCount, stopCount: stopTags.length,
+    evalCount: evalTags.length,
+    evalSpend: evalTags.reduce((s, t) => s + t.spend, 0),
+    evalComm: evalTags.reduce((s, t) => s + t.commEff, 0),
+    evalNet: evalTags.reduce((s, t) => s + t.netEff, 0),
     leakWaste, leakWasteStop, leakWasteLive: leakWaste - leakWasteStop,
     leakStopCount, leakLiveCount: kpi.leakTags - leakStopCount,
     // Profit changes only: the bid gap plus this period's loss on STOP tags.

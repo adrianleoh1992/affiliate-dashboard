@@ -290,22 +290,26 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:11px;margin-bottom:16px;
   align-items:start}
 .dcard{border-radius:11px;padding:14px;border:1px solid;cursor:pointer;transition:.15s;
-  display:flex;flex-direction:column}
+  display:flex;flex-direction:column;min-width:0}
 .dcard:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
 .dcard.dim{opacity:.42}
 .dcard.scale{background:var(--ok-soft);border-color:var(--ok)}
 .dcard.pantau{background:var(--warn-soft);border-color:var(--warn)}
 .dcard.stop{background:var(--bad-soft);border-color:var(--bad)}
 .dcard.organik{background:var(--organic-soft);border-color:var(--organic)}
+.dcard.evaluasi{background:var(--surface-2);border-color:var(--border-strong)}
+/* A <p>, not a div, so the print rule that counts .ditem divs still shows four names. */
+.dtotal{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;font-size:11px;color:var(--text-dim);margin-bottom:6px}
+.dtotal b{font-size:15px;font-variant-numeric:tabular-nums}
 .dcard h4{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px;
   display:flex;align-items:baseline;gap:6px}
 .dcard h4 .unit{font-size:9.5px;font-weight:600;opacity:.6;margin-left:auto}
 .dcard.scale h4{color:var(--ok)} .dcard.pantau h4{color:var(--warn)}
-.dcard.stop h4{color:var(--bad)} .dcard.organik h4{color:var(--organic)}
+.dcard.stop h4{color:var(--bad)} .dcard.organik h4{color:var(--organic)} .dcard.evaluasi h4{color:var(--text-dim)}
 .ditem{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:4px 0;
   border-top:1px solid rgba(0,0,0,.06);font-size:12px}
 .ditem:first-of-type{border-top:none}
-.ditem .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ditem .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .ditem .v{font-weight:800;font-variant-numeric:tabular-nums;flex-shrink:0}
 .dcard .empty{font-size:11.5px;color:var(--text-mute);font-style:italic;line-height:1.5}
 
@@ -330,6 +334,7 @@ tbody tr:hover{background:var(--surface-2)}
 .badge.organik{background:var(--organic-soft);color:var(--organic)}
 .badge.evaluasi{background:var(--surface-2);color:var(--text-mute)}
 .pill{font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--surface-2);color:var(--text-dim)}
+.pill.edge{background:transparent;border:1px dashed var(--border-strong)}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
 .dot.on{background:var(--ok)} .dot.off{background:var(--text-mute)}
 .pos{color:var(--ok);font-weight:700} .neg{color:var(--bad);font-weight:700}
@@ -616,12 +621,13 @@ tbody tr:hover{background:var(--surface-2)}
   .action-grid{display:flex!important;break-inside:avoid;margin-bottom:10px}
   .action-card .a-val{font-size:11px}.action-card .a-label{font-size:9px}
   .action-card .a-copy{font-size:8px}
-  /* Four across, same as the cards above. Left to auto-fit it breaks 3+1 and
-     the stray fourth column pushes the page over. */
-  .dgrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  /* Five across, one per verdict. Left to auto-fit it breaks 3+2 and the
+     stray column pushes the page over. */
+  .dgrid{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;
     break-inside:avoid;margin-bottom:10px;gap:6px}
   .dcard{min-height:0;padding:8px 9px}
   .dcard h4{font-size:9px}.ditem{font-size:8.5px;padding:1px 0}
+  .dtotal{font-size:8.5px;margin-bottom:3px}.dtotal b{font-size:10px}
   /* Four names per verdict is enough on paper; the full list is in the app. */
   .dcard .ditem:nth-of-type(n+5){display:none}
   .action-grid{flex-wrap:wrap}

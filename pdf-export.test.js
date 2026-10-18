@@ -158,10 +158,10 @@ async function main() {
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
       for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
-        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Rugi di Tag STOP', 'Potensi perbaikan laba']) {
+        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Rugi di Tag STOP', 'Potensi perbaikan laba', 'Tag belum cukup data']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
-      assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      assert.equal(report.cards.filter(card => card.page === 1).length, 16, 'All KPI, click, budget and decision cards must fit on the dashboard page');
       for (const card of report.cards) assert.ok(card.x >= 14 && card.x + card.width <= 196.01 && card.y >= 18 && card.y + card.height <= 279,
         'Dashboard cards must remain within page bounds');
       const trend = report.charts[0].box.rows;
@@ -301,6 +301,41 @@ async function main() {
       assert.deepEqual(report.charts.pairedBars.rows.map(row => row.label).sort(), ['Biaya tetap', 'Organik tetap', 'Pending tetap', 'Refund tetap']);
     }
     console.log('PASS PDF all modes omit zero-activity tags consistently while retaining organic, loss, refund and pending commission');
+    // A Scale at 2,05x sits on its threshold; two paid tags are not judged yet.
+    const edgeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+    const edgeOrder = (tag, date, commission) => ({ 'ID Pemesanan': tag + date, 'Status Pesanan': 'Selesai',
+      'Waktu Pemesanan': date + ' 10:00:00', 'Tag_link1': tag, 'Total Komisi per Produk(Rp)': String(commission) });
+    const edgeAd = (tag, date, spend) => ({ 'Ad name': tag, 'Amount spent (IDR)': String(spend),
+      'Reporting starts': date, 'Reporting ends': date });
+    const edge = Engine.analyze({
+      affiliate: [...edgeDays.map(date => edgeOrder('Scale205', date, 41000)), edgeOrder('SmallPaid', '2026-09-01', 4000)],
+      ads: [...edgeDays.map(date => edgeAd('Scale205', date, 20000)), edgeAd('SmallPaid', '2026-09-01', 7500),
+        edgeAd('SmallPaid', '2026-09-02', 7500), edgeAd('NoSuchTag', '2026-09-02', 9000)], clicks: [],
+    }, { ppn: 0, lagDays: 3 });
+    const edgeReport = await page.evaluate(result => {
+      const api = window.jspdf.jsPDF.API, originalTable = api.autoTable, OriginalPDF = window.jspdf.jsPDF;
+      const tables = [], front = [];
+      api.autoTable = function (options) { tables.push(options.body); return originalTable.call(this, options); };
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 1) front.push([].concat(value).join(' '));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'lengkap', generatedAt: '2026-09-11' }); }
+      finally { api.autoTable = originalTable; window.jspdf.jsPDF = OriginalPDF; }
+      return { tables, front };
+    }, edge);
+    const verdictCells = edgeReport.tables.flat().filter(row => row.length === 6).map(row => row[0] + ' = ' + row[1]);
+    assert.ok(verdictCells.includes('Scale205 = Scale\ndi batas'), 'near-threshold verdict is marked: ' + verdictCells.join(' | '));
+    assert.ok(verdictCells.includes('SmallPaid = Belum cukup data'), 'the PDF names unjudged tags like the dashboard badge');
+    const card = edgeReport.front.indexOf('Tag belum cukup data');
+    assert.deepEqual(edgeReport.front.slice(card, card + 3), ['Tag belum cukup data', 'Rp -20.000,00', '2 tag | laba efektif']);
+    assert.ok(edgeReport.front.join(' ').includes('2 tag berbiaya belum cukup data (biaya Rp 24.000,00)'), 'page-1 note counts paid unjudged tags');
+    console.log('PASS PDF unjudged paid tags get their own card and near-threshold verdicts read "di batas"');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);

@@ -214,6 +214,24 @@ test('missing optional counters are visible warnings', () => {
   assert.ok(hasIssue(r, 'empty_optional_number'));
 });
 
+test('blank counters on undelivered ad rows and unread CPM/CTR/Frequency stay quiet; paid-row blanks say they count as 0', () => {
+  // Meta lists every ad for every day, delivered or not, with blank counters when nothing ran.
+  const blanks = { 'Link clicks': '', 'CTR (link click-through rate)': '', 'Landing page views': '', 'Frequency': '' };
+  const r = parse([
+    ads({ 'Ad name': 'Idle', 'Amount spent (IDR)': '0', 'Impressions': '0', 'Reach': '', ...blanks }),
+    ads({ 'Ad name': 'Paid', 'Amount spent (IDR)': '5000', 'Impressions': '900', 'Reach': '700', ...blanks }),
+  ]);
+  assert.equal(r.ok, true);
+  assert.equal(r.stats.accepted, 2);
+  assert.equal(r.rows[0]['Link clicks'], '', 'the blank is kept, and the engine reads it as 0');
+  const notes = r.issues.filter(issue => issue.code === 'empty_optional_number');
+  assert.deepEqual(notes.map(note => note.column).sort(), ['Landing page views', 'Link clicks']);
+  for (const note of notes) {
+    assert.equal(note.row, 3, 'only the row with spend: ' + note.message);
+    assert.match(note.message, /kosong pada baris berbiaya; dihitung 0\./);
+  }
+});
+
 test('Shopee optional blank refunds and double-dash completion markers keep valid orders readable', () => {
   const rows = [
     aff({ 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),

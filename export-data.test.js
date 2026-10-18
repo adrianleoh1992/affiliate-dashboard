@@ -15,10 +15,17 @@ test('CSV keeps decimal precision, zero, negative amounts and multiline text',()
 test('tags CSV appends the link note after the existing columns',()=>{
   const data={...result,tags:[{...result.tags[0],linkNote:'hanya 0% klik sampai Shopee — cek link'}]};
   const p=Papa.parse(X.csv(data,{account:'Toko'}),{header:true,skipEmptyLines:true});
-  assert.equal(p.meta.fields[p.meta.fields.length-1],'Catatan link');
+  assert.equal(p.meta.fields.indexOf('Catatan link'),p.meta.fields.indexOf('ROAS matang')+1);
   assert.equal(p.meta.fields.indexOf('Alasan')+1,p.meta.fields.indexOf('Biaya + PPN'),'existing column order is unchanged');
   assert.equal(p.data[0]['Catatan link'],'hanya 0% klik sampai Shopee — cek link');
   assert.equal(Papa.parse(X.csv(result,{}),{header:true,skipEmptyLines:true}).data[0]['Catatan link'],'');
+});
+test('tags CSV appends the threshold a verdict sits on, empty when it is clear of it',()=>{
+  const data={...result,tags:[{...result.tags[0],borderAt:2},{...result.tags[0],tag:'Jauh',borderAt:null}]};
+  const p=Papa.parse(X.csv(data,{account:'Toko'}),{header:true,skipEmptyLines:true});
+  assert.equal(p.meta.fields[p.meta.fields.length-1],'Di batas ambang (x)');
+  assert.equal(p.meta.fields.indexOf('Catatan link')+1,p.meta.fields.indexOf('Di batas ambang (x)'),'earlier appended columns keep their place');
+  assert.deepEqual(p.data.map(row=>row['Di batas ambang (x)']),['2','']);
 });
 test('CSV neutralizes source formulas without turning negative numbers into text',()=>{
   for(const tag of ['=SUM(A1)',' +1','\t@bad','-cmd','\uFEFF=1']){
