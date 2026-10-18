@@ -224,16 +224,24 @@ test('a revised commission report replaces orders for the whole team', async () 
     where a.name = 'Revisi'`)), 0, 'commission days keep no fingerprints');
 });
 
-test('the database itself refuses the double counts a browser check would catch', async () => {
-  const a = await browser('admin@example.com');
+test('the database itself refuses the double counts and losses a browser check would catch', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
   const acct = await account(a, 'Penjaga');
   await save(a, acct, 'ads', [ad('2026-09-20')]);
   const link = () => a.store.state.get('Penjaga');
-  // A pulled row for the same ad and day as a saved CSV row, sent around the browser check.
+  const ingest = (kind, records, fileHash) => a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: kind,
+    p_expected_revision: link().revision, p_records: records, p_hashes: [], p_upload: { file_hash: fileHash, rows: 1 } });
+  // A pulled row for a day saved from a CSV, sent around the browser check;
+  // also when the ad was renamed since.
   const [pulled] = A.aggregate('ads', [ad('2026-09-20', { 'Ad ID': AD_ID })]);
-  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: 'ads', p_expected_revision: link().revision,
-    p_records: [pulled], p_hashes: [], p_upload: { file_hash: 'pull-1', rows: 1 } }), /sekali tanpa Ad ID[\s\S]*2026-09-20/);
-  await assert.rejects(save(a, acct, 'ads', [ad('2026-09-20', { 'Ad ID': AD_ID })], 'pull.csv'), /sekali tanpa Ad ID/);
+  await assert.rejects(ingest('ads', [pulled], 'pull-1'), /tanpa Ad ID[\s\S]*2026-09-20/);
+  await assert.rejects(ingest('ads', [{ ...pulled, ad_unit: 'Serum A v2' }], 'pull-2'), /tanpa Ad ID[\s\S]*2026-09-20/);
+  await assert.rejects(save(a, acct, 'ads', [ad('2026-09-20', { 'Ad ID': AD_ID, 'Ad name': 'Serum A v2' })], 'pull.csv'), /tanpa Ad ID/);
+  // An order part never shrinks.
+  await save(a, acct, 'affiliate', [affiliate('m1', '2026-09-22'), affiliate('m1', '2026-09-22', { 'ID Produk': 'p-2' })]);
+  const [half] = A.aggregate('affiliate', [affiliate('m1', '2026-09-22', { 'Status Pesanan': 'Tertunda' })]);
+  await assert.rejects(ingest('affiliate', [half], 'half'), /sebagian baris produk[\s\S]*2026-09-22/);
+  await assert.rejects(save(a, acct, 'affiliate', [affiliate('m1', '2026-09-22', { 'Status Pesanan': 'Tertunda' })]), /sebagian baris produk/);
   // A fingerprint-format commission day converts only with all of its orders.
   const backup = await a.local.exportAccount(acct.id);
   backup.affiliate = [{ account_id: acct.id, date: '2026-09-21', tag: 'Serum A', comm: 2469, comm_done: 2469, comm_pending: 0,
@@ -242,15 +250,22 @@ test('the database itself refuses the double counts a browser check would catch'
   backup.rowhashes.push(...['1', '2'].map(n => ({ account_id: acct.id, kind: 'affiliate', hash: n.repeat(16), date: '2026-09-21' })));
   await a.store.importAccount(acct.id, backup, { replace: true });
   const [partial] = A.aggregate('affiliate', [affiliate('k1', '2026-09-21')]);
-  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: 'affiliate', p_expected_revision: link().revision,
-    p_records: [partial], p_hashes: [], p_upload: { file_hash: 'partial', rows: 1 } }), /format lama/);
+  await assert.rejects(ingest('affiliate', [partial], 'partial'), /format lama/);
   await assert.rejects(save(a, acct, 'affiliate', [affiliate('k1', '2026-09-21')]), /format lama/);
+  const acctB = await account(b, 'Penjaga');
   await save(a, acct, 'affiliate', [affiliate('k1', '2026-09-21'), affiliate('k2', '2026-09-21')]);
   const [day] = await a.local.range(acct.id, 'affiliate', '2026-09-21', '2026-09-21');
   assert.equal(day.merge_version, 2);
   assert.equal(day.comm, 2469);
   assert.equal(Number(psql(DB_URL, `select count(*) from dashboard.row_hashes h join dashboard.accounts a on a.id = h.account_id
     where a.name = 'Penjaga' and h.kind = 'affiliate'`)), 0);
+  // Teammates follow the conversion incrementally, fingerprints included.
+  b.log.length = 0;
+  await b.store.sync('Penjaga');
+  assert.ok(b.log.includes('/rest/v1/rpc/daily_changes'));
+  assert.ok(!b.log.includes('/rest/v1/rpc/daily_export_account'), 'no full download after a conversion');
+  assert.deepEqual(await snapshot(b.local, acctB), await snapshot(a.local, acct));
+  assert.equal((await b.local.exportAccount(acctB.id)).rowhashes.filter(h => h.kind === 'affiliate').length, 0);
 });
 
 test('the same file is skipped and a stale revision is refused', async () => {
@@ -421,6 +436,8 @@ test('the database refuses history a browser could not load back', async () => {
     'undated fingerprint': d => { d.rowhashes[0].date = null; },
     'missing fingerprint': d => { d.rowhashes.pop(); },
     'file name control character': d => { d.uploads[0].file_name = 'x\u0001.csv'; },
+    'infinite upload time': d => { d.uploads[0].uploaded_at = 'infinity'; },
+    'five-digit year': d => { d.affiliate[0].created_at = '12026-01-01T00:00:00Z'; },
     'order parts that do not add up': d => { d.affiliate[0].comm += 1; },
     'order part without rows': d => { Object.values(d.affiliate[0].order_parts)[0][7] = 0; },
     'order part key': d => { const [key] = Object.keys(d.affiliate[0].order_parts); d.affiliate[0].order_parts['clear-' + key.slice(6)] = d.affiliate[0].order_parts[key]; delete d.affiliate[0].order_parts[key]; },

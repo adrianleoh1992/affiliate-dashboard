@@ -175,10 +175,13 @@ test('ad rows with an Ad ID replace the saved day, and two ads sharing a name st
 test('one ad saved once without an Ad ID and once with it on the same day is refused', async () => {
   const { store, account } = await context();
   await save(store, account, 'ads', [ad('', '2026-08-01')]);
-  await assert.rejects(save(store, account, 'ads', [ad('120212345678901234', '2026-08-01')]), /Ad ID[\s\S]*2026-08-01 \(Alpha\)/);
+  await assert.rejects(save(store, account, 'ads', [ad('120212345678901234', '2026-08-01')]), /tanpa Ad ID[\s\S]*2026-08-01/);
   await save(store, account, 'ads', [ad('120212345678901234', '2026-08-02')]);
-  await assert.rejects(save(store, account, 'ads', [ad('', '2026-08-02', { 'Impressions': '5' })]), /2026-08-02 \(Alpha\)/);
-  assert.equal((await store.range(account.id, 'ads')).length, 2);
+  await assert.rejects(save(store, account, 'ads', [ad('', '2026-08-02', { 'Impressions': '5' })]), /2026-08-02/);
+  // Meta exports the current name for past days: a renamed ad is still the same spend.
+  await save(store, account, 'ads', [ad('', '2026-08-03')]);
+  await assert.rejects(save(store, account, 'ads', [ad('120212345678901234', '2026-08-03', { 'Ad name': 'Alpha v2' })]), /2026-08-03/);
+  assert.equal((await store.range(account.id, 'ads')).length, 3);
   store.close();
 });
 
@@ -277,7 +280,7 @@ test('validated imports preserve old string-row dedup for repeated, overlapping 
   store.close();
 });
 
-test('an order with several products counts once, and a later file replaces all of its lines', async () => {
+test('an order with several products counts once; a later file replaces its lines but may not drop any', async () => {
   const { store, account } = await context();
   await save(store, account, 'affiliate', [affiliate()]);
   await save(store, account, 'affiliate', [affiliate(), affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]);
@@ -287,11 +290,91 @@ test('an order with several products counts once, and a later file replaces all 
   assert.equal(day.orders, 1);
   assert.deepEqual(Object.keys(day.order_parts), [A.hashRow({ orderId: 'order-1' })]);
   assert.equal(day.order_keys, undefined);
-  // A report lists every line of an order it contains: this one says one line.
-  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]);
+  // A later report lists every line of the order again: both are replaced.
+  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Status Pesanan': 'Tertunda' }),
+    affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product', 'Status Pesanan': 'Tertunda' })]);
   [day] = await store.range(account.id, 'affiliate');
-  assert.equal(day.comm, 200);
-  assert.equal(day.rows, 1);
+  assert.equal(day.comm, 400);
+  assert.equal(day.comm_pending, 400);
+  assert.equal(day.rows, 2);
+  // Only one of its lines (the reader rejected the other, or a filtered
+  // export) would delete the other product: refused, nothing changes.
+  await assert.rejects(save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'ID Produk': 'different-product' })]),
+    /sebagian baris produk[\s\S]*2026-08-01 \(Alpha\)/);
+  [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.comm, 400);
+  assert.equal(day.rows, 2);
+  store.close();
+});
+
+test('a replacing file without an optional metric column keeps the saved values', async () => {
+  const { store, account } = await context();
+  const id = '120212345678901234';
+  await save(store, account, 'ads', [ad(id, '2026-08-01', { 'Results': '5' })]);
+  // A Meta pull has no Results column; this preset also leaves out Reach.
+  const pulled = ad(id, '2026-08-01', { 'Amount spent (IDR)': '150' });
+  delete pulled['Reach'];
+  assert.deepEqual(await save(store, account, 'ads', [pulled]), { added: 0, updated: 1, duplicates: 0 });
+  const [row] = await store.range(account.id, 'ads');
+  assert.equal(row.spend, 150);
+  assert.equal(row.results, 5);
+  assert.equal(row.reach, 800);
+  assert.equal(row.cpm, 150);
+  assert.equal(row.keep, undefined);
+  // Nothing new in it beyond the kept columns: a duplicate, not an update.
+  const again = ad(id, '2026-08-01', { 'Amount spent (IDR)': '150' });
+  delete again['Reach'];
+  delete again['Link clicks'];
+  assert.deepEqual(await save(store, account, 'ads', [again], { fileHash: 'again' }), { added: 0, updated: 0, duplicates: 1 });
+
+  await save(store, account, 'affiliate', [affiliate('order-1', '2026-08-01', { 'Status Pesanan': 'Tertunda' })]);
+  const revised = [affiliate('order-1'), affiliate('order-2')];
+  revised.forEach(r => delete r['Nilai Pembelian(Rp)']);
+  await save(store, account, 'affiliate', revised);
+  const [day] = await store.range(account.id, 'affiliate');
+  assert.equal(day.comm_done, 400);
+  assert.equal(day.gmv, 1000, 'order-1 keeps its saved purchase value; order-2 has none to keep');
+  assert.equal(day.qty, 2);
+  assert.equal(Object.values(day.order_parts).find(p => p[3] === 1000)[1], 200);
+  store.close();
+});
+
+test('a fingerprint-format day converts only with at least as many rows as it saved', () => {
+  const [record] = A.aggregateAffiliate([affiliate()]);
+  const v1 = { ...record, order_parts: undefined, order_keys: Object.keys(record.order_parts), rows: 2, merge_version: 1 };
+  assert.throws(() => A.checkDays('affiliate', [record], new Map([['2026-08-01', [v1]]])), /format lama/);
+  assert.deepEqual(A.checkDays('affiliate', [record], new Map([['2026-08-01', [{ ...v1, rows: 1 }]]])), ['2026-08-01']);
+  // A column the file lacks may not zero a saved total that cannot be split per order.
+  const lacking = { ...record, keep: ['gmv'] };
+  assert.throws(() => A.checkDays('affiliate', [lacking], new Map([['2026-08-01', [{ ...v1, rows: 1 }]]])), /Nilai Pembelian/);
+  assert.deepEqual(A.checkDays('affiliate', [lacking], new Map([['2026-08-01', [{ ...v1, rows: 1, gmv: 0 }]]])), ['2026-08-01']);
+});
+
+test('a save plan refuses history from before mergeable aggregates, like the store', () => {
+  const [record] = A.aggregateAffiliate([affiliate()]);
+  const legacy = { ...record, order_parts: undefined, order_keys: undefined, merge_version: undefined };
+  assert.throws(() => A.checkDays('affiliate', [record], new Map([['2026-08-01', [legacy]]])), /Riwayat lama 2026-08-01/);
+  assert.deepEqual(A.checkDays('affiliate', [record], new Map([['2026-08-01', [{ ...legacy, tag: 'Other' }]]])), []);
+});
+
+test('a synced commission day converted on the server drops its cached fingerprints', async () => {
+  const { store, account } = await context();
+  const backup = {
+    format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 3,
+    exported_at: '2026-09-07T00:00:00Z', account: { id: 7, kind: 'shopee', name: 'v1' }, ads: [], clicks: [], uploads: [],
+    affiliate: [{ account_id: 7, date: '2026-08-01', tag: 'Alpha', comm: 200, comm_done: 200, comm_pending: 0, gmv: 1000, qty: 1,
+      refund: 0, orders: 1, order_keys: [A.hashRow({ orderId: 'order-1' })], excluded: 0, rows: 1, merge_version: 1 },
+      { account_id: 7, date: '2026-08-02', tag: 'Alpha', comm: 200, comm_done: 200, comm_pending: 0, gmv: 1000, qty: 1,
+        refund: 0, orders: 1, order_keys: [A.hashRow({ orderId: 'order-2' })], excluded: 0, rows: 1, merge_version: 1 }],
+    rowhashes: ['a', 'b'].map((h, i) => ({ account_id: 7, kind: 'affiliate', hash: h.repeat(16), date: '2026-08-0' + (i + 1) })),
+  };
+  await store.importAccount(account.id, backup, { replace: true });
+  const [converted] = A.aggregateAffiliate([affiliate()]);
+  await store.applyChanges(account.id, { format: DailyStore.BACKUP_FORMAT, version: DailyStore.BACKUP_VERSION, database_version: 3,
+    exported_at: '2026-09-08T00:00:00Z', account: { id: 7, kind: 'shopee', name: 'v1' }, ads: [], clicks: [], uploads: [], rowhashes: [],
+    affiliate: [{ ...converted, account_id: 7, merge_version: 2 }] });
+  assert.deepEqual((await contents(store, 'rowhashes')).map(h => h.date), ['2026-08-02']);
+  DailyStore.validateBackup(await store.exportAccount(account.id));
   store.close();
 });
 

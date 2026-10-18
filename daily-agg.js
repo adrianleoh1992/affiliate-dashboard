@@ -293,11 +293,50 @@ const DailyAgg = (() => {
       if (fp) hashes.push({ hash: h, date: rowDate(r, kind) });
     }
     const dates = valid.map(r => rowDate(r, kind)).sort();
-    return { records: aggregate(kind, kept), hashes, duplicates, invalid: rows.length - valid.length,
+    const keep = absentMetrics(kind, valid), records = aggregate(kind, kept);
+    if (keep.length) records.forEach(r => { if (kind === 'affiliate' || r.ad_id) r.keep = keep; });
+    return { records, hashes, duplicates, invalid: rows.length - valid.length,
       period: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null };
   }
 
   const recordKey = (kind, r) => r.date + '|' + (kind === 'ads' ? r.ad_key || 'name:' + r.ad_unit : r.tag);
+
+  /* Metric columns a replacing file can lack: the reader only warns about
+     them, and a Meta pull has no Results column. Their saved values are kept
+     rather than replaced with 0. */
+  const OPTIONAL = {
+    affiliate: { gmv: ['Nilai Pembelian(Rp)'], qty: ['Jumlah'], refund: ['Jumlah Pengembalian Dana(Rp)'] },
+    ads: { spend: ['Amount spent (IDR)', 'Amount spent'], impressions: ['Impressions'], reach: ['Reach'], clicks: ['Link clicks'],
+      shop_clicks: ['shop_clicks'], lpv: ['Landing page views'], results: ['Results'] },
+  };
+  const SLOTS = { gmv: 3, qty: 4, refund: 5 };
+  function absentMetrics(kind, rows) {
+    const columns = OPTIONAL[kind];
+    if (!columns || !rows.length) return [];
+    return Object.keys(columns).filter(f => !rows.some(r => columns[f].some(c => Object.prototype.hasOwnProperty.call(r, c))));
+  }
+  // A record from prepare, with the metrics its file lacked taken from the
+  // saved record it replaces. Records without `keep` pass through.
+  function resolveKeep(kind, saved, r) {
+    if (!r.keep) return r;
+    const { keep, ...out } = r;
+    if (!saved) return out;
+    if (kind === 'ads') {
+      keep.forEach(f => { out[f] = saved[f]; });
+      out.cpm = out.impressions > 0 ? out.spend / out.impressions * 1000 : 0;
+      out.cpc = out.clicks > 0 ? out.spend / out.clicks : 0;
+      out.ctr = out.impressions > 0 ? out.clicks / out.impressions * 100 : 0;
+      return out;
+    }
+    if (!saved.order_parts) return out;
+    const slots = keep.map(f => SLOTS[f]);
+    const parts = {};
+    for (const [key, part] of Object.entries(out.order_parts)) {
+      const old = saved.order_parts[key];
+      parts[key] = old ? part.map((value, i) => slots.includes(i) ? old[i] : value) : part;
+    }
+    return { ...out, ...partsTotals(parts), order_parts: parts };
+  }
   const AD_FIELDS = ['ad_unit', 'spend', 'impressions', 'reach', 'clicks', 'shop_clicks', 'lpv', 'results', 'rows'];
   const samePart = (a, b) => Array.isArray(a) && a.length === b.length && a.every((value, i) => value === b[i]);
 
@@ -308,8 +347,8 @@ const DailyAgg = (() => {
   function changes(kind, records, stored) {
     const write = [];
     let duplicates = 0;
-    for (const r of records) {
-      const saved = stored.get(recordKey(kind, r));
+    for (const raw of records) {
+      const saved = stored.get(recordKey(kind, raw)), r = resolveKeep(kind, saved, raw);
       if (kind === 'affiliate' && r.order_parts && saved && saved.order_parts) {
         const parts = {};
         for (const [key, part] of Object.entries(r.order_parts)) {
@@ -328,34 +367,60 @@ const DailyAgg = (() => {
   /* Day-level rules before anything is written. days maps each incoming date
      to every saved record of that kind and date. Returns the dates whose
      fingerprints the write removes (affiliate days converted to order parts).
+       - Records saved before mergeable aggregates (no merge_version) are
+         never merged into.
        - An affiliate day saved in the fingerprint format (merge_version 1)
          converts only as a whole: every such record of the day must be in
-         the file, with all of its orders. Otherwise its fingerprints and the
-         new parts would disagree.
-       - One ad must not be saved twice for a day, once from an export without
-         IDs (by name) and once with its Ad ID: that is the same spend. */
+         the file, with all of its orders and at least as many rows.
+         Otherwise its fingerprints and the new parts would disagree.
+       - An order part never shrinks: a file holding only some rows of a
+         saved order (rows the reader rejected, a filtered export) would
+         otherwise delete the order's other items.
+       - A day holds ads saved by name (exports without IDs) or by Ad ID, not
+         both: the same ad, even renamed, would count twice. */
   function checkDays(kind, records, days) {
     const clear = [];
+    for (const [date, saved] of days) {
+      const keys = new Set(records.filter(r => r.date === date).map(r => recordKey(kind, r)));
+      if (saved.some(r => r.merge_version !== 1 && r.merge_version !== 2 && keys.has(recordKey(kind, r)))) {
+        throw new Error(`Riwayat lama ${date} perlu dihapus lalu diunggah ulang sebelum digabung`);
+      }
+    }
     if (kind === 'affiliate') {
+      const shrunk = [];
       for (const [date, saved] of days) {
         const incoming = new Map(records.filter(r => r.date === date).map(r => [r.tag, r]));
+        for (const r of saved) {
+          const mine = incoming.get(r.tag);
+          if (r.merge_version === 2 && mine && Object.entries(mine.order_parts).some(([key, part]) => r.order_parts[key] && part[7] < r.order_parts[key][7])) {
+            shrunk.push(`${date} (${r.tag})`);
+          }
+        }
         const v1 = saved.filter(r => r.merge_version === 1);
         const touched = v1.filter(r => incoming.has(r.tag));
         if (!touched.length) continue;
-        const missing = v1.filter(r => !incoming.has(r.tag) || !(r.order_keys || []).every(key => key in incoming.get(r.tag).order_parts));
+        const missing = v1.filter(r => !incoming.has(r.tag) || !(r.order_keys || []).every(key => key in incoming.get(r.tag).order_parts)
+          || incoming.get(r.tag).rows < r.rows);
         if (missing.length) throw new Error(`Riwayat komisi ${date} tersimpan dalam format lama dan file ini tidak memuat semua pesanannya `
           + `(${missing.slice(0, 3).map(r => r.tag).join(', ')}). Riwayat lama tanggal itu perlu dihapus lalu diunggah ulang dengan laporan lengkapnya.`);
+        // Old totals cannot be split per order, so a missing column would zero them.
+        const lacking = touched.map(r => (incoming.get(r.tag).keep || []).filter(f => r[f])).find(fields => fields.length);
+        if (lacking) throw new Error(`Riwayat komisi ${date} tersimpan dalam format lama dan file ini tidak memuat kolom `
+          + `${lacking.map(f => OPTIONAL.affiliate[f][0]).join(', ')}. Unggah laporan dengan kolom lengkap.`);
         clear.push(date);
       }
+      if (shrunk.length) throw new Error('File ini hanya memuat sebagian baris produk dari pesanan yang sudah tersimpan: '
+        + shrunk.slice(0, 5).join(', ') + '. Menyimpannya akan menghapus produk lain dari pesanan itu. Muat laporan lengkap '
+        + '(tanpa baris yang ditolak), atau hapus tanggal itu di Data Tersimpan lalu unggah ulang.');
     } else if (kind === 'ads') {
-      const clashes = [];
+      const mixed = [];
       for (const [date, saved] of days) {
-        const mine = records.filter(r => r.date === date), all = saved.concat(mine);
-        const byName = new Set(all.filter(r => !r.ad_id).map(r => r.ad_unit)), byId = new Set(all.filter(r => r.ad_id).map(r => r.ad_unit));
-        for (const r of mine) if ((r.ad_id ? byName : byId).has(r.ad_unit)) clashes.push(`${date} (${r.ad_unit})`);
+        const all = saved.concat(records.filter(r => r.date === date));
+        if (all.some(r => r.ad_id) && all.some(r => !r.ad_id)) mixed.push(date);
       }
-      if (clashes.length) throw new Error('Iklan ini sudah tersimpan dari sumber lain pada tanggal yang sama, sekali tanpa Ad ID (ekspor CSV) dan sekali dengan Ad ID: '
-        + [...new Set(clashes)].slice(0, 5).join(', ') + '. Hapus tanggal itu di Data Tersimpan lalu simpan lagi agar biaya tidak terhitung dua kali.');
+      if (mixed.length) throw new Error('Satu tanggal tidak boleh berisi iklan tanpa Ad ID (ekspor CSV) dan iklan dengan Ad ID sekaligus, karena iklan '
+        + 'yang sama, termasuk yang berganti nama, akan terhitung dua kali: ' + mixed.slice(0, 5).join(', ') + '. Hapus tanggal itu di '
+        + 'Data Tersimpan lalu simpan ulang dari satu sumber, atau sertakan kolom Ad ID di ekspor Ads Manager.');
     }
     return clear;
   }
@@ -372,6 +437,7 @@ const DailyAgg = (() => {
   // unseen source rows, so their contributions add instead of overwriting the
   // stored day with a partial total.
   function mergeDaily(kind, previous, incoming) {
+    incoming = resolveKeep(kind, previous, incoming);
     if (kind === 'affiliate' && incoming.order_parts) {
       if (!previous.order_parts && !(Array.isArray(previous.order_keys) && previous.order_keys.every(key => key in incoming.order_parts))) {
         throw new Error(`Riwayat lama ${incoming.date} (${incoming.tag}) perlu dihapus lalu diunggah ulang sebelum digabung`);
@@ -407,7 +473,7 @@ const DailyAgg = (() => {
   }
 
   return {
-    hashRow, hashRows, dedupe, prepare, changes, checkDays, recordKey,
+    hashRow, hashRows, dedupe, prepare, changes, checkDays, recordKey, resolveKeep,
     aggregateAffiliate, aggregateAds, aggregateClicks, adIdOf, fingerprinted, mergeVersion,
     partsTotals, sortedParts, ORDER_KEY, PART_KEY, AMOUNTS,
     planIngest, num, day, isDate, rowDate, aggregate, mergeDaily,

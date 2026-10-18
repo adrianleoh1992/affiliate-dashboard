@@ -371,13 +371,7 @@ const DailyStore = (() => {
         if (incremental) {
           const prep = A.prepare(kind, o.rawRows, knownRows.map(r => r.hash));
           const days = new Map();
-          for (const date of new Set(prep.records.map(r => r.date))) {
-            const saved = await rq(store.index('acct_date').getAll([accountId, date]));
-            const legacy = saved.find(r => r.merge_version !== 1 && r.merge_version !== 2 &&
-              prep.records.some(x => A.recordKey(kind, x) === A.recordKey(kind, r)));
-            if (legacy) throw new Error(`Riwayat lama ${date} perlu dihapus lalu diunggah ulang sebelum digabung`);
-            days.set(date, saved);
-          }
+          for (const date of new Set(prep.records.map(r => r.date))) days.set(date, await rq(store.index('acct_date').getAll([accountId, date])));
           clear = A.checkDays(kind, prep.records, days);
           const diff = A.changes(kind, prep.records, new Map([...days.values()].flat().map(r => [A.recordKey(kind, r), r])));
           records = diff.write;
@@ -556,6 +550,13 @@ const DailyStore = (() => {
         for (const row of data.uploads) {
           const found = await rq(ups.index('acct_kind_hash').get([accountId, row.kind, row.file_hash]));
           await rq(ups.put({ ...row, account_id: accountId, ...(found ? { id: found.id } : {}) }));
+        }
+        // A commission day converted to order parts loses its fingerprints on
+        // the server too (daily_ingest), which no change row reports.
+        const aff = tx.objectStore('affiliate');
+        for (const date of new Set(data.affiliate.filter(r => r.merge_version === 2).map(r => r.date))) {
+          if ((await rq(aff.index('acct_date').getAll([accountId, date]))).some(r => r.merge_version !== 2)) continue;
+          (await rq(hs.index('acct_kind_date').getAllKeys([accountId, 'affiliate', date]))).forEach(key => hs.delete(key));
         }
       });
     }

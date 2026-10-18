@@ -135,13 +135,18 @@ yang direvisi, misalnya status Tertunda menjadi Selesai, **mengganti** angka
 setiap pesanan yang ada di file itu; pesanan yang tidak ada di file tetap seperti
 sebelumnya. Laporan Meta Ads yang membawa **Ad ID** (tarikan API atau ekspor
 dengan kolom Ad ID) mengganti angka per tanggal dan Ad ID, sehingga iklan dengan
-nama sama tetap terpisah. File revisi harus memuat semua baris produk dari setiap
-pesanan yang dimuatnya.
+nama sama tetap terpisah. File yang hanya memuat sebagian baris produk dari
+pesanan yang sudah tersimpan (misalnya setelah **Muat baris valid saja**) ditolak,
+agar produk lain pesanan itu tidak terhapus. Kolom pelengkap yang tidak ada di
+file (misalnya Results pada tarikan API) tidak mengubah angka tersimpannya. Simpan
+laporan sesuai urutan waktu: laporan lama yang disimpan setelah laporan baru
+mengembalikan status lama.
 
 Ekspor CSV Meta tanpa Ad ID, laporan klik, dan baris komisi tanpa ID Pemesanan
 masih dideduplikasi dengan seluruh isi baris: baris identik dilewati, baris yang
-berubah ditambahkan. Satu iklan pada tanggal yang sama tidak boleh disimpan
-sekali dengan nama saja dan sekali dengan Ad ID; penyimpanan seperti itu ditolak.
+berubah ditambahkan. Satu tanggal tidak boleh berisi iklan tanpa Ad ID dan iklan
+dengan Ad ID sekaligus, karena iklan yang sama, termasuk yang berganti nama,
+akan terhitung dua kali; penyimpanan seperti itu ditolak.
 
 Untuk **koreksi** laporan jenis itu, hapus file lama dari analisis. Pada
 **Data Tersimpan**, hapus tanggal terdampak untuk jenis laporan yang

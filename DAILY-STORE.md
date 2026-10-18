@@ -30,11 +30,23 @@ lama tidak menambahkan baris yang sama. Aturan gabung (`merge_version`):
 - **1, menambah:** klik dan iklan tanpa Ad ID. Baris yang belum dikenal
   ditambahkan ke agregat lama; baris identik dilewati lewat fingerprint.
 
-Iklan yang sama pada tanggal yang sama tidak boleh tersimpan dengan nama dan
-dengan Ad ID sekaligus; penyimpanan itu ditolak agar tidak terhitung dua kali.
-Riwayat komisi lama (format 1, union hash order) dikonversi ke format 2 hanya
-bila file baru memuat semua pesanan hari itu untuk tag tersebut; file sebagian
-ditolak dengan petunjuk hapus tanggal lalu unggah ulang.
+Penolakan sebelum menulis (sama di browser dan database bersama):
+
+- Satu tanggal tidak boleh berisi iklan tanpa Ad ID dan iklan dengan Ad ID
+  sekaligus: iklan yang sama, termasuk yang berganti nama, akan terhitung dua
+  kali.
+- Rincian pesanan tidak boleh menyusut: file yang hanya memuat sebagian baris
+  produk dari pesanan tersimpan (baris ditolak pembaca, ekspor terfilter)
+  ditolak, karena produk lainnya akan terhapus.
+- Riwayat komisi lama (format 1, union hash order) dikonversi ke format 2 hanya
+  bila file baru memuat semua pesanan hari itu untuk tag tersebut, dengan baris
+  sebanyak yang tersimpan; file sebagian ditolak dengan petunjuk hapus tanggal
+  lalu unggah ulang.
+
+Kolom metrik pelengkap yang tidak ada di file pengganti (Nilai Pembelian, Jumlah,
+Jumlah Pengembalian Dana; Reach, Link clicks, Landing page views, Results,
+Impressions) tidak menimpa angka tersimpan dengan 0: nilai lamanya dipertahankan
+dan CPM/CPC/CTR dihitung ulang.
 
 Menghapus satu tanggal membersihkan penanda baris tanggal itu dan membatalkan
 penanda file yang relevan. Unggah ulang laporan yang mencakup beberapa hari
@@ -46,7 +58,9 @@ Penghapusan akun membersihkan data, penanda deduplikasi, dan log terkait.
 Laporan komisi yang direvisi dan tarikan ulang iklan dengan Ad ID mengganti
 angka lama secara otomatis. File revisi komisi harus memuat semua baris produk
 dari setiap pesanan yang dimuatnya. Pesanan yang hilang dari laporan revisi
-tidak dihapus otomatis.
+tidak dihapus otomatis. Penggantian mengikuti urutan simpan, bukan tanggal
+ekspor: laporan lama yang disimpan setelah laporan baru mengembalikan status
+lama, jadi simpan laporan sesuai urutan waktu.
 
 Untuk klik dan ekspor iklan tanpa Ad ID, hash seluruh baris hanya mengenali
 duplikat identik, bukan revisi nilai. Untuk koreksi jenis itu, hapus tanggal

@@ -414,10 +414,15 @@
       for (const it of plan.items) {
         if (it.seenBefore) { skipped++; continue; }
         if (it.error) { refused.push(it); continue; }
-        const res = await STORE.saveDaily(account.id, it.kind, it.records, {
-          rawRows: it.rawRows, fileHash: it.fileHash, fileName: it.file,
-          sourceRows: it.sourceRows, duplicates: it.duplicates, period: it.period,
-        });
+        // A refusal the plan did not foresee (another tab saved meanwhile)
+        // still lets the other files of the batch save.
+        let res;
+        try {
+          res = await STORE.saveDaily(account.id, it.kind, it.records, {
+            rawRows: it.rawRows, fileHash: it.fileHash, fileName: it.file,
+            sourceRows: it.sourceRows, duplicates: it.duplicates, period: it.period,
+          });
+        } catch (e) { refused.push({ file: it.file, error: e.message }); continue; }
         added += res.added; updated += res.updated;
         if (res.skipped) skipped++;
       }

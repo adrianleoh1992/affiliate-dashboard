@@ -107,6 +107,9 @@ language sql immutable set search_path = pg_catalog, pg_temp as $$
 $$;
 
 create domain dashboard.day as date check (value between date '0001-01-01' and date '9999-12-31');
+-- Times a browser can read back: finite, four-digit UTC year.
+create domain dashboard.stamp as timestamptz
+  check (value >= timestamptz '0001-01-01 00:00:00+00' and value < timestamptz '10000-01-01 00:00:00+00');
 create domain dashboard.amount as double precision check (dashboard._num_ok(value));
 
 create table dashboard.team_members (
@@ -146,8 +149,8 @@ create table dashboard.daily_affiliate (
   excluded integer not null check (excluded >= 0),
   rows integer not null check (rows >= 0),
   rev bigint not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz,
+  created_at dashboard.stamp not null default now(),
+  updated_at dashboard.stamp,
   primary key (account_id, date, tag),
   check (coalesce(case when merge_version = 1
     then order_parts is null and order_keys is not null and orders = cardinality(order_keys) and dashboard._valid_order_keys(order_keys)
@@ -179,8 +182,8 @@ create table dashboard.daily_ads (
   ctr dashboard.amount not null,
   delivery text not null default '' check (dashboard._label_ok(delivery, 256, true)),
   rev bigint not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz,
+  created_at dashboard.stamp not null default now(),
+  updated_at dashboard.stamp,
   primary key (account_id, date, ad_key),
   check (case when merge_version = 2 then ad_id ~ '^[0-9]{6,20}$' and ad_key = 'id:' || ad_id
     else ad_id = '' and ad_key = 'name:' || ad_unit end)
@@ -194,8 +197,8 @@ create table dashboard.daily_clicks (
   by_region jsonb not null default '{}',
   by_source jsonb not null default '{}',
   rev bigint not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz,
+  created_at dashboard.stamp not null default now(),
+  updated_at dashboard.stamp,
   primary key (account_id, date, tag),
   check (dashboard._count_map_total(by_region) = clicks and dashboard._count_map_total(by_source) = clicks)
 );
@@ -224,7 +227,7 @@ create table dashboard.uploads (
   duplicates integer not null default 0 check (duplicates >= 0),
   period_start dashboard.day,
   period_end dashboard.day,
-  uploaded_at timestamptz not null default now(),
+  uploaded_at dashboard.stamp not null default now(),
   uploaded_by uuid references auth.users (id) on delete set null,
   rev bigint not null,
   unique (account_id, kind, file_hash),
@@ -489,6 +492,19 @@ begin
       raise exception 'Riwayat komisi % tersimpan dalam format lama dan file ini tidak memuat semua pesanannya (%). Riwayat lama tanggal itu perlu dihapus lalu diunggah ulang dengan laporan lengkapnya.',
         bad.date, bad.tag using errcode = 'PT400';
     end if;
+    -- An order part never shrinks, and a converted day keeps all its rows: a
+    -- file with only some rows of an order would delete its other items.
+    select t.date, t.tag into bad
+    from jsonb_to_recordset(p_records) i(date date, tag text, order_parts jsonb)
+    join dashboard.daily_affiliate t on t.account_id = p_account_id and t.date = i.date and t.tag = i.tag
+    where case when t.merge_version = 2
+      then exists (select 1 from jsonb_each(i.order_parts) p where (t.order_parts->p.key->>7)::int > (p.value->>7)::int)
+      else (dashboard._parts_totals(i.order_parts))[9] < t.rows end
+    limit 1;
+    if found then
+      raise exception 'File ini hanya memuat sebagian baris produk dari pesanan yang sudah tersimpan: % (%). Menyimpannya akan menghapus produk lain dari pesanan itu. Muat laporan lengkap (tanpa baris yang ditolak), atau hapus tanggal itu di Data Tersimpan lalu unggah ulang.',
+        bad.date, bad.tag using errcode = 'PT400';
+    end if;
     converted := array(select distinct t.date from jsonb_to_recordset(p_records) i(date date, tag text)
       join dashboard.daily_affiliate t on t.account_id = p_account_id and t.date = i.date and t.tag = i.tag
       where t.merge_version = 1);
@@ -554,13 +570,13 @@ begin
       returning (xmax = 0) inserted)
     select count(*) filter (where inserted), count(*) filter (where not inserted) into added, updated from up;
 
-    -- One ad saved by name and by Ad ID on the same day is the same spend twice.
-    select a.date, a.ad_unit into bad from dashboard.daily_ads a
-    join dashboard.daily_ads b on b.account_id = a.account_id and b.date = a.date and b.ad_unit = a.ad_unit and b.merge_version = 2
-    where a.account_id = p_account_id and a.merge_version = 1 and a.date = any(touched) limit 1;
+    -- A day holds ads saved by name or by Ad ID, never both: the same ad,
+    -- even renamed, would be the same spend twice.
+    select a.date into mismatch from dashboard.daily_ads a where a.account_id = p_account_id and a.date = any(touched)
+    group by a.date having bool_or(a.merge_version = 1) and bool_or(a.merge_version = 2) limit 1;
     if found then
-      raise exception 'Iklan ini sudah tersimpan dari sumber lain pada tanggal yang sama, sekali tanpa Ad ID (ekspor CSV) dan sekali dengan Ad ID: % (%). Hapus tanggal itu di Data Tersimpan lalu simpan lagi agar biaya tidak terhitung dua kali.',
-        bad.date, bad.ad_unit using errcode = 'PT400';
+      raise exception 'Satu tanggal tidak boleh berisi iklan tanpa Ad ID (ekspor CSV) dan iklan dengan Ad ID sekaligus, karena iklan yang sama, termasuk yang berganti nama, akan terhitung dua kali: %. Hapus tanggal itu di Data Tersimpan lalu simpan ulang dari satu sumber, atau sertakan kolom Ad ID di ekspor Ads Manager.',
+        mismatch using errcode = 'PT400';
     end if;
   else
     with up as (

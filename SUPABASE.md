@@ -42,9 +42,11 @@ Token Meta Ads tidak pernah disimpan di database.
   (`merge_version` 2); klik dan iklan tanpa Ad ID dijumlahkan (`merge_version` 1).
   Total komisi dihitung ulang dari rincian pesanan dengan urutan kunci yang sama
   dengan browser, sehingga angkanya identik. CPM/CPC/CTR dihitung ulang dari
-  total. Database sendiri juga menolak iklan yang tersimpan dengan nama dan Ad ID
-  pada hari yang sama, serta konversi hari komisi format lama yang tidak memuat
-  semua pesanannya.
+  total. Database sendiri juga menolak tanggal yang berisi iklan tanpa Ad ID dan
+  dengan Ad ID sekaligus, rincian pesanan yang menyusut, serta konversi hari
+  komisi format lama yang tidak memuat semua pesanannya. Kolom metrik yang tidak
+  ada di file pengganti mempertahankan angka tersimpan (browser mengirim nilai
+  yang sudah digabung dari salinan pada revisi yang sama).
 - Setelah setiap penulisan, browser menarik **hanya baris yang berubah** sejak
   revisinya (`daily_changes`), termasuk tanggal yang dihapus, lalu mencocokkan
   jumlah record dengan database. Bila tidak cocok, atau akun baru saja diganti
@@ -73,7 +75,8 @@ Token Meta Ads tidak pernah disimpan di database.
 - Database menolak isi yang tidak bisa dimuat kembali oleh browser (label kosong
   atau berkarakter kontrol, angka di luar batas aman JavaScript, peta klik bukan
   bilangan bulat, rincian pesanan yang tidak sama dengan totalnya, Ad ID tidak
-  valid, fingerprint tanpa tanggal atau tidak sesuai jumlah baris), agar
+  valid, waktu tak hingga atau bertahun lima digit, fingerprint tanpa tanggal
+  atau tidak sesuai jumlah baris), agar
   satu penulisan buruk tidak mengunci seluruh tim.
 
 ## Keamanan
@@ -140,6 +143,10 @@ dilewati kecuali `REQUIRE_DB=1`.
   file revisi tanpa Ad ID ditambahkan, bukan mengganti. Pakai tarikan API atau
   sertakan kolom Ad ID di ekspor Ads Manager.
 - Pesanan yang hilang dari laporan komisi revisi tidak dihapus otomatis; hapus
-  tanggalnya lalu unggah ulang bila pesanan memang dihapus Shopee.
+  tanggalnya lalu unggah ulang bila pesanan memang dihapus Shopee. Begitu juga
+  iklan yang tidak muncul lagi di tarikan ulang Meta (misalnya semua impresinya
+  dibatalkan Meta): angka lamanya tetap. Penggantian per rentang tanggal tidak
+  dipakai karena satu akun dashboard memuat beberapa akun iklan, dan tarikan
+  tanpa filter status tidak memuat iklan yang diarsipkan atau dihapus.
 - Ad ID yang dibulatkan Excel (lebih dari 15 digit dan berakhir nol) dianggap
   tidak ada, sehingga baris itu disimpan per nama iklan.
