@@ -4,7 +4,7 @@
   "description": "Local Meta Ads and Shopee affiliate decision dashboard",
   "scripts": {
     "test": "npm run test:unit && npm run test:browser && npm run test:pdf",
-    "test:unit": "node engine.test.js && node engine.regression.test.js && node daily.regression.test.js && node import-pipeline.test.js && node export-data.test.js",
+    "test:unit": "node engine.test.js && node chart-theme.test.js && node engine.regression.test.js && node daily.regression.test.js && node import-pipeline.test.js && node export-data.test.js",
     "test:browser": "node browser.regression.test.js && node experience.test.js",
     "vendor": "node scripts/vendor.js",
     "start": "node scripts/serve.js",
@@ -28,6 +28,7 @@
     "playwright": "1.63.0"
   },
   "dependencies": {
+    "@fontsource-variable/plus-jakarta-sans": "5.3.0",
     "chart.js": "4.5.1",
     "jspdf": "4.2.1",
     "jspdf-autotable": "5.0.8",

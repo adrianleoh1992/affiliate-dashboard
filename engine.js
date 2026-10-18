@@ -83,6 +83,8 @@ function diffDays(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 }
 function dict() { return Object.create(null); }
+// Comma decimals, matching the dashboard and PDF: 1,25x rather than 1.25x.
+function ratioText(n) { return n.toFixed(2).replace('.', ','); }
 function normalizeOptions(options) {
   const input = options || {}, out = Object.assign({}, DEFAULTS, input);
   const bounds = {
@@ -717,13 +719,13 @@ function analyze(data, options) {
       reason = `ROAS di bawah 1 selama ${streak} hari produksi berturut`;
     } else if (roasEff >= o.thScale) {
       status = 'scale'; label = 'SCALE';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x di atas target ${String(o.thScale).replace('.', ',')}x`;
     } else if (roasEff >= o.thPantau) {
       status = 'pantau'; label = 'PANTAU';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x, belum layak scale`;
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x, belum layak scale`;
     } else {
       status = 'stop'; label = 'STOP';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di bawah titik impas`;
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x di bawah titik impas`;
     }
     if (leak && leak.severity === 'bad' && status === 'stop') {
       reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;

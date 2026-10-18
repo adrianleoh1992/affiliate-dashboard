@@ -14,9 +14,13 @@ const LS={accounts:'adash_accounts_v3',active:'adash_active_v3',map:'adash_map_v
    saved map, entered once through Kelola Tag. */
 const DEFAULT_MAP={};
 const esc=E.escapeHtml;
-function rp(n){if(n==null||!isFinite(n))return'Rp0';let a=Math.abs(n),s=n<0?'-':'';if(a>=1e9)return s+'Rp'+(a/1e9).toFixed(2)+' M';if(a>=1e6)return s+'Rp'+(a/1e6).toFixed(1)+' jt';if(a>=1e3)return s+'Rp'+Math.round(a/1e3)+'rb';return s+'Rp'+Math.round(a)}
+// Indonesian decimals take a comma: "Rp1.2 jt" next to "1.635 pesanan" read as
+// one thousand two hundred. The PDF already writes them this way.
+function dec(n,d){return Number(n).toFixed(d).replace('.',',')}
+function rp(n){if(n==null||!isFinite(n))return'Rp0';let a=Math.abs(n),s=n<0?'-':'';if(a>=1e9)return s+'Rp'+dec(a/1e9,2)+' M';if(a>=1e6)return s+'Rp'+dec(a/1e6,1)+' jt';if(a>=1e3)return s+'Rp'+Math.round(a/1e3)+'rb';return s+'Rp'+Math.round(a)}
+function rpShort(n){if(n==null||!isFinite(n))return'—';let a=Math.abs(n),s=n<0?'-':'';if(a>=1e9)return s+dec(a/1e9,1)+'M';if(a>=1e6)return s+dec(a/1e6,1)+'jt';if(a>=1e3)return s+Math.round(a/1e3)+'rb';return s+Math.round(a)}
 function full(n){return'Rp'+Math.round(n||0).toLocaleString('id-ID')} function nf(n){return Math.round(n||0).toLocaleString('id-ID')}
-function rx(n){return n===Infinity?'∞':Number.isFinite(n)?n.toFixed(2)+'x':'—'}
+function rx(n){return n===Infinity?'∞':Number.isFinite(n)?dec(n,2)+'x':'—'}
 let TOAST_TIMER;function toast(s){clearTimeout(TOAST_TIMER);let e=$('toast');e.textContent=s;e.classList.add('show');TOAST_TIMER=setTimeout(()=>e.classList.remove('show'),4000)}
 function readStorage(key){try{return localStorage.getItem(key)}catch(e){return null}}
 function accounts(){try{const a=JSON.parse(readStorage(LS.accounts));return Array.isArray(a)&&a.length&&a.every(x=>typeof x==='string'&&x.trim())?[...new Set(a)]:['default']}catch(e){return['default']}}
@@ -35,7 +39,7 @@ function validSnapshot(x){
 function snaps(){try{const a=JSON.parse(readStorage(LS.snaps+'_'+active()));return Array.isArray(a)?a.filter(validSnapshot).filter(s=>!s.account||s.account===active()).slice(0,120):[]}catch(e){return[]}}
 function saveSnaps(a){localStorage.setItem(LS.snaps+'_'+active(),JSON.stringify(a.slice(0,120)))}
 function renderAccounts(){let a=accounts(),s=$('account');s.innerHTML=a.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');s.value=active();if($('flowAccount'))$('flowAccount').textContent=active()}
-function applyTheme(t){t=t==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);$('btnTheme').textContent=t==='dark'?'Mode Terang':'Mode Gelap';try{localStorage.setItem(LS.theme,t)}catch(e){}if(RESULT)render()}
+function applyTheme(t){t=t==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);$('btnTheme').setAttribute('aria-pressed',String(t==='dark'));try{localStorage.setItem(LS.theme,t)}catch(e){}if(RESULT)render()}
 applyTheme(readStorage(LS.theme)||'light');renderAccounts();
 $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
 $('account').onchange=()=>{try{setActive($('account').value);reset();loadOpts();renderHistory()}catch(e){toast('Penyimpanan akun tidak tersedia')}renderAccounts()};
@@ -73,6 +77,8 @@ function updateImportUI(){
   $('uploadCard').setAttribute('aria-busy',PENDING_IMPORTS?'true':'false');
   $('flowImport').classList.toggle('done',FILES.length>0&&!PENDING_IMPORTS);
   $('flowAnalyze').classList.toggle('done',!!RESULT&&!PENDING_IMPORTS);
+  // Once the numbers are on screen the three-step guide has done its job.
+  document.body.classList.toggle('has-result',!!RESULT&&!PENDING_IMPORTS);
   $('flowImportNote').textContent=PENDING_IMPORTS?'Memeriksa file…':FILES.length?FILES.length+' file dimuat':'Unggah laporan CSV';
   $('flowAnalyzeNote').textContent=RESULT?(RESULT.tags.length+' tag · '+RESULT.range.start+' — '+RESULT.range.end):'Menunggu laporan komisi';
   $('btnExport').disabled=!RESULT||PENDING_IMPORTS>0;$('btnPdf').disabled=!RESULT||PENDING_IMPORTS>0;
@@ -80,7 +86,10 @@ function updateImportUI(){
 }
 function renderImportReports(){
   $('importFeedback').classList.toggle('hidden',!IMPORT_REPORTS.length);
-  $('importFeedbackRows').innerHTML=IMPORT_REPORTS.map(report=>{
+  // Files that passed with nothing to say are already listed in the boxes
+  // above; repeating each one as a full row pushed the results off screen.
+  const clean=IMPORT_REPORTS.length>0&&IMPORT_REPORTS.every(r=>r.state==='accepted'&&r.parsed&&!r.parsed.issues.length&&!r.message);
+  const rows=IMPORT_REPORTS.map(report=>{
     const p=report.parsed,issues=p?p.issues:[],state={accepted:'Siap dianalisis',review:'Perlu diperiksa',error:'Tidak dimuat',duplicate:'Duplikat dilewati'}[report.state]||report.state;
     return `<article class="import-result ${report.state}"><div class="import-result-head"><b>${esc(report.name)}</b><span>${state}</span></div>`
       +(p?`<p>${nf(p.stats.accepted)} baris valid${p.stats.rejected?' · '+nf(p.stats.rejected)+' baris bermasalah':''}${p.period?' · '+esc(p.period.start)+' — '+esc(p.period.end):''}</p>`:'')
@@ -89,6 +98,9 @@ function renderImportReports(){
       +(report.state==='review'?`<div class="button-row"><button class="btn sm" data-discard-import="${report.id}">Abaikan file</button><button class="btn sm" data-accept-import="${report.id}">Muat ${nf(p.stats.accepted)} baris valid saja</button></div>`:'')
       +(issues.length?`<button class="btn ghost sm" data-issues="${report.id}">Unduh rincian pemeriksaan</button>`:'')+'</article>';
   }).join('');
+  $('importFeedbackRows').innerHTML=clean
+    ?`<details class="import-clean"><summary><span class="ok-mark" aria-hidden="true">✓</span>${nf(IMPORT_REPORTS.length)} file lolos pemeriksaan dan siap dianalisis<span class="hint-inline">Lihat per file</span></summary>${rows}</details>`
+    :rows;
   $('importFeedbackRows').querySelectorAll('[data-accept-import]').forEach(b=>b.onclick=()=>{
     const report=IMPORT_REPORTS.find(x=>x.id===+b.dataset.acceptImport);if(!report||report.epoch!==IMPORT_EPOCH||report.account!==active()||PENDING_IMPORTS)return;
     commitImport(report);finish();renderImportReports();
@@ -339,10 +351,12 @@ function renderGaps(){
   // two of them were never uploaded is the worst thing this card could say.
   const loaded=Object.keys(SRC).filter(k=>have[k].size);
   const missingReports=Object.keys(SRC).filter(k=>!have[k].size).map(k=>SRC[k].label);
+  // Nothing missing is one line of reassurance, not a full card.
+  card.classList.toggle('gap-clean',!rows.length&&!missingReports.length);
   if(!rows.length){
     card.classList.remove('hidden');
     $('gapNote').textContent=`${min} — ${max} · ${all.length} hari`;
-    $('gapBody').innerHTML=`<div class="gap-ok">${loaded.map(k=>SRC[k].label).join(' dan ')} menutupi seluruh ${all.length} hari, tidak ada tanggal yang bolong.</div>`
+    $('gapBody').innerHTML=`<div class="gap-ok"><b>Data lengkap.</b> ${loaded.map(k=>SRC[k].label).join(' dan ')} menutupi seluruh ${all.length} hari (${min} — ${max}), tidak ada tanggal yang bolong.</div>`
       +(missingReports.length?`<div class="gap-warn" style="margin:12px 0 0">${missingReports.join(' dan ')} belum dimuat sama sekali.</div>`:'');
     return;
   }
@@ -423,7 +437,7 @@ function renderKpi(){
       k.paidRoas<1?`iklan sendiri ${rx(k.paidRoas)} — di bawah impas`:'iklan dan organik digabung',[
       ['ROAS Iklan',rx(k.paidRoas)],
       ['ROAS Organik',k.spend?rx(org/k.spend):'—'],
-      ['Kontribusi Organik',share.toFixed(1)+'%']])
+      ['Kontribusi Organik',dec(share,1)+'%']])
   ].join('');
   bindDrill('kpis');
 }
@@ -514,7 +528,7 @@ function renderClickKpi(){
   const mC=W?adMeta:k.clicks,sC=adShopee;
   const per=(n,d)=>d?full(n/d):'—';
   const per1k=(n,d)=>d?full(n/d*1000):'—';
-  const pc=(n,d)=>d?(n/d*100).toFixed(2)+'%':'—';
+  const pc=(n,d)=>d?dec(n/d*100,2)+'%':'—';
 
   const out=[];
   if(DATA.ads.length)out.push(
@@ -538,7 +552,7 @@ function renderClickKpi(){
       lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
               ['Klik ekstra dari share',`+${nf(gained)}`,1]]
             :[['Klik ekstra dari share',`+${nf(gained)}`,1]]),
-    kpiCard(pctIn<100?'bad':'','% Klik Masuk Shopee',pctIn.toFixed(1)+'%',
+    kpiCard(pctIn<100?'bad':'','% Klik Masuk Shopee',dec(pctIn,1)+'%',
       pctIn>100?'di atas 100% karena dibagikan orang':'sebagian klik tidak sampai',[
       [`${gainTags.length} tag dibagikan`,`+${nf(gained)} klik`],
       [`${lostTags.length} tag bocor`,`−${nf(lost)} klik`],
@@ -570,7 +584,7 @@ function breakdownHTML(title,byDate,note){
     return `<tr><td><b>${v.date}</b></td>
       <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
       <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
-      <td class="num">${v.spend?(v.comm/v.spend).toFixed(2):'—'}</td>
+      <td class="num">${v.spend?dec(v.comm/v.spend,2):'—'}</td>
       <td class="num">${nf(v.clicks)}</td>
       <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
       <td class="num">${sh?nf(sh):'—'}</td>
@@ -608,7 +622,7 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+FILTER+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';
@@ -641,8 +655,8 @@ function renderUnit(){
     <td class="num"${x.shopeeClicks?' title="Jendela laporan klik, dibagi proporsional dari tag induk"':''}>${x.shopeeClicks?nf(x.shopeeClicks):'—'}</td>
     <td class="num"${x.cpcShopee?' title="Biaya pada jendela klik ÷ klik masuk, di tingkat tag"':''}>${x.cpcShopee?nf(x.cpcShopee):'—'}</td>
     <td class="num col-ideal"><b>${nf(x.cpcIdeal)}</b></td>
-    <td class="num">${x.ctr.toFixed(2)}</td><td class="num">${nf(x.orders)}</td>
-    <td class="num">${x.convRate.toFixed(2)}</td><td class="num">${rp(x.commEff)}</td>
+    <td class="num">${dec(x.ctr,2)}</td><td class="num">${nf(x.orders)}</td>
+    <td class="num">${dec(x.convRate,2)}</td><td class="num">${rp(x.commEff)}</td>
     <td class="num ${x.netEff>=0?'pos':'neg'}">${rp(x.netEff)}</td>
     <td class="num ${x.roi>=0?'pos':'neg'}">${x.spend?x.roi.toFixed(0)+'%':'—'}</td>
     <td class="num">${x.orders?rp(x.costPerOrder):'—'}</td></tr>`).join('');
@@ -664,14 +678,14 @@ function renderLeak(){
       : d>0?'Dibagikan orang di luar iklan — sinyal konten bagus':'Pas dengan klik berbayar';
     return `<tr><td><b>${esc(t.tag)}</b></td><td class="num">${nf(L.metaClicks)}</td><td class="num">${nf(L.shopeeClicks)}</td>
       <td class="num ${d<0?'neg':d>0?'pos':''}">${d>0?'+':''}${nf(d)}</td>
-      <td class="num leak-${L.severity}">${L.pct.toFixed(1)}%</td>
+      <td class="num leak-${L.severity}">${dec(L.pct,1)}%</td>
       <td class="num ${L.wasted>0?'neg':''}">${L.wasted>0?rp(L.wasted):'—'}</td>
       <td style="white-space:normal;font-size:11px;color:var(--text-dim)">${note}</td></tr>`;
   }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat perbandingan klik.</td></tr>`;
 }
 function renderDaily(){
   const d=RESULT.daily,k=RESULT.kpi;
-  $('dailyStrip').innerHTML=[['Impresi',nf(k.impr)],['Reach',nf(k.reach)],['Klik',nf(k.clicks)],['CTR',k.ctr.toFixed(2)+'%'],['CPM',rp(k.cpm)],['CPC',rp(k.cpc)],['Landing View',nf(k.lpv)],['CR',k.convRate.toFixed(2)+'%'],['GMV',rp(k.gmv)],['Biaya/Order',rp(k.costPerOrder)]].map(x=>`<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
+  $('dailyStrip').innerHTML=[['Impresi',nf(k.impr)],['Reach',nf(k.reach)],['Klik',nf(k.clicks)],['CTR',dec(k.ctr,2)+'%'],['CPM',rp(k.cpm)],['CPC',rp(k.cpc)],['Landing View',nf(k.lpv)],['CR',dec(k.convRate,2)+'%'],['GMV',rp(k.gmv)],['Biaya/Order',rp(k.costPerOrder)]].map(x=>`<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
   $('tblDaily').querySelector('thead').innerHTML='<tr>'+DAYCOLS.map((h,i)=>`<th class="${i>1?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblDaily').querySelector('tbody').innerHTML=d.slice().reverse().map(x=>dayRow(x)).join('');
   $('tblDaily').querySelectorAll('[data-day]').forEach(tr=>{
@@ -701,7 +715,7 @@ function dayRow(x){
     <td><b>${x.date}</b>${x.mature?'':' <span class="pill">belum matang</span>'}</td>
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.comm)}</td>
     <td class="num ${x.net>=0?'pos':'neg'}">${rp(x.net)}</td>
-    <td class="num">${x.spend?x.roas.toFixed(2):'—'}</td>
+    <td class="num">${x.spend?dec(x.roas,2):'—'}</td>
     ${orderCells(x,x.orders)}</tr>`;
 }
 function toggleDay(date,tr){
@@ -715,7 +729,7 @@ function toggleDay(date,tr){
     return `<tr><td><b>${esc(x.tag)}</b> <span class="badge ${x.status}">${x.label}</span></td>
       <td class="num">${rp(v.spend)}</td><td class="num">${rp(v.comm)}</td>
       <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
-      <td class="num">${v.spend?(v.comm/v.spend).toFixed(2):'—'}</td>
+      <td class="num">${v.spend?dec(v.comm/v.spend,2):'—'}</td>
       ${orderCells(v,v.orders)}</tr>`;
   }).join(''):`<tr><td colspan="${DAYCOLS.length-1}" style="color:var(--text-mute);padding:14px">Tidak ada tag yang aktif pada tanggal ini.</td></tr>`;
   const det=document.createElement('tr');
@@ -753,7 +767,7 @@ function renderStatus(){
     box('cancelled','Dibatalkan',T.cancelled,C.cancelled,'bad')+
     `<div class="stat-cell total"><div class="sl">Komisi belum final</div>
       <div class="sv">${rp(C.pending+C.unpaid)}</div>
-      <div class="sc">dari ${nf(T.pending+T.unpaid)} pesanan · ${T.orders?((T.pending+T.unpaid)/T.orders*100).toFixed(1):0}% dari semua</div></div>`;
+      <div class="sc">dari ${nf(T.pending+T.unpaid)} pesanan · ${T.orders?dec((T.pending+T.unpaid)/T.orders*100,1):0}% dari semua</div></div>`;
 
   const byDate={};days.forEach(d=>byDate[d.date]=d);
   const all=[];
@@ -793,7 +807,7 @@ function renderTrend(){
   // change and name the baseline period once, above the strip.
   const dl=(v,fmt,inv)=>{v=n(v);if(!v)return '';const good=inv?v<0:v>0;
     return ` <span class="dlt ${good?'up':'down'}">${v>0?'▲':'▼'} ${fmt(Math.abs(v))}</span>`};
-  const pct=v=>n(v).toFixed(2);
+  const pct=v=>dec(n(v),2);
   $('trendRange').textContent=tr.series.length+' snapshot · '+tr.series[0].period+' — '+last.period;
   $('trendBase').innerHTML=prev?`Perubahan dibanding periode <b>${esc(prev.period)}</b>.`:'';
   $('trendStrip').innerHTML=[
@@ -809,7 +823,7 @@ function renderTrend(){
   $('tblMovers').querySelector('thead').innerHTML='<tr>'+['Tag','Dari','Ke','Perubahan','Status Awal','Status Kini'].map((h,i)=>`<th class="${i&&i<4?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblMovers').querySelector('tbody').innerHTML=mv.length?mv.map(m=>`<tr>
     <td><b>${esc(m.tag)}</b></td><td class="num">${rx(n(m.from))}</td><td class="num">${rx(n(m.to))}</td>
-    <td class="num ${n(m.delta)>=0?'pos':'neg'}">${n(m.delta)>=0?'+':''}${n(m.delta).toFixed(2)}</td>
+    <td class="num ${n(m.delta)>=0?'pos':'neg'}">${n(m.delta)>=0?'+':''}${dec(n(m.delta),2)}</td>
     <td><span class="badge ${esc(m.fromStatus||'evaluasi')}">${esc(m.fromStatus||'—')}</span></td>
     <td><span class="badge ${esc(m.toStatus||'evaluasi')}">${esc(m.toStatus||'—')}</span>${m.changed?' <span class="pill">berubah</span>':''}</td></tr>`).join('')
     :`<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Belum ada tag yang muncul di dua snapshot.</td></tr>`;
@@ -878,17 +892,19 @@ function renderCalendar(){
       // All four numbers live in the square. The switcher above now only picks
       // which one drives the colour and sits on the top line — nobody should
       // have to click through four views to read one day.
+      // The lead number sits on its own line at full size; the three below drop
+      // the "Rp" so "Komisi 1,1jt" fits a 90px square without being cut off.
       const lines=[
-        ['Laba',rp(d.net),d.net>=0?'up':'down'],
-        ['Komisi',rp(d.comm),''],
-        ['Biaya',rp(d.spend),''],
-        ['ROAS',d.spend?d.roas.toFixed(2)+'x':'—',''],
+        ['Laba',rp(d.net),d.net>=0?'up':'down',rpShort(d.net)],
+        ['Komisi',rp(d.comm),'',rpShort(d.comm)],
+        ['Biaya',rp(d.spend),'',rpShort(d.spend)],
+        ['ROAS',d.spend?dec(d.roas,2)+'x':'—',''],
       ];
       const lead=lines.splice({net:0,comm:1,spend:2,roas:3}[CALVIEW],1)[0];
       cells.push(`<span class="cday ${cls}${d.mature?'':' raw'}" style="--i:${op.toFixed(3)}"
         title="${key} · ${nf(d.orders)} order · ${nf(d.clicks)} klik Meta${d.shopeeClicks?' · '+nf(d.shopeeClicks)+' klik Shopee':''}${d.mature?'':' · data belum matang'}">
         <b>${i}</b><i class="${lead[2]}"><em>${lead[0]}</em>${lead[1]}</i>
-        <u>${lines.map(l=>`<span><em>${l[0]}</em>${l[1]}</span>`).join('')}</u></span>`);
+        <u>${lines.map(l=>`<span><em>${l[0]}</em>${l[3]||l[1]}</span>`).join('')}</u></span>`);
     }
     return `<div class="calmonth"><h4>${NM[m-1]} ${y}</h4>
       <div class="cgrid">${DOW.map(x=>`<span class="cdow">${x}</span>`).join('')}${cells.join('')}</div></div>`;
@@ -935,73 +951,87 @@ function mk(id,cfg){
   // re-runs renderCharts() once it has a real box.
   if(!el.offsetParent&&!(el.offsetWidth&&el.offsetHeight)) return;
   if(CHARTS[id])CHARTS[id].destroy();
-  const grid=cv('--border'),text=cv('--text-dim');
-  cfg.options=Object.assign({responsive:true,maintainAspectRatio:false,
-    // With only a handful of snapshots Chart.js stretches bars across the whole
-    // plot area, which reads as blocks rather than a comparison.
-    datasets:{bar:{maxBarThickness:54,categoryPercentage:.7,barPercentage:.85}},
-    plugins:{legend:{labels:{color:text,font:{family:'Plus Jakarta Sans',size:11}}}},
-    scales:cfg.type==='doughnut'?undefined:{x:{grid:{color:grid},ticks:{color:text,font:{size:10}}},
-      y:{grid:{color:grid},ticks:{color:text,font:{size:10}}}}},cfg.options||{});
-  CHARTS[id]=new Chart(el,cfg);
+  CHARTS[id]=ChartTheme.create(Chart,el,cfg);
 }
+const CT=window.ChartTheme;
+// Canvas text does not re-flow when the web font arrives; redraw once it has.
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{if(RESULT)renderCharts()});
 function renderCharts(){
   if(!RESULT)return;
   const R=RESULT,d=R.daily,lbl=d.map(x=>x.date.slice(5)),b=R.breakdown;
-  const acc=cv('--accent'),ok=cv('--ok'),info=cv('--info'),warn=cv('--warn'),bad=cv('--bad'),org=cv('--organic');
-  $('matureNote').textContent=R.range.matureUntil?'Titik pudar = data belum matang':'';
+  const acc=cv('--accent'),ok=cv('--ok'),info=cv('--info'),warn=cv('--warn'),bad=cv('--bad'),org=cv('--organic'),mute=cv('--text-mute');
+  // Days still inside the attribution lag are drawn dashed and faded: their
+  // commission is still arriving, so the dip at the end is not a real drop.
+  const raw=i=>d[i]&&!d[i].mature,anyRaw=d.some(x=>!x.mature);
+  const fresh=(color)=>({segment:{borderDash:c=>raw(c.p1DataIndex)?[5,4]:undefined},
+    pointBackgroundColor:d.map(x=>x.mature?color:color+'55'),pointBorderColor:d.map(x=>x.mature?color:color+'55')});
+  $('matureNote').textContent='Area hijau = laba, merah = rugi'+(anyRaw?' · garis putus-putus = belum matang':'');
 
   mk('chDaily',{type:'line',data:{labels:lbl,datasets:[
-    {label:'Komisi',data:d.map(x=>x.comm),borderColor:ok,backgroundColor:ok+'22',fill:true,tension:.3,pointRadius:2},
-    {label:'Biaya Iklan',data:d.map(x=>x.spend),borderColor:acc,backgroundColor:acc+'18',fill:true,tension:.3,pointRadius:2}]}});
-  mk('chRoas',{type:'bar',data:{labels:lbl,datasets:[{label:'ROAS',data:d.map(x=>x.roas),
-    backgroundColor:d.map(x=>!x.mature?warn+'55':x.roas>=2?ok:x.roas>=1?warn:bad)}]}});
+    // The band between the two lines is the day's profit: green above, red below.
+    {label:'Komisi',data:d.map(x=>x.comm),borderColor:ok,backgroundColor:ok,fill:{target:1,above:ok+'2e',below:bad+'2e'},fmt:'money',...fresh(ok)},
+    {label:'Biaya Iklan',data:d.map(x=>x.spend),borderColor:acc,backgroundColor:acc,fill:false,fmt:'money',...fresh(acc)}]},
+    options:{scales:{y:CT.axis('money',{beginAtZero:true})}}});
+  const thScale=R.options&&Number.isFinite(R.options.thScale)?R.options.thScale:2;
+  mk('chRoas',{type:'bar',data:{labels:lbl,datasets:[{label:'ROAS',data:d.map(x=>x.roas),fmt:'ratio',order:1,
+    backgroundColor:d.map(x=>{const c=x.roas>=thScale?ok:x.roas>=1?warn:bad;return x.mature?c:c+'55'})},
+    CT.reference('Impas 1x',1,d.length,mute),
+    CT.reference('Target scale '+CT.ratio(thScale),thScale,d.length,ok)]},
+    options:{scales:{y:CT.axis('ratio',{beginAtZero:true})}}});
   mk('chClicks',{type:'line',data:{labels:lbl,datasets:[
-    {label:'Klik Meta',data:d.map(x=>x.clicks),borderColor:info,tension:.3,pointRadius:2},
-    {label:'Klik Shopee',data:d.map(x=>x.shopeeClicks),borderColor:warn,tension:.3,pointRadius:2},
-    {label:'Order',data:d.map(x=>x.orders),borderColor:ok,tension:.3,pointRadius:2,yAxisID:'y1'}]},
-    options:{scales:{y1:{position:'right',grid:{display:false},ticks:{color:cv('--text-dim'),font:{size:10}}}}}});
+    {label:'Klik Meta',data:d.map(x=>x.clicks),borderColor:info,backgroundColor:info,fmt:'count'},
+    {label:'Klik Shopee',data:d.map(x=>x.shopeeClicks),borderColor:warn,backgroundColor:warn,fmt:'count'},
+    {label:'Order',data:d.map(x=>x.orders),borderColor:ok,backgroundColor:ok,borderDash:[2,3],fmt:'count',yAxisID:'y1'}]},
+    options:{scales:{y:CT.axis('count',{beginAtZero:true,title:{display:true,text:'Klik',color:mute}}),
+      y1:CT.axis('count',{position:'right',beginAtZero:true,grid:{display:false},border:{display:false},
+        title:{display:true,text:'Order',color:mute}})}}});
 
   const pf=b.platform.slice(0,6);
-  mk('chPlat',{type:'doughnut',data:{labels:pf.map(x=>x.name),datasets:[{data:pf.map(x=>x.comm),
-    backgroundColor:[acc,ok,info,warn,bad,org]}]}});
+  mk('chPlat',{type:'doughnut',data:{labels:pf.map(x=>x.name),datasets:[{label:'Komisi',data:pf.map(x=>x.comm),fmt:'money',
+    backgroundColor:[acc,ok,info,warn,bad,org],borderColor:cv('--surface'),borderWidth:2}]},options:{cutout:'62%'}});
   const ct=b.category.slice(0,8);
   mk('chCat',{type:'bar',data:{labels:ct.map(x=>x.name.slice(0,22)),datasets:[{label:'Komisi',
-    data:ct.map(x=>x.comm),backgroundColor:acc}]},options:{indexAxis:'y'}});
-  mk('chHour',{type:'bar',data:{labels:b.hourly.map(h=>h.hour+':00'),datasets:[{label:'Komisi',
-    data:b.hourly.map(h=>h.comm),backgroundColor:info}]}});
+    data:ct.map(x=>x.comm),backgroundColor:acc,fmt:'money'}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:CT.axis('money',{beginAtZero:true,grid:{display:true}}),y:{grid:{display:false}}}}});
+  mk('chHour',{type:'bar',data:{labels:b.hourly.map(h=>String(h.hour).padStart(2,'0')),datasets:[{label:'Komisi',
+    data:b.hourly.map(h=>h.comm),backgroundColor:info,fmt:'money'}]},
+    options:{plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].label+':00'}}},scales:{y:CT.axis('money',{beginAtZero:true})}}});
   const lp=R.lagProfile.slice(0,8);
   mk('chLag',{type:'bar',data:{labels:lp.map(x=>'H+'+x.day),datasets:[
-    {label:'% pesanan',data:lp.map(x=>x.pct),backgroundColor:info},
-    {label:'kumulatif %',data:lp.map(x=>x.cumulative),type:'line',borderColor:acc,tension:.3,pointRadius:2}]}});
+    {label:'% pesanan',data:lp.map(x=>x.pct),backgroundColor:info,fmt:'pct'},
+    {label:'kumulatif %',data:lp.map(x=>x.cumulative),type:'line',borderColor:acc,backgroundColor:acc,fmt:'pct'}]},
+    options:{scales:{y:CT.axis('pct',{beginAtZero:true,max:100})}}});
   const st=R.settlement.filter(s=>s.age<=21);
-  mk('chSettle',{type:'line',data:{labels:st.map(s=>'umur '+s.age),datasets:[{label:'% tertunda',
-    data:st.map(s=>s.pendingPct),borderColor:warn,backgroundColor:warn+'22',fill:true,tension:.3,pointRadius:2}]}});
+  mk('chSettle',{type:'line',data:{labels:st.map(s=>'H+'+s.age),datasets:[{label:'% tertunda',
+    data:st.map(s=>s.pendingPct),borderColor:warn,backgroundColor:warn+'22',fill:'origin',fmt:'pct'}]},
+    options:{plugins:{legend:{display:false}},scales:{y:CT.axis('pct',{beginAtZero:true,max:100})}}});
   const sc=b.clickSource.slice(0,6);
-  mk('chSrc',{type:'doughnut',data:{labels:sc.map(x=>x.name),datasets:[{data:sc.map(x=>x.count),
-    backgroundColor:[info,ok,acc,warn,bad,org]}]}});
+  mk('chSrc',{type:'doughnut',data:{labels:sc.map(x=>x.name),datasets:[{label:'Klik',data:sc.map(x=>x.count),fmt:'count',
+    backgroundColor:[info,ok,acc,warn,bad,org],borderColor:cv('--surface'),borderWidth:2}]},options:{cutout:'62%'}});
   const rg=b.clickRegion.slice(0,6);
   mk('chRegion',{type:'bar',data:{labels:rg.map(x=>x.name.slice(0,18)),datasets:[{label:'Klik',
-    data:rg.map(x=>x.count),backgroundColor:warn}]},options:{indexAxis:'y'}});
+    data:rg.map(x=>x.count),backgroundColor:warn,fmt:'count'}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:CT.axis('count',{beginAtZero:true,grid:{display:true}}),y:{grid:{display:false}}}}});
 
   const tr=E.buildTrend(snaps(),active());
   if(tr.series.length>=2){
     const tl=tr.series.map(s=>s.period);
     mk('chTrend',{type:'bar',data:{labels:tl,datasets:[
-      {label:'Biaya',data:tr.series.map(s=>s.spend),backgroundColor:acc+'99'},
-      {label:'Komisi Efektif',data:tr.series.map(s=>s.commEff),backgroundColor:ok+'99'},
-      {label:'Laba',data:tr.series.map(s=>s.netEff),type:'line',borderColor:info,tension:.3,pointRadius:3}]}});
+      {label:'Biaya',data:tr.series.map(s=>s.spend),backgroundColor:acc+'99',fmt:'money'},
+      {label:'Komisi Efektif',data:tr.series.map(s=>s.commEff),backgroundColor:ok+'99',fmt:'money'},
+      {label:'Laba',data:tr.series.map(s=>s.netEff),type:'line',borderColor:info,backgroundColor:info,pointRadius:3,fmt:'money'}]},
+      options:{scales:{y:CT.axis('money',{beginAtZero:true})}}});
     mk('chTrendRoas',{type:'line',data:{labels:tl,datasets:[
-      {label:'ROAS Berbayar',data:tr.series.map(s=>s.paidRoas),borderColor:acc,tension:.3,pointRadius:3},
-      {label:'ROAS Gabungan',data:tr.series.map(s=>s.roasEff),borderColor:ok,tension:.3,pointRadius:3}]},
+      {label:'ROAS Berbayar',data:tr.series.map(s=>s.paidRoas),borderColor:acc,backgroundColor:acc,pointRadius:3,fmt:'ratio'},
+      {label:'ROAS Gabungan',data:tr.series.map(s=>s.roasEff),borderColor:ok,backgroundColor:ok,pointRadius:3,fmt:'ratio'}]},
       // Start at zero: a truncated axis makes a small ROAS move look dramatic.
-      options:{scales:{y:{beginAtZero:true}}}});
+      options:{scales:{y:CT.axis('ratio',{beginAtZero:true})}}});
     mk('chTrendMix',{type:'bar',data:{labels:tl,datasets:[
       {label:'Scale',data:tr.series.map(s=>s.counts.scale||0),backgroundColor:ok,stack:'s'},
       {label:'Pantau',data:tr.series.map(s=>s.counts.pantau||0),backgroundColor:warn,stack:'s'},
       {label:'Stop',data:tr.series.map(s=>s.counts.stop||0),backgroundColor:bad,stack:'s'},
       {label:'Organik',data:tr.series.map(s=>s.counts.organik||0),backgroundColor:org,stack:'s'}]},
-      options:{scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}}}});
+      options:{scales:{x:{stacked:true},y:CT.axis('count',{stacked:true,beginAtZero:true,ticks:{precision:0}})}}});
   }
 }
 function updateAnalysisAvailability(){
@@ -1014,11 +1044,19 @@ $('btnStored').onclick=()=>{
   document.querySelector('[data-tab="tersimpan"]').click();
 };
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-selected','false');x.tabIndex=-1});
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');
+  t.classList.add('active');t.setAttribute('aria-selected','true');t.tabIndex=0;
   document.querySelector(`[data-panel="${t.dataset.tab}"]`).classList.add('active');
   requestAnimationFrame(()=>{if(RESULT)renderCharts()});
+});
+// Arrow keys move between tabs, as in any tab strip; Tab leaves the strip.
+document.querySelector('.tabs').addEventListener('keydown',e=>{
+  const tabs=[...document.querySelectorAll('.tab:not(:disabled)')],i=tabs.indexOf(document.activeElement);
+  if(i<0)return;
+  const next={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:tabs.length-1}[e.key];
+  if(next==null)return;
+  e.preventDefault();const t=tabs[(next+tabs.length)%tabs.length];t.focus();t.click();
 });
 
 /* ── Export PDF ─────────────────────────────────────────────────────────────

@@ -12,6 +12,9 @@ for (const [source, destination] of [
   ['jspdf/LICENSE', 'jspdf-LICENSE'],
   ['jspdf-autotable/dist/jspdf.plugin.autotable.min.js', 'jspdf.plugin.autotable.min.js'],
   ['jspdf-autotable/LICENSE.txt', 'jspdf-autotable-LICENSE.txt'],
+  ['@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-wght-normal.woff2', 'plus-jakarta-sans-latin.woff2'],
+  ['@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-ext-wght-normal.woff2', 'plus-jakarta-sans-latin-ext.woff2'],
+  ['@fontsource-variable/plus-jakarta-sans/LICENSE', 'plus-jakarta-sans-LICENSE.txt'],
 ]) {
   fs.copyFileSync(path.join(root, 'node_modules', source), path.join(root, 'vendor', destination));
 }

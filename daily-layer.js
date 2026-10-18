@@ -178,18 +178,10 @@
   /* ── Stored history ─────────────────────────────────────────────────────── */
   function cv(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
   function mk(id, cfg) {
-    const el = $(id); if (!el) return;
+    const el = $(id); if (!el || typeof Chart === 'undefined') return;
     if (!el.offsetParent && !(el.offsetWidth && el.offsetHeight)) return;
     if (DCHARTS[id]) DCHARTS[id].destroy();
-    const grid = cv('--border'), text = cv('--text-dim');
-    cfg.options = Object.assign({
-      responsive: true, maintainAspectRatio: false,
-      datasets: { bar: { maxBarThickness: 44 } },
-      plugins: { legend: { labels: { color: text, font: { family: 'Plus Jakarta Sans', size: 11 } } } },
-      scales: { x: { grid: { color: grid }, ticks: { color: text, font: { size: 10 } } },
-                y: { grid: { color: grid }, ticks: { color: text, font: { size: 10 } } } },
-    }, cfg.options || {});
-    DCHARTS[id] = new Chart(el, cfg);
+    DCHARTS[id] = window.ChartTheme.create(Chart, el, cfg);
   }
 
   async function renderStored() {
@@ -256,20 +248,24 @@
     ].map(x => `<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
 
     const lbl = days.map(d => d.date.slice(5));
+    const CT = window.ChartTheme, mute = cv('--text-mute');
+    const thScale = window.Engine.normalizeOptions(window.opts ? window.opts() : {}).thScale;
     mk('chStored', { type: 'line', data: { labels: lbl, datasets: [
-      { label: 'Komisi Efektif', data: days.map(d => d.commEff), borderColor: cv('--ok'),
-        backgroundColor: cv('--ok') + '22', fill: true, tension: .3, pointRadius: 2 },
+      { label: 'Komisi Efektif', data: days.map(d => d.commEff), borderColor: cv('--ok'), backgroundColor: cv('--ok'),
+        fill: { target: 1, above: cv('--ok') + '2e', below: cv('--bad') + '2e' }, fmt: 'money' },
       { label: 'Biaya + PPN', data: days.map(d => d.spendPpn), borderColor: cv('--accent'),
-        backgroundColor: cv('--accent') + '18', fill: true, tension: .3, pointRadius: 2 },
-    ]}});
+        backgroundColor: cv('--accent'), fill: false, fmt: 'money' },
+    ]}, options: { scales: { y: CT.axis('money', { beginAtZero: true }) } } });
     mk('chStoredRoas', { type: 'bar', data: { labels: lbl, datasets: [
-      { label: 'ROAS', data: days.map(d => d.roas),
-        backgroundColor: days.map(d => d.roas >= 2 ? cv('--ok') : d.roas >= 1 ? cv('--warn') : cv('--bad')) },
-    ]}, options: { scales: { y: { beginAtZero: true } } } });
+      { label: 'ROAS', data: days.map(d => d.roas), fmt: 'ratio', order: 1,
+        backgroundColor: days.map(d => d.roas >= thScale ? cv('--ok') : d.roas >= 1 ? cv('--warn') : cv('--bad')) },
+      CT.reference('Impas 1x', 1, days.length, mute),
+      CT.reference('Target scale ' + CT.ratio(thScale), thScale, days.length, cv('--ok')),
+    ]}, options: { scales: { y: CT.axis('ratio', { beginAtZero: true }) } } });
     mk('chStoredClk', { type: 'line', data: { labels: lbl, datasets: [
-      { label: 'Klik Meta', data: days.map(d => d.clicks), borderColor: cv('--info'), tension: .3, pointRadius: 2 },
-      { label: 'Klik Shopee', data: days.map(d => d.shopeeClicks), borderColor: cv('--warn'), tension: .3, pointRadius: 2 },
-    ]}});
+      { label: 'Klik Meta', data: days.map(d => d.clicks), borderColor: cv('--info'), backgroundColor: cv('--info'), fmt: 'count' },
+      { label: 'Klik Shopee', data: days.map(d => d.shopeeClicks), borderColor: cv('--warn'), backgroundColor: cv('--warn'), fmt: 'count' },
+    ]}, options: { scales: { y: CT.axis('count', { beginAtZero: true }) } } });
 
     const cols = ['Tanggal', 'Komisi Efektif', 'Biaya+PPN', 'Laba', 'ROAS', 'Order', 'Klik Meta', 'Klik Shopee', '% Masuk', 'CPC'];
     $('tblStored').querySelector('thead').innerHTML = '<tr>' +
@@ -277,7 +273,7 @@
     $('tblStored').querySelector('tbody').innerHTML = days.slice().reverse().map(d => `<tr>
       <td><b>${d.date}</b></td><td class="num">${rp(d.commEff)}</td><td class="num">${rp(d.spendPpn)}</td>
       <td class="num ${d.net >= 0 ? 'pos' : 'neg'}">${rp(d.net)}</td>
-      <td class="num">${d.spendPpn > 0 ? d.roas.toFixed(2) : '—'}</td>
+      <td class="num">${d.spendPpn > 0 ? window.dec(d.roas, 2) : '—'}</td>
       <td class="num">${nf(d.orders)}</td><td class="num">${nf(d.clicks)}</td>
       <td class="num">${d.shopeeClicks ? nf(d.shopeeClicks) : '—'}</td>
       <td class="num ${d.leak != null && d.leak < 70 ? 'neg' : ''}">${d.leak != null ? d.leak.toFixed(0) + '%' : '—'}</td>

@@ -414,6 +414,31 @@ async function main() {
     });
   }
 
+  test('daily charts keep clicks and orders on separate axes and tabs announce their state', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1'), aff('2', 'Alpha', '2026-08-02')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Alpha', 100, '2026-08-02')] },
+      { name: 'clicks.csv', rows: [click(), click('Alpha', '2026-08-02')] }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chClicks'))));
+    const axes = await page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('chClicks'));
+      return { ids: chart.data.datasets.map(ds => ds.yAxisID || 'y'), left: chart.scales.y.max, right: chart.scales.y1.position,
+        xGridHidden: chart.options.scales.x.grid.display === false,
+        roasRefs: Chart.getChart(document.getElementById('chRoas')).data.datasets.filter(ds => ds.isReference).map(ds => ds.data[0]) };
+    });
+    assert.deepEqual(axes.ids, ['y', 'y', 'y1'], 'orders get their own axis; clicks stay on the left');
+    assert.ok(axes.left >= 10, 'left axis is scaled to click counts, not left empty');
+    assert.equal(axes.right, 'right');
+    assert.equal(axes.xGridHidden, true, 'a per-chart y override must not wipe the shared x styling');
+    assert.deepEqual(axes.roasRefs, [1, 2], 'ROAS bars show break-even and the scale threshold');
+    assert.equal(await page.locator('#tab-harian').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#tab-iklan').getAttribute('aria-selected'), 'false');
+    await page.locator('#tab-harian').focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.locator('#tab-produk').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#panel-produk').isVisible(), true);
+  });
+
   for (const width of [320, 390]) {
     test(`dashboard stays within a ${width}px mobile viewport`, async page => {
       await page.setViewportSize({ width, height: 844 });
