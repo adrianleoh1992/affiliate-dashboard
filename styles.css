@@ -777,3 +777,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .check-row{display:flex;gap:8px;align-items:center;font-size:13px;margin:10px 0 4px;cursor:pointer}
 .check-row input{width:16px;height:16px}
 #metaModal .field{margin-top:12px}#metaModal .ctrls{margin-top:4px}
+.meta-help{font-size:13px;margin:8px 0 2px}.meta-help summary{cursor:pointer;font-weight:600}
+.meta-help ol{margin:8px 0 4px;padding-left:20px;display:grid;gap:4px}.meta-help p{margin:4px 0 0}
+#metaToken.masked{-webkit-text-security:disc}
+.meta-saved{background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:7px;font-size:13px;margin:8px 0 0;overflow-wrap:anywhere}

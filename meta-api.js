@@ -21,6 +21,11 @@
   const INSIGHT_FIELDS = ['ad_id', 'ad_name', 'adset_name', 'campaign_name', 'account_currency', 'spend', 'impressions',
     'reach', 'frequency', 'inline_link_clicks', 'clicks', 'inline_link_click_ctr', 'cpm', 'actions',
     'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking'];
+  // Insights at level=ad leave out ARCHIVED and DELETED ads unless a status
+  // filter names them (Meta: "Manage Your Ad Object's Status"). Losing ads are
+  // exactly the ones people delete, so every status is requested explicitly.
+  const ALL_STATUSES = ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'IN_PROCESS', 'WITH_ISSUES', 'PENDING_REVIEW',
+    'DISAPPROVED', 'PREAPPROVED', 'PENDING_BILLING_INFO', 'ARCHIVED', 'DELETED'];
   const RANKING = {
     ABOVE_AVERAGE: 'Above average', AVERAGE: 'Average',
     BELOW_AVERAGE_35: 'Below average - Bottom 35% of ads', BELOW_AVERAGE_20: 'Below average - Bottom 20% of ads',
@@ -64,9 +69,9 @@
         ? 'Token Meta sudah kedaluwarsa. Buat token baru (disarankan token System User yang tidak kedaluwarsa), lalu tempel ulang.'
         : 'Token Meta tidak valid atau sudah dicabut. Buat token baru dengan izin ads_read, lalu tempel ulang.', info);
     }
-    if (code === 10 || code === 200 || code === 272 || (code >= 200 && code < 300)) {
+    if (code === 10 || code === 200 || code === 272 || (code >= 200 && code < 300) || (code === 100 && sub === 33)) {
       info.kind = 'permission';
-      return new MetaApiError('Token tidak punya akses ke akun iklan ini. Pastikan token memiliki izin ads_read dan pengguna/System User ditugaskan ke akun iklan tersebut.', info);
+      return new MetaApiError('Akun iklan tidak ditemukan atau token tidak punya akses ke akun ini. Pastikan token memiliki izin ads_read dan pengguna/System User ditugaskan ke akun iklan tersebut.', info);
     }
     if ([4, 17, 32, 341, 613].includes(code) || (code >= 80000 && code <= 80014)) {
       info.kind = 'rate';
@@ -99,7 +104,9 @@
         if (err && err.name === 'AbortError') throw err;
         throw new MetaApiError('Tidak dapat menghubungi Meta. Periksa koneksi internet, lalu coba lagi.', { kind: 'network' });
       }
-      try { body = await response.json(); } catch (err) { body = null; }
+      // A cancel that lands while the body is read must stay a cancel, not
+      // turn into an API error that callers may swallow.
+      try { body = await response.json(); } catch (err) { if ((err && err.name === 'AbortError') || (signal && signal.aborted)) throw err; body = null; }
       if (!response.ok || !body || body.error) throw describeError(body, response.status);
       return body;
     }
@@ -149,28 +156,51 @@
       const out = new Map(), ids = [...new Set(adIds.filter(id => /^\d+$/.test(id)))];
       for (let i = 0; i < ids.length; i += 50) {
         const body = await get(url('', { ids: ids.slice(i, i + 50).join(','), fields: 'effective_status' }), token, signal);
-        Object.entries(body || {}).forEach(([id, ad]) => { if (ad && ad.effective_status) out.set(id, String(ad.effective_status).toLowerCase()); });
+        Object.entries(body || {}).forEach(([id, ad]) => { if (ad && ad.effective_status) out.set(id, String(ad.effective_status).toUpperCase()); });
       }
       return out;
     }
 
     /* Ad-level insights, one row per ad per day, in the ad account's timezone
-       — the same grain as an Ads Manager export with breakdown Time → Day. */
+       — the same grain as an Ads Manager export with breakdown Time → Day.
+       Each window is checked against the account's own daily spend, so spend
+       the ad rows miss (an ad status the filter did not cover, a filter Meta
+       refused) is reported instead of silently lowering cost. */
     async function fetchDailyInsights(token, accountId, since, until, opts) {
       opts = opts || {};
       token = requireToken(token);
       const account = normalizeAccountId(accountId);
       const chunks = splitRange(since, until, opts.chunkDays);
-      const rows = [];
+      const rows = [], totals = new Map();
+      let filtered = true;
       for (let i = 0; i < chunks.length; i++) {
         if (opts.onProgress) opts.onProgress({ step: i, total: chunks.length, range: chunks[i] });
-        const part = await all(url(account + '/insights', {
-          level: 'ad', time_increment: '1', fields: INSIGHT_FIELDS.join(','),
-          time_range: { since: chunks[i].since, until: chunks[i].until }, limit: String(PAGE_LIMIT),
-        }), token, opts.signal);
+        const range = { since: chunks[i].since, until: chunks[i].until };
+        const params = { level: 'ad', time_increment: '1', fields: INSIGHT_FIELDS.join(','), time_range: range, limit: String(PAGE_LIMIT) };
+        let part;
+        try {
+          part = await all(url(account + '/insights', filtered ? Object.assign({ filtering: [{ field: 'ad.effective_status', operator: 'IN', value: ALL_STATUSES }] }, params) : params), token, opts.signal);
+        } catch (err) {
+          // An invalid-parameter answer to the status filter must not block
+          // the pull; the daily totals below then show what went missing.
+          if (!(err instanceof MetaApiError && err.code === 100 && filtered)) throw err;
+          filtered = false;
+          part = await all(url(account + '/insights', params), token, opts.signal);
+        }
         rows.push(...part);
+        const daily = await all(url(account + '/insights', { time_increment: '1', fields: 'spend', time_range: range, limit: String(PAGE_LIMIT) }), token, opts.signal);
+        daily.forEach(d => { if (isDate(d.date_start)) totals.set(d.date_start, (totals.get(d.date_start) || 0) + (Number(d.spend) || 0)); });
       }
       if (opts.onProgress) opts.onProgress({ step: chunks.length, total: chunks.length });
+      const byDay = new Map();
+      rows.forEach(r => byDay.set(r.date_start, (byDay.get(r.date_start) || 0) + (Number(r.spend) || 0)));
+      // Meta rounds spend per row; allow one rupiah per ad row before calling it a gap.
+      const rowCount = new Map();
+      rows.forEach(r => rowCount.set(r.date_start, (rowCount.get(r.date_start) || 0) + 1));
+      const gaps = [...totals].map(([date, total]) => ({ date, total, ads: byDay.get(date) || 0 }))
+        .filter(g => g.total - g.ads > Math.max(1, rowCount.get(g.date) || 0))
+        .map(g => Object.assign(g, { missing: g.total - g.ads }))
+        .sort((a, b) => a.date.localeCompare(b.date));
       let delivery = new Map();
       if (opts.delivery !== false && rows.length) {
         // Delivery status is a nice-to-have (it drives the "active" label);
@@ -178,7 +208,7 @@
         try { delivery = await fetchDelivery(rows.map(r => String(r.ad_id || '')), token, opts.signal); }
         catch (err) { if (err && err.name === 'AbortError') throw err; }
       }
-      return { account, since, until, rows, delivery };
+      return { account, since, until, rows, delivery, gaps, filtered };
     }
 
     return { version, listAdAccounts, fetchDailyInsights };
@@ -188,7 +218,14 @@
     const hit = (Array.isArray(row.actions) ? row.actions : []).find(a => a && a.action_type === type);
     return hit ? hit.value : '';
   };
-  const ranking = v => RANKING[String(v || '').toUpperCase()] || (v ? '-' : '');
+  // UNKNOWN ("not yet available") becomes empty, not the export's "-": the
+  // CSV formula guard would turn "-" into "'-", which engine.js would count
+  // as a real ranking.
+  const ranking = v => RANKING[String(v || '').toUpperCase()] || '';
+  // effective_status → the "Ad delivery" words an Ads Manager export uses
+  // (active / inactive / rejected / ...); engine.js treats only "active" as live.
+  const DELIVERY = { ACTIVE: 'active', DISAPPROVED: 'rejected', PENDING_REVIEW: 'in_review', IN_PROCESS: 'in_review', WITH_ISSUES: 'with_issues', PENDING_BILLING_INFO: 'not_delivering' };
+  const deliveryLabel = status => status ? (DELIVERY[status] || 'inactive') : '';
 
   /* Insights rows → CSV text with Ads Manager export headers. Non-IDR accounts
      keep their currency column so the import pipeline refuses them visibly
@@ -198,19 +235,33 @@
     const currency = String((rows[0] && rows[0].account_currency) || currencyHint || '').toUpperCase();
     const spendHeader = currency === 'IDR' ? 'Amount spent (IDR)' : 'Amount spent';
     const delivery = (result && result.delivery) || new Map();
-    const data = rows.map(r => ({
+    // Delivery status and rankings describe the ad now, not that day. Writing
+    // them on every historical row would change those rows' fingerprints on
+    // every re-pull, and the daily store would add the same spend again. They
+    // go on each ad's latest row only, which is also the row engine.js reads
+    // the current status from.
+    const latest = new Map();
+    rows.forEach(r => { const k = String(r.ad_id || r.ad_name || ''); if (!latest.has(k) || r.date_start > latest.get(k)) latest.set(k, r.date_start); });
+    const isLatest = r => latest.get(String(r.ad_id || r.ad_name || '')) === r.date_start;
+    // A row with no ad name and no delivery carries nothing the dashboard can
+    // use, and an empty name would make the importer reject the whole pull.
+    const data = rows.filter(r => r.ad_name || Number(r.spend) > 0 || Number(r.impressions) > 0).map(r => ({
       'Reporting starts': r.date_start, 'Reporting ends': r.date_stop,
       'Ad ID': r.ad_id || '', 'Ad name': r.ad_name || '', 'Ad set name': r.adset_name || '', 'Campaign name': r.campaign_name || '',
       'Account currency': r.account_currency || currency,
       [spendHeader]: r.spend == null || r.spend === '' ? '0' : r.spend,
       'Impressions': r.impressions || '0', 'Reach': r.reach || '', 'Frequency': r.frequency || '',
-      'Link clicks': r.inline_link_clicks || '0', 'Clicks (all)': r.clicks || '0',
+      // The export's "Link clicks" is actions:link_click (it equals Results
+      // when the result indicator is actions:link_click in a real export);
+      // inline_link_clicks is only a fallback when the action is absent.
+      'Link clicks': action(r, 'link_click') || r.inline_link_clicks || '0', 'Clicks (all)': r.clicks || '0',
       'CTR (link click-through rate)': r.inline_link_click_ctr || '',
       'CPM (cost per 1,000 impressions) (IDR)': currency === 'IDR' ? (r.cpm || '') : '',
       'Landing page views': action(r, 'landing_page_view'),
-      'Ad delivery': delivery.get(String(r.ad_id || '')) || '',
-      'Quality ranking': ranking(r.quality_ranking), 'Engagement rate ranking': ranking(r.engagement_rate_ranking),
-      'Conversion rate ranking': ranking(r.conversion_rate_ranking),
+      'Ad delivery': isLatest(r) ? deliveryLabel(delivery.get(String(r.ad_id || ''))) : '',
+      'Quality ranking': isLatest(r) ? ranking(r.quality_ranking) : '',
+      'Engagement rate ranking': isLatest(r) ? ranking(r.engagement_rate_ranking) : '',
+      'Conversion rate ranking': isLatest(r) ? ranking(r.conversion_rate_ranking) : '',
     }));
     const fields = ['Reporting starts', 'Reporting ends', 'Ad ID', 'Ad name', 'Ad set name', 'Campaign name', 'Account currency', spendHeader,
       'Impressions', 'Reach', 'Frequency', 'Link clicks', 'Clicks (all)', 'CTR (link click-through rate)',
@@ -222,5 +273,17 @@
     return `meta-api_${result.account}_${result.since}_${result.until}.csv`;
   }
 
-  return { VERSION, CHUNK_DAYS, MAX_DAYS, MetaApiError, create, splitRange, normalizeAccountId, describeError, toCsv, fileName, shift, isDate };
+  /* Yesterday in the ad account's timezone: insights dates follow the
+     account, so "kemarin" in the browser can still be the account's running
+     day. Falls back to the browser date when the zone is unknown. */
+  function accountYesterday(timezone, now) {
+    now = now || new Date();
+    let day;
+    try { day = new Intl.DateTimeFormat('en-CA', { timeZone: timezone || undefined, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now); }
+    catch (err) { day = null; }
+    if (!isDate(day)) day = new Date(now.getTime() - now.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    return shift(day, -1);
+  }
+
+  return { VERSION, CHUNK_DAYS, MAX_DAYS, ALL_STATUSES, MetaApiError, accountYesterday, create, splitRange, normalizeAccountId, describeError, toCsv, fileName, shift, isDate };
 });

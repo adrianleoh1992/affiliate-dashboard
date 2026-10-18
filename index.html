@@ -433,14 +433,24 @@
   <div class="modal-box narrow">
     <div class="card-head"><h2>Tarik dari Meta Ads Manager</h2><button class="btn ghost" data-close>Tutup</button></div>
     <p class="export-context" id="metaContext"></p>
-    <p class="hint">Data iklan harian per iklan ditarik langsung dari Marketing API, lalu diperiksa seperti file ekspor. Token hanya dikirim ke Meta, tidak ke server lain. Cara membuat token ada di README bagian <b>Koneksi Meta Ads Manager</b>.</p>
-    <div class="field"><label for="metaToken">Token akses (izin ads_read)</label><input id="metaToken" type="password" autocomplete="off" spellcheck="false" placeholder="EAAB…"></div>
+    <p class="hint">Data iklan harian per iklan ditarik langsung dari Marketing API, lalu diperiksa seperti file ekspor. Token hanya dikirim ke Meta, tidak ke server lain.</p>
+    <details class="meta-help"><summary>Cara membuat token yang tidak kedaluwarsa</summary>
+      <ol>
+        <li>Di developers.facebook.com, buat aplikasi tipe Bisnis yang terhubung ke portofolio bisnis pemilik akun iklan, lalu tambahkan Marketing API. Mode pengembangan sudah cukup.</li>
+        <li>Di Pengaturan Bisnis → Pengguna → Pengguna sistem, buat pengguna sistem, lalu tetapkan akun iklan (lihat performa) dan aplikasi tadi.</li>
+        <li>Pilih Buat token, pilih aplikasi, masa berlaku Tidak pernah, centang <code>ads_read</code> saja, lalu salin dan tempel di bawah.</li>
+      </ol>
+      <p><a href="https://github.com/adrianleoh1992/affiliate-dashboard#koneksi-meta-ads-manager" target="_blank" rel="noopener">Panduan lengkap dan batasannya</a></p>
+    </details>
+    <!-- type=text with masking: a formless password field that disappears after a fetch makes browsers offer to save the token. -->
+    <div class="field"><label for="metaToken">Token akses (izin ads_read)</label><input id="metaToken" class="masked" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="EAAB…"></div>
     <label class="check-row"><input type="checkbox" id="metaRemember"> Ingat token di browser ini</label>
     <p class="hint">Tanpa centang, token hilang saat halaman dimuat ulang. Dengan centang, token tersimpan di localStorage perangkat ini; jangan centang di komputer bersama.</p>
     <div class="button-row"><button class="btn sm" id="btnMetaAccounts" type="button">Muat akun iklan</button><button class="btn ghost sm" id="btnMetaForget" type="button">Hapus token</button></div>
     <div class="field"><label for="metaAccount">Akun iklan</label><select id="metaAccount"><option value="">Muat akun iklan dulu</option></select></div>
     <div class="ctrls"><div class="field"><label for="metaSince">Dari</label><input type="date" id="metaSince"></div><div class="field"><label for="metaUntil">Sampai</label><input type="date" id="metaUntil"></div></div>
-    <p class="hint">Default 7 hari sampai kemarin. Angka hari ini masih berubah; jika ditarik lagi, tarikan lama dari akun iklan yang sama diganti, bukan ditambahkan.</p>
+    <p class="hint">Default 7 hari sampai kemarin menurut zona waktu akun iklan, karena angka hari berjalan masih berubah. Menarik ulang mengganti tanggal yang sama dari akun iklan yang sama di layar. Tanggal yang sudah <b>Disimpan</b> tidak ikut diganti: hapus dulu tanggal itu di Data Tersimpan sebelum menyimpan tarikan ulang.</p>
+    <p class="meta-saved hidden" id="metaSaved" role="status"></p>
     <p class="inline-error hidden" id="metaError" role="alert"></p>
     <p class="hint" id="metaStatus" role="status" aria-live="polite"></p>
     <div class="button-row"><button class="btn primary" id="btnMetaPull" type="button" disabled>Tarik data</button><button class="btn ghost hidden" id="btnMetaCancel" type="button">Batalkan</button></div>

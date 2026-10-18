@@ -95,15 +95,33 @@ Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan iz
 
 ### Perilaku dan batasan
 
-- Default rentang adalah 7 hari sampai kemarin, karena angka hari berjalan masih
-  berubah. Satu tarikan maksimum 400 hari dan dipecah per 14 hari.
-- Menarik ulang dari akun iklan yang sama **mengganti** tarikan sebelumnya yang
-  tanggalnya bertumpuk (rentang diperluas agar hari lain tidak hilang), bukan
-  menambahkannya. Jika tanggal itu sudah ada dari CSV Meta yang diunggah, penarikan
-  ditolak agar biaya tidak terhitung dua kali; hapus file itu terlebih dahulu.
-- Untuk riwayat yang sudah **Disimpan**, aturan revisi tetap sama dengan CSV: bila
-  angka hari yang sudah tersimpan berubah, hapus tanggal itu di Data Tersimpan lalu
-  simpan ulang. Menyimpan tarikan revisi langsung dapat menggandakan biaya hari itu.
+- Default rentang adalah 7 hari sampai kemarin menurut zona waktu akun iklan,
+  karena angka hari berjalan masih berubah. Satu tarikan maksimum 400 hari dan
+  dipecah per 14 hari.
+- Iklan yang dihapus atau diarsipkan ikut diminta. Setiap tarikan juga
+  membandingkan total biaya harian akun iklan dengan jumlah baris iklan. Bila
+  ada selisih, data tetap dimuat, dialog tetap terbuka dengan peringatan, dan
+  selisihnya masuk catatan kualitas ekspor, karena biaya yang hilang membuat
+  ROAS terlihat lebih baik dari kenyataan.
+- Menarik ulang dari akun iklan yang sama **mengganti** tanggal yang diminta saja.
+  Hari lain dari tarikan sebelumnya tetap dipakai dan tidak ditarik ulang. Akun
+  iklan lain pada tanggal yang sama ditambahkan, bukan ditolak.
+- CSV Meta yang diunggah dan tarikan untuk tanggal yang sama ditolak di kedua
+  arah agar biaya tidak terhitung dua kali, kecuali kolom `Ad ID` di CSV
+  menunjukkan akun iklan yang berbeda. Hapus salah satunya terlebih dahulu.
+- Penggantian hanya berlaku untuk data di layar. Untuk riwayat yang sudah
+  **Disimpan**, aturan revisi sama dengan CSV: panel Simpan menandai
+  **Periode bertumpuk**; hapus tanggal itu di Data Tersimpan lalu simpan ulang.
+  Menyimpan tarikan revisi langsung dapat menggandakan biaya hari itu.
+- Status penayangan dan tiga peringkat adalah kondisi iklan saat ini, sama seperti
+  kolom ekspor Ads Manager, dan hanya diisi di baris tanggal terakhir tiap iklan.
+  Baris lama tidak berubah saat ditarik ulang, sehingga penyimpanan tetap
+  mengenalinya sebagai duplikat.
+- Menutup dialog (Esc, Tutup, atau klik di luar) membatalkan tarikan yang sedang
+  berjalan. Berganti atau membuat akun dashboard juga membuang hasil tarikan dan
+  token di memori.
+- **Hapus token** menghapus token yang diingat untuk semua akun dashboard di
+  browser itu.
 - Hanya akun iklan bermata uang IDR yang diterima.
 - Aplikasi dalam mode pengembangan memiliki batas permintaan yang lebih rendah.
   Jika muncul pesan batas permintaan, tunggu beberapa menit atau persempit rentang.
@@ -111,10 +129,11 @@ Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan iz
   ditolak karena app secret tidak boleh berada di browser. Biarkan nonaktif.
 - Nama iklan yang diawali `=`, `+`, `-`, atau `@` diberi awalan `'` oleh pengaman
   formula CSV, sehingga mapping manual untuk nama tersebut perlu ditulis ulang.
-- Status penayangan adalah status iklan saat ini, sama seperti kolom ekspor Ads
-  Manager, bukan status pada tanggal historis.
-- Pengujian memakai respons Graph API tiruan. Belum ada uji terhadap akun Meta asli
-  dari repositori ini.
+- Pengujian otomatis memakai respons Graph API tiruan. Bentuk datanya (format ID
+  akun, mata uang, status iklan, peringkat, format biaya, dan `link_click` sebagai
+  "Link clicks") sudah dicocokkan dengan akun iklan asli lewat konektor Meta
+  read-only. Panggilan langsung dari browser ke `graph.facebook.com` dengan token
+  asli, termasuk filter status iklan, belum diuji dari repositori ini.
 
 ## Ekspor analisis dan PDF
 
