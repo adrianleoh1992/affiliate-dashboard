@@ -492,7 +492,8 @@
         + `${nf(s.counts.ads)} agregat iklan, ${nf(s.counts.clicks)} agregat klik, ${nf(s.counts.uploads)} unggahan. `
         + `Seluruh ${nf(existing)} agregat harian, fingerprint, dan riwayat unggahan akun ini akan diganti. `
         + 'Akun lain tetap aman. Parameter dalam cadangan hanya referensi; pengaturan analisis saat ini tetap digunakan. '
-        + 'Unduh cadangan akun ini terlebih dahulu jika riwayat lama masih diperlukan.';
+        + 'Unduh cadangan akun ini terlebih dahulu jika riwayat lama masih diperlukan.'
+        + (STORE.enabled ? ' Anda masuk ke database bersama: pemulihan juga mengganti data akun ini untuk seluruh tim.' : '');
       $('backupPreview').classList.remove('hidden');
       $('btnRestoreAcct').focus();
     } catch (error) {
@@ -526,15 +527,28 @@
     }
   };
 
+  async function refreshViews() {
+    ++STORED_REV; ++PLAN_REV;
+    await refreshCoverage(); await renderStored(); await renderUploads(); await renderDayIndex(); await buildPlan();
+  }
+  window.DailyLayer = { refresh: () => run(refreshViews), account: shopeeName, busy: () => SAVING || RESTORING };
+
   (async () => {
     try {
       STORE = await DailyStore.open();
+      // Optional shared database (cloud-store.js). Unconfigured, this is the
+      // same IndexedDB store; signed in, writes go to Supabase first.
+      if (window.CloudStore) STORE = window.CloudStore.attach(STORE, { onChange: change => {
+        if (window.CloudPanel) window.CloudPanel.render();
+        if (change.data && !SAVING && !RESTORING && change.name === shopeeName()) run(refreshViews);
+      } });
       window.__dailyStore = STORE;
       await refreshAccounts();
       await buildPlan();
       await renderStored();
       await renderUploads();
       await renderDayIndex();
+      if (window.CloudPanel) window.CloudPanel.render();
     } catch (e) {
       toast('Gagal membuka penyimpanan: ' + e.message);
     }

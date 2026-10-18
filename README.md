@@ -2,7 +2,9 @@
 
 Dashboard lokal untuk menggabungkan laporan komisi Shopee Affiliate, Meta Ads,
 dan klik Shopee. Menghitung laba, ROAS, keputusan per tag, kebocoran klik,
-dan riwayat harian per akun. Semua pemrosesan dan penyimpanan berada di browser.
+dan riwayat harian per akun. Semua pemrosesan berada di browser. Riwayat harian
+disimpan di browser, atau di database bersama Supabase bila dikonfigurasi
+([SUPABASE.md](SUPABASE.md)).
 
 ## Menjalankan
 
@@ -195,6 +197,8 @@ format ekspor dan kondisi browser telah tercakup.
 | File | Fungsi |
 |---|---|
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
+| `cloud-store.js`, `cloud-panel.js` | Database bersama Supabase (opsional), lihat [SUPABASE.md](SUPABASE.md) |
+| `supabase/migrations/` | Skema, RLS, dan fungsi database bersama |
 | `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
 | `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
 | `pdf-export.js` | Susunan laporan visual PDF dan tabel multi halaman |

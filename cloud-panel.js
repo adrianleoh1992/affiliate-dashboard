@@ -1,0 +1,107 @@
+/* ── Shared database panel ───────────────────────────────────────────────────
+   Sign-in and sync status for cloud-store.js, shown at the top of Data
+   Tersimpan. Renders nothing when SUPABASE_CONFIG is empty, so a deployment
+   without Supabase looks exactly as before. */
+'use strict';
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = value => window.Engine.escapeHtml(value);
+  const nf = n => Math.round(n || 0).toLocaleString('id-ID');
+  const shared = () => window.__cloudStore || null;
+  const name = () => (window.DailyLayer && window.DailyLayer.account()) || '';
+  const toast = message => window.toast && window.toast(message);
+  let BUSY = false;
+
+  function mount() {
+    let card = $('cloudCard');
+    if (card) return card;
+    const panel = document.querySelector('[data-panel="tersimpan"]');
+    if (!panel) return null;
+    card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'cloudCard';
+    panel.prepend(card);
+    return card;
+  }
+
+  const TEXT = {
+    checking: () => ['Memeriksa database bersama…', ''],
+    synced: s => ['Tersinkron', `Data akun ini sama dengan database bersama (revisi ${nf(s.revision)}). Setiap Simpan dan hapus tanggal langsung tercatat untuk seluruh tim.`],
+    unlinked: s => ['Belum ada di database bersama', s.localRows
+      ? `Browser ini menyimpan ${nf(s.localRows)} agregat untuk akun ini. Kirim sekarang, atau otomatis terkirim saat Anda menekan Simpan berikutnya.`
+      : 'Akun dibuat di database bersama saat Anda pertama kali menyimpan laporan.'],
+    conflict: s => ['Perlu dipilih', `Browser ini punya ${nf(s.localRows)} agregat yang belum pernah tersinkron, sedangkan database bersama sudah berisi data akun ini. `
+      + 'Penyimpanan dihentikan agar tidak ada yang tertimpa diam-diam. Disarankan: Unduh backup, pakai data database bersama, lalu unggah ulang CSV yang disimpan saat offline (baris yang sudah ada otomatis dilewati).'],
+    error: s => ['Tidak terhubung', s.message + ' Data tidak disimpan ke mana pun sampai koneksi pulih.'],
+  };
+
+  function render() {
+    const store = shared();
+    if (!store) return;
+    const card = mount();
+    if (!card) return;
+    const client = store.client;
+    if (!client.signedIn) {
+      card.innerHTML = `<div class="card-head"><h2>Database bersama</h2><span class="sub">belum masuk</span></div>
+        <p class="hint">Masuk untuk memakai riwayat harian yang sama dengan tim untuk semua akun. Akun login dibuat oleh admin di Supabase.
+          Tanpa masuk, data hanya tersimpan di browser ini.</p>
+        <form id="cloudLogin" class="ctrls ctrls-inline">
+          <div class="field"><label for="cloudEmail">Email</label><input id="cloudEmail" type="email" autocomplete="username" required></div>
+          <div class="field"><label for="cloudPass">Kata sandi</label><input id="cloudPass" type="password" autocomplete="current-password" required></div>
+          <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit" ${BUSY ? 'disabled' : ''}>Masuk</button></div>
+        </form>`;
+      $('cloudLogin').onsubmit = event => {
+        event.preventDefault();
+        // Read before act() re-renders the form.
+        const email = $('cloudEmail').value.trim(), password = $('cloudPass').value;
+        act(async () => {
+          await client.signIn(email, password);
+          await store.sync(name());
+          toast('Masuk sebagai ' + client.user.email);
+        });
+      };
+      return;
+    }
+    const status = store.status(name());
+    const [title, detail] = (TEXT[status.state] || TEXT.checking)(status);
+    const buttons = [];
+    if (status.state === 'unlinked' && status.localRows) buttons.push('<button class="btn sm primary" data-cloud="push">Kirim riwayat lokal</button>');
+    if (status.state === 'conflict') {
+      buttons.push('<button class="btn sm primary" data-cloud="pull">Pakai data database bersama</button>');
+      buttons.push('<button class="btn sm danger" data-cloud="push">Ganti database bersama dengan data browser ini</button>');
+    }
+    buttons.push('<button class="btn sm" data-cloud="sync">Periksa ulang</button>');
+    card.innerHTML = `<div class="card-head"><h2>Database bersama</h2>
+        <span class="pill ${status.state === 'synced' ? 'ok-pill' : 'warn-pill'}">${esc(title)}</span>
+        <span class="sub">${esc(client.user ? client.user.email : '')}</span>
+        <button class="btn sm ghost" data-cloud="logout">Keluar</button></div>
+      <p class="hint">${esc(detail)}</p>
+      <div class="button-row">${buttons.join('')}</div>`;
+    card.querySelectorAll('[data-cloud]').forEach(button => { button.disabled = BUSY; button.onclick = () => handle(button.dataset.cloud); });
+  }
+
+  function handle(action) {
+    const store = shared(), account = name();
+    if (action === 'logout') return act(async () => { await store.client.signOut(); toast('Keluar dari database bersama. Salinan data di browser ini tetap ada.'); });
+    if (action === 'sync') return act(() => store.sync(account));
+    if (action === 'pull') {
+      if (!confirm(`Ganti riwayat harian "${account}" di browser ini dengan data database bersama?\n\nUnduh backup dulu jika data browser ini masih diperlukan.`)) return;
+      return act(async () => { await store.usePulled(account); toast('Memakai data database bersama'); });
+    }
+    if (action === 'push') {
+      const conflict = store.status(account).state === 'conflict';
+      if (conflict && !confirm(`Ganti seluruh riwayat "${account}" di database bersama dengan data browser ini?\n\nData yang disimpan anggota tim lain untuk akun ini akan hilang.`)) return;
+      return act(async () => { await store.push(account); window.DailyLayer && window.DailyLayer.refresh(); toast('Riwayat lokal terkirim ke database bersama'); });
+    }
+  }
+
+  async function act(work) {
+    if (BUSY) return;
+    if (window.DailyLayer && window.DailyLayer.busy()) return toast('Tunggu penyimpanan selesai');
+    BUSY = true; render();
+    try { await work(); } catch (error) { toast('Database bersama: ' + error.message); }
+    finally { BUSY = false; render(); }
+  }
+
+  window.CloudPanel = { render };
+})();

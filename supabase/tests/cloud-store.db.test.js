@@ -1,0 +1,381 @@
+'use strict';
+
+// Runs the Supabase migration on a real Postgres and drives it through
+// CloudStore exactly as two browsers would: separate IndexedDB caches, one
+// shared database. Auth and PostgREST are replaced by a small fetch shim that
+// calls the same SQL functions as the "authenticated" role with RLS on.
+//
+//   DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres node supabase/tests/cloud-store.db.test.js
+//
+// Without a reachable Postgres the suite is skipped, unless REQUIRE_DB=1.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
+const A = require('../../daily-agg');
+const DailyStore = require('../../daily-store');
+const CloudStore = require('../../cloud-store');
+global.IDBKeyRange = IDBKeyRange;
+
+const BASE = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/postgres';
+const DB = 'cloud_store_test_' + process.pid;
+const DB_URL = BASE.replace(/\/[^/?]*(\?|$)/, '/' + DB + '$1');
+const ROOT = path.join(__dirname, '..');
+
+function psql(url, sql) {
+  try {
+    return execFileSync('psql', [url, '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=verbose'],
+      { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch (error) {
+    const stderr = String(error.stderr || error.message);
+    const match = stderr.match(/ERROR:\s+([A-Z0-9]{5}):\s+([^\n]*)/);
+    const failure = new Error(match ? match[2] : stderr);
+    failure.code = match ? match[1] : 'PSQL';
+    throw failure;
+  }
+}
+const literal = value => { const tag = '$j' + Math.random().toString(36).slice(2) + '$'; return tag + value + tag; };
+
+const USERS = { 'admin@example.com': '00000000-0000-0000-0000-000000000001',
+  'tim@example.com': '00000000-0000-0000-0000-000000000002', 'luar@example.com': '00000000-0000-0000-0000-000000000003' };
+const TYPES = { p_account_id: 'bigint', p_kind: 'text', p_expected_revision: 'bigint', p_date: 'date', p_name: 'text',
+  p_records: 'jsonb', p_hashes: 'jsonb', p_upload: 'jsonb', p_backup: 'jsonb' };
+
+function asUser(uid, sql) {
+  return psql(DB_URL, `begin; set local role authenticated; set local request.jwt.claim.sub = '${uid}';
+    ${sql}; commit;`);
+}
+function callRpc(uid, name, args) {
+  const json = literal(JSON.stringify(args || {}));
+  const params = Object.keys(args || {}).map(key => {
+    if (!TYPES[key]) throw new Error('unknown arg ' + key);
+    return TYPES[key] === 'jsonb' ? `${key} => (${json}::jsonb)->'${key}'` : `${key} => ((${json}::jsonb)->>'${key}')::${TYPES[key]}`;
+  }).join(', ');
+  const sql = name === 'daily_list_accounts'
+    ? `select coalesce(jsonb_agg(to_jsonb(r)), '[]') from public.daily_list_accounts() r`
+    : `select to_jsonb(public.${name}(${params}))`;
+  return JSON.parse(asUser(uid, sql));
+}
+
+// fetch() stand-in for Supabase Auth + PostgREST.
+function fakeFetch(log) {
+  return async (url, init) => {
+    const { pathname, searchParams } = new URL(url);
+    const body = init.body ? JSON.parse(init.body) : {};
+    const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
+    log && log.push(pathname);
+    if (pathname === '/auth/v1/token' && searchParams.get('grant_type') === 'password') {
+      const id = USERS[body.email];
+      if (!id || body.password !== 'rahasia') return reply(400, { error_description: 'Invalid login credentials' });
+      return reply(200, { access_token: id, refresh_token: 'r-' + id, expires_in: 3600, user: { id, email: body.email } });
+    }
+    if (pathname === '/auth/v1/logout') return reply(204, null);
+    const match = pathname.match(/^\/rest\/v1\/rpc\/(\w+)$/);
+    if (!match) return reply(404, { message: 'not found' });
+    const uid = String(init.headers.Authorization || '').replace('Bearer ', '');
+    try { return reply(200, callRpc(uid, match[1], body)); }
+    catch (error) { return reply(error.code === 'PT409' ? 409 : 400, { code: error.code, message: error.message }); }
+  };
+}
+
+class MemoryStorage {
+  constructor() { this.map = new Map(); }
+  getItem(key) { return this.map.has(key) ? this.map.get(key) : null; }
+  setItem(key, value) { this.map.set(key, String(value)); }
+  removeItem(key) { this.map.delete(key); }
+}
+
+// One "browser": its own IndexedDB, localStorage and session.
+async function browser(email) {
+  global.indexedDB = new IDBFactory();
+  const local = await DailyStore.open();
+  const storage = new MemoryStorage(), changes = [];
+  const client = new CloudStore.Client({ url: 'https://test.supabase.co', anonKey: 'anon', storage, fetch: fakeFetch() });
+  if (email) await client.signIn(email, 'rahasia');
+  const store = CloudStore.attach(local, { client, storage, onChange: change => changes.push(change) });
+  return { local, store, client, changes };
+}
+const NAME = 'Beautyisus';
+async function account(b, name = NAME) {
+  const acct = await b.store.ensureAccount('shopee', name);
+  await b.store.sync(name);
+  return acct;
+}
+const save = (b, acct, kind, rows, name) => b.store.saveDaily(acct.id, kind, [], {
+  rawRows: rows, sourceRows: rows.length, fileHash: A.hashRows(rows), fileName: name || kind + '.csv' });
+
+const affiliate = (id, date = '2026-09-01', extra = {}) => ({
+  'ID Pemesanan': id, 'ID Produk': 'p-' + id, 'Status Pesanan': 'Selesai', 'Waktu Pemesanan': date + ' 10:00:00',
+  'Tag_link1': 'Serum A', 'Total Komisi per Produk(Rp)': 1234.5, 'Nilai Pembelian(Rp)': 10000, 'Jumlah': 1, ...extra });
+const ad = (date = '2026-09-01', extra = {}) => ({ 'Ad name': 'Serum A', 'Reporting starts': date,
+  'Amount spent (IDR)': 1000.25, 'Impressions': 5000, 'Reach': 4000, 'Link clicks': 37, 'Landing page views': 30, ...extra });
+const click = (time, date = '2026-09-01', extra = {}) => ({ 'Waktu Klik': date + ' ' + time, 'Tag_link': 'Serum A',
+  'Wilayah Klik': 'Jakarta', 'Perujuk': 'Facebook', ...extra });
+
+// Strip what legitimately differs between stores (ids, timestamps, set order).
+const shape = rows => rows.map(row => {
+  const { id, account_id, created_at, updated_at, merge_version, ...rest } = row;
+  if (rest.order_keys) rest.order_keys = [...rest.order_keys].sort();
+  return rest;
+}).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+async function snapshot(store, acct) {
+  const out = {};
+  for (const kind of ['affiliate', 'ads', 'clicks']) out[kind] = shape(await store.range(acct.id, kind));
+  return out;
+}
+
+const cases = [];
+const test = (name, fn) => cases.push({ name, fn });
+
+test('first save creates the shared account and the cache mirrors it', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a);
+  assert.equal(a.store.status(NAME).state, 'unlinked');
+  const result = await save(a, acct, 'affiliate', [affiliate('o1'), affiliate('o2'), affiliate('o2', '2026-09-01', { 'ID Produk': 'p-x' })]);
+  assert.deepEqual(result, { added: 1, updated: 0, duplicates: 0 });
+  assert.equal(a.store.status(NAME).state, 'synced');
+  const [row] = await a.local.range(acct.id, 'affiliate');
+  assert.equal(row.orders, 2);
+  assert.equal(row.rows, 3);
+  assert.equal(row.comm, 1234.5 * 3);
+});
+
+test('a second browser pulls the same history and both keep merging', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a), acctB = await account(b);
+  assert.equal(b.store.status(NAME).state, 'synced');
+  assert.deepEqual(await snapshot(b.local, acctB), await snapshot(a.local, acctA));
+  // B adds ads, A (cache now one revision behind) adds overlapping affiliate rows.
+  await save(b, acctB, 'ads', [ad(), ad('2026-09-02')]);
+  const res = await save(a, acctA, 'affiliate', [affiliate('o2'), affiliate('o3')], 'aff-2.csv');
+  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 1 }, 'o2 row is deduplicated across browsers');
+  await b.store.sync(NAME);
+  assert.deepEqual(await snapshot(b.local, acctB), await snapshot(a.local, acctA));
+  const [row] = await b.local.range(acctB.id, 'affiliate');
+  assert.equal(row.orders, 3);
+  assert.equal((await b.local.range(acctB.id, 'ads')).length, 2);
+});
+
+test('shared totals equal a local-only store fed the same files', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a, 'Parity');
+  global.indexedDB = new IDBFactory();
+  const plain = await DailyStore.open(), plainAcct = await plain.ensureAccount('shopee', 'Parity');
+  const files = [
+    ['affiliate', [affiliate('x1'), affiliate('x2', '2026-09-02', { 'Status Pesanan': 'Tertunda' }), affiliate('x3', '2026-09-02', { 'Status Pesanan': 'Dibatalkan' })]],
+    ['affiliate', [affiliate('x2', '2026-09-02', { 'Status Pesanan': 'Tertunda' }), affiliate('x4', '2026-09-02', { 'Total Komisi per Produk(Rp)': 0.1 })]],
+    ['ads', [ad('2026-09-01', { 'Ad delivery': 'active' }), ad('2026-09-01', { 'Amount spent (IDR)': 0.2, 'Impressions': 3 })]],
+    ['ads', [ad('2026-09-01', { 'Link clicks': 1, 'Ad delivery': '' })]],
+    ['clicks', [click('10:00:00'), click('10:00:01', '2026-09-01', { 'Wilayah Klik': 'Bandung' })]],
+    ['clicks', [click('10:00:01', '2026-09-01', { 'Wilayah Klik': 'Bandung' }), click('11:00:00', '2026-09-01', { 'Perujuk': '__proto__' })]],
+  ];
+  for (const [kind, rows] of files) {
+    const shared = await save(a, acct, kind, rows);
+    const local = await plain.saveDaily(plainAcct.id, kind, [], { rawRows: rows, sourceRows: rows.length, fileHash: A.hashRows(rows) });
+    assert.deepEqual(shared, local);
+  }
+  assert.deepEqual(await snapshot(a.local, acct), await snapshot(plain, plainAcct));
+  const clicks = await a.local.range(acct.id, 'clicks');
+  assert.equal(clicks[0].by_source.__proto__, 1);
+});
+
+test('the same file is skipped and a stale revision is refused', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a);
+  const rows = [affiliate('o1'), affiliate('o2'), affiliate('o2', '2026-09-01', { 'ID Produk': 'p-x' })];
+  const res = await save(a, acct, 'affiliate', rows);
+  assert.equal(res.skipped, true);
+  const link = a.store.state.get(NAME);
+  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link.remoteId, p_kind: 'ads',
+    p_expected_revision: link.revision - 1, p_records: [], p_hashes: [], p_upload: { file_hash: 'zz' } }), { code: 'PT409' });
+  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link.remoteId, p_kind: 'ads',
+    p_expected_revision: link.revision, p_records: A.aggregate('ads', [ad('2026-09-03')]), p_hashes: [],
+    p_upload: { file_hash: 'zz' } }), /Fingerprint tidak sesuai/);
+});
+
+test('a stale cache retries once after someone else saved', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a), acctB = await account(b);
+  await save(a, acctA, 'clicks', [click('09:00:00', '2026-09-05')]);
+  // B's cache is behind; make its pre-save check believe it is current.
+  const sync = b.store.sync.bind(b.store);
+  b.store.sync = async () => b.store.status(NAME);
+  const res = await save(b, acctB, 'clicks', [click('09:00:00', '2026-09-05'), click('09:30:00', '2026-09-05')]);
+  b.store.sync = sync;
+  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 1 });
+  const [row] = await b.local.range(acctB.id, 'clicks', '2026-09-05', '2026-09-05');
+  assert.equal(row.clicks, 2);
+});
+
+test('local history saved while signed out is a conflict, never overwritten', async () => {
+  const c = await browser(null);
+  const acct = await account(c);
+  assert.equal(c.store.status(NAME).state, 'local');
+  await save(c, acct, 'ads', [ad('2026-09-09')]);
+  await c.client.signIn('tim@example.com', 'rahasia');
+  await c.store.sync(NAME);
+  assert.equal(c.store.status(NAME).state, 'conflict');
+  await assert.rejects(save(c, acct, 'ads', [ad('2026-09-10')]), /berbeda dengan database bersama/);
+  assert.equal((await c.local.range(acct.id, 'ads', '2026-09-09', '2026-09-09')).length, 1, 'local data untouched');
+  await c.store.usePulled(NAME);
+  assert.equal(c.store.status(NAME).state, 'synced');
+  assert.equal((await c.local.range(acct.id, 'ads', '2026-09-09', '2026-09-09')).length, 0);
+});
+
+test('local history uploads into an empty shared account', async () => {
+  const c = await browser(null);
+  const acct = await account(c, 'Rizqie');
+  await save(c, acct, 'affiliate', [affiliate('r1'), affiliate('r2', '2026-09-03')]);
+  await c.client.signIn('admin@example.com', 'rahasia');
+  await c.store.sync('Rizqie');
+  assert.equal(c.store.status('Rizqie').state, 'unlinked');
+  await c.store.push('Rizqie');
+  const b = await browser('tim@example.com');
+  const acctB = await account(b, 'Rizqie');
+  assert.deepEqual(await snapshot(b.local, acctB), await snapshot(c.local, acct));
+  assert.equal((await b.local.uploadHistory(acctB.id)).length, 1);
+});
+
+test('deleting a day is shared and re-upload restores it', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a), acctB = await account(b);
+  const removed = await a.store.deleteDay(acctA.id, 'ads', '2026-09-02');
+  assert.equal(removed, 1);
+  await b.store.sync(NAME);
+  assert.equal((await b.local.range(acctB.id, 'ads', '2026-09-02', '2026-09-02')).length, 0);
+  const res = await save(b, acctB, 'ads', [ad(), ad('2026-09-02')]);
+  assert.equal(res.added, 1);
+  assert.equal(res.duplicates, 1);
+});
+
+test('restoring a backup while signed in replaces the shared account', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a), acctB = await account(b);
+  const backup = await a.local.exportAccount(acctA.id);
+  backup.ads = backup.ads.filter(row => row.date !== '2026-09-02');
+  backup.rowhashes = backup.rowhashes.filter(row => !(row.kind === 'ads' && row.date === '2026-09-02'));
+  backup.uploads = backup.uploads.filter(row => row.kind !== 'ads');
+  await b.store.importAccount(acctB.id, backup, { replace: true });
+  await a.store.sync(NAME);
+  assert.deepEqual(await snapshot(a.local, acctA), await snapshot(b.local, acctB));
+  assert.equal((await a.local.range(acctA.id, 'ads', '2026-09-02', '2026-09-02')).length, 0);
+});
+
+test('RLS: non-members, anon and direct writes are refused', async () => {
+  const outsider = await browser('luar@example.com');
+  await outsider.store.ensureAccount('shopee', NAME);
+  assert.equal((await outsider.store.sync(NAME)).state, 'error');
+  await assert.rejects(outsider.client.rpc('daily_export_account', { p_account_id: 1 }), { code: 'PT403' });
+  // Tables sit in the unexposed "dashboard" schema: even members read them only through functions.
+  for (const sql of ['select count(*) from dashboard.daily_affiliate', `insert into dashboard.accounts (name) values ('x')`,
+    'update dashboard.daily_ads set spend = 0', 'select dashboard._bump(1)', 'select dashboard.is_member()'])
+    assert.throws(() => asUser(USERS['tim@example.com'], sql), { code: '42501' }, sql);
+  assert.throws(() => psql(DB_URL, `begin; set local role anon; select count(*) from dashboard.daily_ads; commit;`), { code: '42501' });
+  assert.throws(() => psql(DB_URL, `begin; set local role anon; select public.daily_list_accounts(); commit;`), { code: '42501' });
+});
+
+test('database stores no raw order IDs or buyer fields', async () => {
+  const dump = psql(DB_URL, `select string_agg(t::text, ' ') from (
+    select to_jsonb(x)::text t from dashboard.daily_affiliate x union all select to_jsonb(x)::text from dashboard.uploads x
+    union all select to_jsonb(x)::text from dashboard.row_hashes x) s`);
+  assert.doesNotMatch(dump, /"o1"|p-o1|ID Pemesanan|Waktu Pemesanan/);
+});
+
+// End to end in Chromium: real dashboard UI, real SQL, two browser profiles.
+test('browser: sign in, save a CSV, and a teammate sees the same history', async () => {
+  let harness;
+  try { harness = await require('../../browser.regression.test.js').createHarness(); }
+  catch (error) {
+    if (process.env.REQUIRE_DB === '1') throw error;
+    return console.log('  (Chromium tidak tersedia, uji browser dilewati)');
+  }
+  const { upload, saveDaily, storedRows, aff, ad } = require('../../browser.regression.test.js');
+  const profile = async () => {
+    const context = await harness.browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const external = [], errors = [];
+    await context.route('**/*', async route => {
+      const url = route.request().url();
+      if (url === harness.url + '/supabase-config.js') return route.fulfill({ contentType: 'text/javascript',
+        body: 'window.SUPABASE_CONFIG = { url: "https://test.supabase.co", anonKey: "sb_publishable_test" };' });
+      if (url.startsWith(harness.url + '/')) return route.continue();
+      if (url.startsWith('https://test.supabase.co/')) {
+        const request = route.request();
+        const cors = { 'Access-Control-Allow-Origin': harness.url, 'Access-Control-Allow-Headers': 'apikey, authorization, content-type, accept',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
+        if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+        const headers = await request.allHeaders();
+        const response = await fakeFetch()(url, { method: request.method(), body: request.postData() || undefined,
+          headers: headers.authorization ? { Authorization: headers.authorization } : {} });
+        return route.fulfill({ status: response.status, headers: cors, contentType: 'application/json', body: (await response.text()) || '' });
+      }
+      external.push(url);
+      return route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(15000);
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(harness.url + '/index.html', { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__dailyStore && window.__cloudStore);
+    return { context, page, external, errors };
+  };
+  const signIn = async page => {
+    await page.locator('#btnStored').click();
+    await page.fill('#cloudEmail', 'tim@example.com');
+    await page.fill('#cloudPass', 'rahasia');
+    await page.locator('#cloudLogin button[type=submit]').click();
+    await page.waitForFunction(() => /Tersinkron|Belum ada di database/.test(document.getElementById('cloudCard').innerText))
+      .catch(async error => { throw new Error(error.message + '\n' + await page.locator('#cloudCard').innerText() + '\n' + await page.locator('#toast').innerText()); });
+  };
+  try {
+    const first = await profile();
+    assert.match(await first.page.locator('#cloudCard').innerText(), /Database bersama[\s\S]*Masuk/);
+    await signIn(first.page);
+    await first.page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(first.page, [{ name: 'affiliate.csv', rows: [aff('91', 'Gamma', '2026-09-20'), aff('92', 'Gamma', '2026-09-20')] },
+      { name: 'ads.csv', rows: [ad('Gamma', 300, '2026-09-20')] }]);
+    await saveDaily(first.page);
+    await first.page.waitForFunction(() => /Tersinkron/.test(document.getElementById('cloudCard').innerText));
+    const remote = JSON.parse(psql(DB_URL, `select coalesce(jsonb_agg(jsonb_build_object('tag', tag, 'orders', orders, 'comm', comm)), '[]')
+      from dashboard.daily_affiliate a join dashboard.accounts c on c.id = a.account_id where c.name = 'default'`));
+    assert.deepEqual(remote, [{ tag: 'Gamma', orders: 2, comm: 400 }]);
+
+    const second = await profile();
+    await signIn(second.page);
+    await second.page.waitForFunction(async () => {
+      const account = (await window.__dailyStore.listAccounts('shopee')).find(a => a.name === 'default');
+      return account && (await window.__dailyStore.range(account.id, 'ads')).length === 1;
+    });
+    const rows = await storedRows(second.page, 'affiliate', 'default');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].orders, 2);
+    assert.match(await second.page.locator('#tblDayIdx').innerText(), /2026-09-20/);
+    for (const { external, errors } of [first, second]) {
+      assert.deepEqual(errors, [], 'uncaught browser errors');
+      assert.deepEqual(external, [], 'requests outside the dashboard and Supabase');
+    }
+  } finally { await harness.close(); }
+});
+
+(async () => {
+  try { psql(BASE, 'select 1'); } catch (error) {
+    if (process.env.REQUIRE_DB === '1') throw error;
+    console.log('Lewati uji database bersama: Postgres tidak tersedia (' + error.message.split('\n')[0] + ')');
+    return;
+  }
+  psql(BASE, `drop database if exists ${DB}; create database ${DB};`);
+  let failed = 0;
+  try {
+    psql(DB_URL, require('node:fs').readFileSync(path.join(ROOT, 'tests/supabase-stub.sql'), 'utf8'));
+    psql(DB_URL, require('node:fs').readFileSync(path.join(ROOT, 'migrations/20261018000000_shared_daily_store.sql'), 'utf8'));
+    psql(DB_URL, `insert into auth.users values ${Object.entries(USERS).map(([email, id]) => `('${id}', '${email}')`).join(', ')};
+      insert into dashboard.team_members (user_id) values ('${USERS['admin@example.com']}'), ('${USERS['tim@example.com']}');`);
+    for (const { name, fn } of cases) {
+      try { await fn(); console.log('ok -', name); }
+      catch (error) { failed++; console.error('not ok -', name, '\n', error); }
+    }
+  } finally {
+    psql(BASE, `drop database if exists ${DB} with (force);`);
+  }
+  if (failed) { console.error(failed + ' gagal'); process.exit(1); }
+  console.log(cases.length + ' uji database bersama lulus');
+})().catch(error => { console.error(error); process.exit(1); });
