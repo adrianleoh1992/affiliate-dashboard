@@ -19,6 +19,7 @@ function fixture(size = 100) {
       'Tag_link1': tag, 'Total Komisi per Produk(Rp)': '123456.78', 'Nilai Pembelian(Rp)': '987654.32',
       'Nama Barang': 'Produk pengujian ' + index + ': ' + tag, 'Nama Toko': 'Café Nusantara',
       'Platform': 'Facebook', 'L1 Kategori Global': 'Perlengkapan rumah', 'Content Type': 'Video',
+      'Tipe Penawaran': index % 2 ? 'Komisi XTRA' : '-',
     });
     ads.push({ 'Ad name': 'Campaign ' + index + ' | Set A | ' + tag, 'Campaign name': 'Campaign ' + index,
       'Amount spent (IDR)': '75000.25', 'Reporting starts': date, 'Reporting ends': date,
@@ -162,6 +163,19 @@ async function main() {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
       assert.equal(report.cards.filter(card => card.page === 1).length, 16, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      // Page 2: completed commission, its floor ROAS and the cancellation rate, untruncated in 4 columns.
+      const second = report.labels.filter(label => label.page === 2).map(label => label.value);
+      for (const [label, note] of [['Komisi organik efektif', 'Termasuk dalam Komisi Total'], ['Komisi tertunda', '20,00% dari komisi laporan'],
+        ['Komisi selesai', 'ROAS hanya selesai 1,19x'], ['Pesanan batal', 'Menurut nilai 0,00%']]) {
+        const at = second.indexOf(label);
+        assert.ok(at >= 0, 'Page 2 must include ' + label);
+        assert.equal(second[at + 2], note, label + ' note must fit its card');
+      }
+      // The offer row is the whole product commission, not the XTRA component.
+      const offerRow = report.bounds.some(cell => cell.kind === 'body' && cell.text.includes('Tipe penawaran (seluruh komisi produk)'));
+      const pageText = report.labels.map(label => label.value).join(' ');
+      assert.equal(offerRow, mode === 'lengkap', mode + ': offer-type rows belong to the complete report only');
+      assert.equal(pageText.includes('bukan besar komisi XTRA'), mode === 'lengkap', mode + ': the offer note travels with its rows');
       for (const card of report.cards) assert.ok(card.x >= 14 && card.x + card.width <= 196.01 && card.y >= 18 && card.y + card.height <= 279,
         'Dashboard cards must remain within page bounds');
       const trend = report.charts[0].box.rows;
@@ -336,6 +350,28 @@ async function main() {
     assert.deepEqual(edgeReport.front.slice(card, card + 3), ['Tag belum cukup data', 'Rp -20.000,00', '2 tag | laba efektif']);
     assert.ok(edgeReport.front.join(' ').includes('2 tag berbiaya belum cukup data (biaya Rp 24.000,00)'), 'page-1 note counts paid unjudged tags');
     console.log('PASS PDF unjudged paid tags get their own card and near-threshold verdicts read "di batas"');
+    // Cancelled rows report the lost order value (refund + purchase value), not their zero commission.
+    const cancelOrder = (id, status, extra = {}) => ({ 'ID Pemesanan': id, 'Status Pesanan': status,
+      'Waktu Pemesanan': '2026-09-01 10:00:00', 'Tag_link1': 'Batal', 'Total Komisi per Produk(Rp)': status === 'Selesai' ? '100' : '0',
+      'Nilai Pembelian(Rp)': '1000', ...extra });
+    const cancelText = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, lines = [];
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { lines.push([].concat(value).join(' ')); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+      return lines.join(' ');
+    }, Engine.analyze({ affiliate: [cancelOrder('ok', 'Selesai'),
+      cancelOrder('c1', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '0', 'Jumlah Pengembalian Dana(Rp)': '80000' }),
+      cancelOrder('c2', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '20000' }), cancelOrder('c2', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '5000' }),
+      cancelOrder('u1', 'Belum Dibayar')] }, { ppn: 0, lagDays: 0 }));
+    assert.ok(cancelText.includes('Dikecualikan: 3 baris batal (2 pesanan, nilai pesanan Rp 105.000,00; terbesar Rp 80.000,00) dan 1 baris belum dibayar.'), cancelText);
+    assert.ok(cancelText.includes('Pesanan batal 66,67% Menurut nilai 99,06%'), 'page 2 shows the cancellation rate by order and by value');
+    console.log('PASS PDF cancelled orders carry their order value and rate');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);

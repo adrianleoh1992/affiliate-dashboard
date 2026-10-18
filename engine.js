@@ -437,7 +437,10 @@ function analyze(data, options) {
 
   /* ── Filter source rows ─────────────────────────────────────────────── */
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
-  const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
+  const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0, cancelledOrders: 0, cancelledMax: 0 };
+  // Shopee zeroes commission on cancelled rows; what was lost is the order
+  // value, which sits in the refund column or, for some rows, the purchase value.
+  const cancelledByOrder = new Map();
   const statusCount = dict();
   /* Status per day, counted in ORDERS not product rows — one order carrying
      eight products is one pending order, not eight. Cancelled and unpaid rows
@@ -462,12 +465,17 @@ function analyze(data, options) {
     sd.commBy[key] += c;
     if (key !== 'cancelled') { sd.comm += c; sd.qty += num(pick(r, COL.aff.qty)); }
     if (Object.prototype.hasOwnProperty.call(EXCLUDED, st)) {
-      if (st === 'Dibatalkan') { excluded.cancelled++; excluded.cancelledValue += num(pick(r, COL.aff.comm)); }
-      else excluded.unpaid++;
+      if (st === 'Dibatalkan') {
+        const value = num(pick(r, COL.aff.refund)) + num(pick(r, COL.aff.gmv));
+        excluded.cancelled++; excluded.cancelledValue += value;
+        if (id) cancelledByOrder.set(id, (cancelledByOrder.get(id) || 0) + value);
+      } else excluded.unpaid++;
       return;
     }
     fAff.push(r);
   });
+  excluded.cancelledOrders = cancelledByOrder.size;
+  cancelledByOrder.forEach(v => { if (v > excluded.cancelledMax) excluded.cancelledMax = v; });
   const fAds = ads.filter(r => inRange(dayOnly(pick(r, COL.ads.date))));
   const fClk = clk.filter(r => inRange(dayOnly(pick(r, COL.clk.time))));
 
@@ -921,6 +929,11 @@ function analyze(data, options) {
   const totalClicks = sum(t => t.clicks);
   const allOrders = new Set();
   fAff.forEach(r => { const id = String(pick(r, COL.aff.orderId) || '').trim(); if (id) allOrders.add(id); });
+  // Cancellation rate over Selesai, Tertunda and Dibatalkan orders; unpaid
+  // orders never started, so they stay out of the base. An order with both kept
+  // and cancelled items counts once, as cancelled.
+  const cancelBase = new Set([...allOrders, ...cancelledByOrder.keys()]).size;
+  const gmvKept = sum(t => t.gmv);
 
   const paid = tags.filter(t => t.spend > 0);
   const paidSpend = paid.reduce((s, t) => s + t.spend, 0);
@@ -947,6 +960,9 @@ function analyze(data, options) {
     commEff: totalEff,
     commPending: sum(t => t.commPending),
     pendingPct: totalComm > 0 ? sum(t => t.commPending) / totalComm * 100 : 0,
+    commDone: sum(t => t.commDone),
+    // Lower bound: as if every pending order were cancelled. Same spend (with PPN) as roasEff.
+    roasDone: totalSpend > 0 ? sum(t => t.commDone) / totalSpend : 0,
     net: totalComm - totalSpend,
     netEff: totalEff - totalSpend,
     roas: totalSpend > 0 ? totalComm / totalSpend : 0,
@@ -980,6 +996,10 @@ function analyze(data, options) {
     lostClicks, gainClicks, netLostClicks,
     leakTags: tags.filter(linkBad).length,
     excluded, statusCount,
+    cancelBase,
+    cancelRate: cancelBase ? cancelledByOrder.size / cancelBase * 100 : 0,
+    // Secondary: one large cancelled order moves this a lot, so it is shown next to the largest one.
+    cancelValueRate: gmvKept + excluded.cancelledValue > 0 ? excluded.cancelledValue / (gmvKept + excluded.cancelledValue) * 100 : 0,
     counts: { scale: 0, pantau: 0, stop: 0, organik: 0, evaluasi: 0 },
   };
   tags.forEach(t => { kpi.counts[t.status] = (kpi.counts[t.status] || 0) + 1; });

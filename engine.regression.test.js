@@ -358,4 +358,40 @@ assert.equal(trend.movers[0].delta, 1);
 assert.equal(E.buildTrend([first, { ...first, saved: '2026-08-12' }], 'a').series.length, 1);
 assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2);
 
+// Cancelled rows carry zero commission; their lost value is refund + purchase
+// value, summed per order. Rows outside the period add nothing.
+const cancelledRows = [aff('ok', 100),
+  aff('c1', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 0, 'Jumlah Pengembalian Dana(Rp)': 80000 }),
+  aff('c2', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 20000 }),
+  aff('c2', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 5000 })];
+const cancelled = analyze({ affiliate: cancelledRows });
+assert.equal(cancelled.kpi.excluded.cancelledValue, 105000);
+assert.equal(cancelled.kpi.excluded.cancelledOrders, 2);
+assert.equal(cancelled.kpi.excluded.cancelledMax, 80000);
+assert.equal(cancelled.kpi.excluded.cancelled, 3);
+assert.equal(cancelled.kpi.cancelBase, 3);
+near(cancelled.kpi.cancelRate, 2 / 3 * 100);
+near(cancelled.kpi.cancelValueRate, 105000 / (1000 + 105000) * 100);
+const outside = analyze({ affiliate: [...cancelledRows, aff('late', 0, { 'Status Pesanan': 'Dibatalkan',
+  'Waktu Pemesanan': '2026-08-09 10:00:00', 'Nilai Pembelian(Rp)': 900000 })] },
+{ dateStart: '2026-08-01', dateEnd: '2026-08-01' });
+assert.equal(outside.kpi.excluded.cancelledValue, 105000);
+assert.equal(outside.kpi.excluded.cancelledOrders, 2);
+assert.equal(outside.kpi.cancelBase, 3);
+// An order with one kept and one cancelled item counts once, as cancelled.
+const partial = analyze({ affiliate: [aff('X', 100), aff('X', 0, { 'Status Pesanan': 'Dibatalkan' }), aff('Y', 50)] });
+assert.equal(partial.kpi.cancelBase, 2);
+assert.equal(partial.kpi.cancelRate, 50);
+const noOrders = analyze({ affiliate: [] });
+assert.deepEqual([noOrders.kpi.cancelBase, noOrders.kpi.cancelRate, noOrders.kpi.cancelValueRate,
+  noOrders.kpi.excluded.cancelledValue, noOrders.kpi.excluded.cancelledMax], [0, 0, 0, 0, 0]);
+
+// Completed-only ROAS shares the PPN-inclusive spend of roasEff and is 0 without ads.
+const doneOnly = analyze({ affiliate: [aff('d', 300), aff('p', 100, { 'Status Pesanan': 'Tertunda' })],
+  ads: [ad('2026-08-01', 200)] }, { ppn: 11 });
+assert.equal(doneOnly.kpi.commDone, 300);
+near(doneOnly.kpi.roasDone, 300 / 222);
+near(doneOnly.kpi.commDone + doneOnly.kpi.commPending, doneOnly.kpi.comm);
+assert.equal(analyze({ affiliate: [aff('d', 300)] }).kpi.roasDone, 0);
+
 console.log('engine regression tests: PASS');

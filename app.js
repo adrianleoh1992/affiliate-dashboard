@@ -423,14 +423,18 @@ function kpiCard(cls,label,value,note,rows){
     ${body?`<div class="kdrill">${body}</div>`:''}</div>`;
 }
 function renderKpi(){
-  const k=RESULT.kpi,paid=RESULT.tags.filter(t=>t.spend>0);
+  const k=RESULT.kpi,o=RESULT.options,paid=RESULT.tags.filter(t=>t.spend>0);
   const paidComm=paid.reduce((s,t)=>s+t.commEff,0),org=k.organicComm;
   const paidNet=paidComm-k.spend;
   const share=k.commEff?org/k.commEff*100:0;
   const pl=placementSplit();
   const pct=v=>k.commEff?` · ${(v/k.commEff*100).toFixed(0)}%`:'';
   $('kpis').innerHTML=[
+    // Selesai plus weighted Tertunda adds up to the headline; the share still
+    // pending is what moves the verdicts, so it sits right under it.
     kpiCard('','Komisi Total',rp(k.commEff),`${nf(k.orders)} pesanan · ${nf(k.qty)} produk`,[
+      ['Sudah Selesai',rp(k.commDone)],
+      ['Tertunda × '+dec(o.pendingFactor,2),`${rp(k.commPending)} → ${rp(k.commPending*o.pendingFactor)}`],
       ['Komisi Organik',rp(org)+pct(org)],
       ['Komisi Iklan',rp(paidComm)+pct(paidComm)]]),
     kpiCard('','Spend Iklan',rp(k.spend),`PPN ${RESULT.options.ppn}%`,
@@ -451,7 +455,8 @@ function renderKpi(){
       k.paidRoas<1?`iklan sendiri ${rx(k.paidRoas)} — di bawah impas`:'iklan dan organik digabung',[
       ['ROAS Iklan',rx(k.paidRoas)],
       ['ROAS Organik',k.spend?rx(org/k.spend):'—'],
-      ['Kontribusi Organik',dec(share,1)+'%']])
+      ['Kontribusi Organik',dec(share,1)+'%'],
+      ['ROAS hanya Selesai',k.spend?rx(k.roasDone)+' · batas bawah':'—']])
   ].join('');
   bindDrill('kpis');
 }
@@ -783,14 +788,19 @@ function renderStatus(){
   });
   const settled=days.filter(d=>d.settled).length,open=days.filter(d=>d.open>0).length;
   $('statNote').textContent=`${r.start} — ${r.end} · ${days.length} hari ada order · ${settled} sudah settle · ${open} masih ada tertunda`;
-  const box=(k,label,n,comm,cls)=>`<div class="stat-cell ${cls}">
+  // Shopee zeroes commission on cancelled rows, so that cell shows the lost
+  // order value instead; the prefixes keep the two kinds of rupiah apart.
+  const K=RESULT.kpi,X=K.excluded||{};
+  const box=(k,label,n,sub,cls)=>`<div class="stat-cell ${cls}">
     <div class="sl">${label}</div><div class="sv">${nf(n)}</div>
-    <div class="sc">${rp(comm)}</div></div>`;
+    <div class="sc">${sub}</div></div>`;
   $('statSum').innerHTML=
-    box('done','Selesai',T.done,C.done,'ok')+
-    box('pending','Tertunda',T.pending,C.pending,'warn')+
-    box('unpaid','Belum Dibayar',T.unpaid,C.unpaid,'warn')+
-    box('cancelled','Dibatalkan',T.cancelled,C.cancelled,'bad')+
+    box('done','Selesai',T.done,'komisi '+rp(C.done),'ok')+
+    box('pending','Tertunda',T.pending,'komisi '+rp(C.pending),'warn')+
+    box('unpaid','Belum Dibayar',T.unpaid,'komisi '+rp(C.unpaid),'warn')+
+    box('cancelled','Dibatalkan',T.cancelled,'nilai pesanan '+rp(X.cancelledValue||0),'bad')+
+    `<div class="stat-cell bad"><div class="sl">Tingkat Batal</div><div class="sv">${dec(K.cancelRate||0,1)}%</div>
+      <div class="sc">${nf(X.cancelledOrders)} dari ${nf(K.cancelBase)} pesanan · menurut nilai ${dec(K.cancelValueRate||0,1)}%${X.cancelledMax?' · terbesar '+rp(X.cancelledMax):''}</div></div>`+
     `<div class="stat-cell total"><div class="sl">Komisi belum final</div>
       <div class="sv">${rp(C.pending+C.unpaid)}</div>
       <div class="sc">dari ${nf(T.pending+T.unpaid)} pesanan · ${T.orders?dec((T.pending+T.unpaid)/T.orders*100,1):0}% dari semua</div></div>`;

@@ -121,6 +121,22 @@ async function main() {
     assert.match(await page.locator('#tblMain tbody tr').first().innerText(), /Alpha/);
     const totals = await page.evaluate(() => ({ comm: RESULT.kpi.comm, spend: RESULT.kpi.spend }));
     assert.deepEqual(totals, { comm: 400, spend: 400 });
+    // Drill rows are display:none until opened, so read textContent, not innerText.
+    const kpis = await page.locator('#kpis').textContent();
+    assert.match(kpis, /Sudah Selesai/);
+    assert.match(kpis, /Tertunda × 0,95/);
+    assert.match(kpis, /ROAS hanya Selesai1,00x · batas bawah/);
+  });
+
+  test('Status Order shows cancelled order value and the cancellation rate', async page => {
+    const cancelled = { ...aff('3'), 'Status Pesanan': 'Dibatalkan', 'Total Komisi per Pesanan(Rp)': '0', 'Nilai Pembelian(Rp)': '20000' };
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1'), aff('2'), cancelled] }]);
+    const sum = await page.locator('#statSum').textContent();
+    assert.match(sum, /nilai pesanan Rp20rb/, 'cancelled rows have zero commission; show the order value');
+    assert.match(sum, /komisi Rp/);
+    assert.match(sum, /Tingkat Batal/);
+    assert.match(sum, /33,3%/);
+    assert.match(sum, /1 dari 3 pesanan · menurut nilai 90,9% · terbesar Rp20rb/);
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {

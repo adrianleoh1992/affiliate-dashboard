@@ -275,10 +275,13 @@
 
     section('Bagaimana laba terbentuk');
     moneyFlow();
+    // Completed-only ROAS is a floor: it treats every pending order as cancelled.
     metricGrid([
       ['Komisi organik efektif', money(k.organicComm), 'Termasuk dalam Komisi Total'],
       ['Komisi tertunda', money(k.commPending), percent(k.pendingPct) + ' dari komisi laporan'],
-    ], 2);
+      ['Komisi selesai', money(k.commDone), 'ROAS hanya selesai ' + ratio(k.roasDone, amount(k.spend) > 0)],
+      ['Pesanan batal', percent(k.cancelRate), 'Menurut nilai ' + percent(k.cancelValueRate)],
+    ], 4);
 
     nextPage();
     const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);
@@ -375,9 +378,12 @@
         p.name, integer(p.qty), integer(p.orders), money(p.comm), money(p.gmv),
       ]), [68, 18, 18, 39, 39], { numeric: [1, 2, 3, 4] });
 
-      section('Sumber komisi', 'Komisi laporan sebelum bobot tertunda. Daftar toko dan kategori terbatas pada 10 teratas sesuai ringkasan mesin; kategori lain tidak dijumlahkan sebagai nol.');
+      // The offer row credits each product's whole commission to its offer
+      // label, so 'Komisi XTRA' there includes Shopee's base commission.
+      section('Sumber komisi', 'Komisi laporan sebelum bobot tertunda. Daftar toko dan kategori terbatas pada 10 teratas sesuai ringkasan mesin; kategori lain tidak dijumlahkan sebagai nol.'
+        + ' Baris tipe penawaran menjumlahkan seluruh komisi produk yang dijual dengan penawaran itu, termasuk komisi dasar Shopee; angka ini bukan besar komisi XTRA.');
       const groups = [['Platform', b.platform], ['Toko (top 10)', b.shop], ['Kategori L1 (top 10)', b.category],
-        ['Kategori L2 (top 10)', b.category2], ['Tipe penawaran', b.offerType], ['Tipe konten', b.contentType]];
+        ['Kategori L2 (top 10)', b.category2], ['Tipe penawaran (seluruh komisi produk)', b.offerType], ['Tipe konten', b.contentType]];
       table(['Dimensi', 'Nama', 'Komisi laporan'], groups.flatMap(([label, rows]) => array(rows).map(row => [label, row.name || '(tanpa nama)', money(row.comm)])),
         [43, 97, 42], { numeric: [2] });
 
@@ -397,7 +403,9 @@
     ], [44, 47, 44, 47]);
     paragraph(integer(tags.length) + ' tag / ' + integer(units.length) + ' iklan / ' + integer(daily.length) + ' hari. '
       + 'Baris aktif: affiliate ' + integer(counts.affiliate) + ', iklan ' + integer(counts.ads) + ', klik ' + integer(counts.clicks) + '. '
-      + 'Dikecualikan: ' + integer(excluded.cancelled) + ' baris batal dan ' + integer(excluded.unpaid) + ' belum dibayar.', { size: 8 });
+      + 'Dikecualikan: ' + integer(excluded.cancelled) + ' baris batal (' + integer(excluded.cancelledOrders) + ' pesanan, nilai pesanan '
+      + money(excluded.cancelledValue) + (amount(excluded.cancelledMax) > 0 ? '; terbesar ' + money(excluded.cancelledMax) : '')
+      + ') dan ' + integer(excluded.unpaid) + ' baris belum dibayar.', { size: 8 });
     if (omittedTags.size) paragraph(integer(omittedTags.size) + ' tag dengan biaya dan komisi sama-sama nol tidak ditampilkan pada laporan ini.', { size: 8 });
     paragraph('Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'tidak tersedia') + '.', { size: 8 });
     const quality = settings.quality == null ? [] : Array.isArray(settings.quality) ? settings.quality : [settings.quality];
