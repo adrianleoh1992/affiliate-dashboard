@@ -89,12 +89,31 @@ async function main() {
     assert.ok(texts.some(t => t.includes('100826 | TST | Bantal')) && texts.some(t => t.includes('270926 | TST | Bantal')));
     const second = rows.filter({ hasText: '270926' });
     await second.evaluate(tr => tr.click());
-    assert.match(await page.locator('#tblUnit tr.daydetail').innerText(), /Rp50/);
+    const detail = await page.locator('#tblUnit tr.daydetail').innerText();
+    assert.match(detail, /Rp50/);
+    assert.match(detail, /Bantal · 270926 \| TST \| Bantal · Ad ID 120212345678905678/i, 'the heading names the ad, not its internal key');
 
     // 35 Shopee clicks for 430 Meta link clicks over 7 days: the mapping is flagged.
     await page.locator('#btnMap').click();
     assert.match(await page.locator('#tblMatch').innerText(), /Klik masuk rendah: klik Shopee di tag ini hanya 8% dari klik Meta/);
     assert.equal(await page.locator('#mapAlert').innerText(), '3');
+  });
+
+  test('a suggestion picked for one of two ads sharing a name is saved for that Ad ID only', async page => {
+    const id1 = '120212345678901234', id2 = '120212345678905678';
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'GulingAnak')] },
+      { name: 'ads.csv', rows: [{ ...ad('Guling', 100), 'Ad ID': id1, 'Campaign name': 'K1' }, { ...ad('Guling', 300), 'Ad ID': id2, 'Campaign name': 'K2' }] }]);
+    await page.locator('#btnMap').click();
+    const pick = page.locator(`#tblMatch [data-accept-key="id:${id2}"]`);
+    assert.equal(await pick.count(), 1, 'each copy has its own button');
+    await pick.click();
+    const log = await page.evaluate(() => RESULT.matchLog.map(m => [m.adId, m.method, m.tag]));
+    assert.deepEqual(log.find(x => x[0] === id2), [id2, 'Manual', 'GulingAnak']);
+    assert.equal(log.find(x => x[0] === id1)[1], 'Contains', 'the other copy is untouched');
+    assert.equal(await page.evaluate(id => JSON.parse(localStorage.getItem('adash_map_v3_default'))['id:' + id], id2), 'GulingAnak');
+    await page.locator('#btnSaveMap').click();
+    assert.equal(await page.evaluate(id => RESULT.matchLog.find(m => m.adId === id).method, id2), 'Manual', 'Simpan keeps the per-Ad-ID choice');
   });
 
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {

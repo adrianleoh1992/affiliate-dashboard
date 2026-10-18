@@ -431,4 +431,45 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   assert.equal(cap.low, false);
 }
 
+/* ── Review round 2 ────────────────────────────────────────────────────── */
+{
+  // A value Excel shows with six digits fits many ads: it only joins an
+  // intact ID that carries the same name.
+  const r = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Kuku' }), aff('o2', 500, { 'Tag_link1': 'Mukena' }), aff('o3', 500, { 'Tag_link1': 'Varo' })],
+    ads: [ad('2026-08-01', 5000, { 'Ad name': 'Kuku', 'Ad ID': '1.20212E+17' }), ad('2026-08-01', 10000, { 'Ad name': 'Mukena', 'Ad ID': '1.20212E+17' }),
+          ad('2026-08-02', 100, { 'Ad name': 'Varo', 'Ad ID': '120212345678901234' })] });
+  assert.equal(r.tags.find(t => t.tag === 'Kuku').spend, 5000);
+  assert.equal(r.tags.find(t => t.tag === 'Mukena').spend, 10000);
+  assert.equal(r.adUnits.find(u => u.adId === '120212345678901234').spend, 100);
+}
+{
+  // A lower-case mapping holds for other spellings, but never takes a name
+  // off its own exact sub_id.
+  const tags = ['MaskerDuckbill', 'Maskerduckbill'], map = { 'masker duckbill': 'Maskerduckbill' };
+  assert.equal(E.matchAdToTag('MaskerDuckbill', tags, map).method, 'Exact');
+  assert.equal(E.matchAdToTag('Masker  Duckbill!', tags, map).tag, 'MaskerDuckbill', 'spaces and punctuation are ignored, case is not');
+  assert.equal(E.matchAdToTag('masker duckbill', tags, map).method, 'Manual');
+  const loud = E.matchAdToTag('MASKER DUCKBILL', tags, map);
+  assert.deepEqual([loud.method, loud.tag], ['Manual', 'Maskerduckbill'], 'the lower-case key covers spellings without their own sub_id');
+}
+{
+  // A choice for one ad among copies sharing its name decides for that ad only.
+  const id1 = '120212345678901234', id2 = '120212345678905678';
+  const r = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'BantalPromo' })],
+    ads: [ad('2026-08-01', 100, { 'Ad name': 'Bantal Promo Baru', 'Ad ID': id1 }), ad('2026-08-01', 300, { 'Ad name': 'Bantal Promo Baru', 'Ad ID': id2 })],
+    tagMap: { ['id:' + id2]: 'BantalPromo' } });
+  assert.equal(r.matchLog.find(m => m.adId === id2).method, 'Manual');
+  assert.equal(r.matchLog.find(m => m.adId === id1).method, 'Contains', 'the other copy is still a question');
+  assert.equal(r.tags.find(t => t.tag === 'BantalPromo').spend, 300);
+}
+{
+  // Ad IDs leave the CSV export as text, so a spreadsheet keeps all 18 digits.
+  const X = require('./export-data.js');
+  const r = analyze({ affiliate: [aff('o1')], ads: [ad('2026-08-01', 100, { 'Ad ID': '120212345678901234' })] });
+  const out = X.csv(r, { dataset: 'units' });
+  assert.match(out, /"=""120212345678901234"""/);
+  assert.match(X.csv(r, { dataset: 'matching' }), /"=""120212345678901234"""/);
+  assert.match(out, /^﻿"Akun","Periode awal","Periode akhir","Nama iklan","Ad ID",/, 'the header row is plain text');
+}
+
 console.log('engine regression tests: PASS');

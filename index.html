@@ -384,11 +384,15 @@
   <div class="modal-box">
     <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
       <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Iklan tersambung otomatis hanya kalau namanya sama persis dengan sub_id di laporan komisi
-      atau laporan klik, termasuk huruf besar-kecil (spasi diabaikan). Nama yang mirip, misalnya
+    <p class="hint">Iklan tersambung otomatis kalau namanya sama persis dengan sub_id di laporan komisi
+      atau laporan klik, termasuk huruf besar-kecil (spasi diabaikan). Iklan yang diganti namanya tetap
+      memakai tag dari nama lamanya (metode <b>nama lama</b>) atau tag yang pernah didapat Ad ID-nya
+      (metode <b>Ad ID</b>). Nama yang mirip, misalnya
       <b>Telesin video 2</b> untuk <b>TelesinGripvideo2</b>, hanya disarankan. Mapping di sini selalu menang
-      atas pencocokan otomatis, dan disimpan terpisah per akun. Nama iklan yang ditulis dengan huruf
-      kapital hanya berlaku untuk ejaan itu; yang ditulis huruf kecil semua berlaku untuk semua ejaan.
+      atas pencocokan otomatis, dan disimpan terpisah per akun. Mapping berlaku untuk ejaan nama yang
+      ditulis; yang ditulis huruf kecil semua juga berlaku untuk ejaan lain, kecuali ejaan yang punya
+      sub_id persis sendiri. Pilihan untuk iklan yang namanya dipakai beberapa iklan disimpan per Ad ID
+      (baris <b>id:…</b>).
       Satu link bisa membawa sampai lima tag; yang pertama dipakai sebagai tag induk.</p>
     <h3 class="sec-split">Hasil pencocokan saat ini</h3>
     <p class="hint">Baris dengan keyakinan di bawah 50% belum tersambung ke tag mana pun: klik tag yang

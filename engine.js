@@ -201,17 +201,33 @@ function dashKey(s) { return String(s == null ? '' : s).replace(/[^A-Za-z0-9-]/g
    arriving — a STOP verdict on a healthy ad — while a phantom tag held all
    7.226 of its clicks and no spend.
 
-   Splitting blindly would break any tag that legitimately contains a dash, so
-   the first slot is only taken when it is a known sub_id: a tag in the
-   commission report, or one the click report itself shows with every other
-   slot empty. `known` is a tagLookup() over those, and it follows the same
+   The report always writes all five slots, so a value with exactly four
+   dashes has none inside a slot and its first part is slot one. With more
+   dashes some slot holds one, and slot one is only cut where a known tag
+   ends. Values in any other shape (a single Tag_link1 column) are split at
+   the first dash only when the commission report knows that part. `known` is
+   a tagLookup() over the commission report's tags, and it follows the same
    case rule as the ad matching: both reports come from one tracking system,
    so a click spelled differently is a different sub_id. */
 function resolveClickTag(raw, known) {
   const t = cleanTag(raw);
   if (!t) return t;
+  const parts = String(raw).trim().split('-');
+  // Exactly five slots means no slot holds a dash: slot one is certain.
+  if (parts.length === 5 && parts[0].trim()) return known(parts[0].trim()) || parts[0].trim();
   const whole = known(t, true);
   if (whole) return whole;
+  if (parts.length > 5) {
+    // Slots two to five empty: everything before them is slot one.
+    if (parts.slice(-4).every(x => !x.trim())) return t;
+    // Otherwise slot one holds some of the extra dashes; the longest known
+    // prefix it can be wins.
+    for (let j = parts.length - 4; j >= 1; j--) {
+      const hit = known(parts.slice(0, j).join('-').trim(), true);
+      if (hit) return hit;
+    }
+    return t;
+  }
   const first = t.split('-')[0].trim();
   return (first && known(first)) || t;
 }
@@ -339,16 +355,17 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
 
   // An explicit correction wins over an embedded pipe tag. Manual mappings
   // apply to the full ad name, never unrelated substring names. A mapping
-  // written with capitals holds for that spelling only, so mapping TumblerIG
-  // cannot take Tumblerig off its exact tag; one in lower case (as every
-  // mapping saved before case mattered is) holds for any spelling.
+  // holds for the spelling it was written in. One in lower case (as every
+  // mapping saved before case mattered is) also holds for other spellings,
+  // except one with an exact sub_id of its own: mapping "maskerduckbill"
+  // must not take MaskerDuckbill off its tag.
+  const find = tagLookup(affiliateTags);
   const map = tagMap || {}, key = strictKey(raw);
   const keys = Object.keys(map).filter(k => String(map[k] || '').trim());
-  const manual = keys.find(k => strictKey(k) === key)
-    ?? keys.find(k => strictKey(k) === normalize(k) && normalize(k) === n);
+  let manual = keys.find(k => strictKey(k) === key);
+  if (manual === undefined && !find(raw)) manual = keys.find(k => strictKey(k) === normalize(k) && normalize(k) === n);
   if (manual !== undefined) return { tag: cleanTag(map[manual]), method: 'Manual', confidence: 1 };
 
-  const find = tagLookup(affiliateTags);
   const piped = noPipe ? '' : extractPipeTag(raw);
   if (piped) {
     const hit = find(piped);
@@ -633,9 +650,8 @@ function analyze(data, options) {
      appears only in the click report, and used to be called "Tidak cocok".
      The commission report still decides how a click's joined slots split. */
   const commTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
-  const soloClickTags = fClk.map(r => cleanTag(pick(r, COL.clk.tag))).filter(t => t && !t.includes('-'));
-  const knownTags = tagLookup(commTags.concat(soloClickTags));
-  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), knownTags));
+  const commKnown = tagLookup(commTags);
+  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), commKnown));
   const affiliateTags = [...new Set(commTags.concat(clickTagOf.filter(Boolean)))];
 
   /* ── Ads aggregation + matching, per ad ─────────────────────────────────
@@ -647,13 +663,14 @@ function analyze(data, options) {
      and a pull of later days stay one ad; a name several ads share cannot be
      split and stays a unit of its own. */
   /* A damaged ID (rounded by a spreadsheet, or a genuine one ending in zeros)
-     joins the one intact ID it can be; failing that, a digits-only one keeps
-     its own unit (with its name) and anything else falls back to the name. */
-  const unitOf = [], unitInfo = dict(), idsByName = dict(), intactIds = new Set();
+     joins the one intact ID with the same name that it can be: a value shown
+     with six digits fits many ads, so the number alone proves nothing. Failing
+     that, a digits-only one keeps its own unit (with its name) and anything
+     else falls back to the name. */
+  const unitOf = [], unitInfo = dict(), idsByName = dict(), fitCache = new Map();
   fAds.forEach(r => {
     const id = intactAdId(pick(r, COL.ads.id));
     if (!id) return;
-    intactIds.add(id);
     const name = String(pick(r, COL.ads.name) || '');
     (idsByName[name] = idsByName[name] || new Set()).add(id);
   });
@@ -662,7 +679,9 @@ function analyze(data, options) {
     const cell = String(pick(r, COL.ads.id) || '').trim();
     let id = intactAdId(cell), key = '';
     if (!id && cell) {
-      const fits = [...intactIds].filter(x => idAgrees(cell, x));
+      const ck = cell + '|' + name;
+      if (!fitCache.has(ck)) fitCache.set(ck, [...(idsByName[name] || [])].filter(x => idAgrees(cell, x)));
+      const fits = fitCache.get(ck);
       if (fits.length === 1) id = fits[0];
       // Two ads can round to one value, so the name still has to agree.
       else if (/^\d+$/.test(cell)) key = 'raw:' + cell + '|' + name;
@@ -691,7 +710,10 @@ function analyze(data, options) {
   const isSure = x => x.confidence >= 0.85 && !x.candidateTag;
   Object.keys(unitInfo).forEach(key => {
     const u = unitInfo[key];
-    let m = matchAdToTag(u.name, affiliateTags, tagMap), base = m.method;
+    // A choice made for one ad among several sharing its name is stored under
+    // "id:<Ad ID>" and decides for that ad alone.
+    const own = u.adId && Object.prototype.hasOwnProperty.call(tagMap, 'id:' + u.adId) ? cleanTag(tagMap['id:' + u.adId]) : '';
+    let m = own ? { tag: own, method: 'Manual', confidence: 1 } : matchAdToTag(u.name, affiliateTags, tagMap), base = m.method;
     if (!isSure(m)) {
       const older = [...u.names].filter(([nm]) => nm !== u.name).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
       for (const [nm] of older) {

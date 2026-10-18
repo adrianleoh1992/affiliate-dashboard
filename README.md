@@ -147,6 +147,7 @@ Klik **Ekspor data**, lalu pilih format dan isi laporan:
 
 - **CSV:** keputusan tag, rincian iklan, kinerja harian, atau pencocokan nama.
   Untuk tag, pilih semua tag atau hasil pencarian/filter yang sedang terlihat.
+  Ad ID ditulis sebagai `="…"` agar spreadsheet tidak membulatkannya ke 15 digit.
   Setiap baris menyertakan akun dan periode; angka mempertahankan presisinya,
   dan teks sumber yang dapat menjadi formula spreadsheet dinetralkan.
 - **JSON:** seluruh hasil analisis, parameter, dan catatan kualitas data dalam
@@ -197,24 +198,27 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
   alasan keputusan menyebut dasar yang matang.
 - **Lag dan order:** distribusi lag dan penyelesaian menghitung order unik,
   bukan jumlah baris produk. Rekomendasi H+0 tetap dapat bernilai nol.
-- **Mapping:** urutannya mapping manual nama iklan, segmen pipa yang sama
+- **Mapping:** urutannya mapping manual per Ad ID (baris `id:<Ad ID>`, untuk
+  iklan yang namanya kembar), mapping manual nama iklan, segmen pipa yang sama
   persis dengan tag, nama iklan yang sama persis dengan sub_id di laporan
   komisi **atau** laporan klik, nama lama iklan yang sama di data yang dimuat,
   lalu tag yang pernah didapat Ad ID itu dari nama persisnya. "Sama persis"
   memperhatikan huruf besar-kecil; spasi dan tanda baca diabaikan. Mapping
   manual yang ditulis dengan huruf kapital hanya berlaku untuk ejaan itu; yang
-  huruf kecil semua (termasuk mapping lama) berlaku untuk semua ejaan. Nama
-  yang hanya beda huruf, mirip, atau mengandung tag lain hanya menjadi saran
-  (keyakinan di bawah 50%): biayanya tetap di nama iklan sampai sarannya
-  diklik di tab Matching.
+  huruf kecil semua (termasuk mapping lama) berlaku untuk ejaan lain, kecuali
+  ejaan yang punya sub_id sendiri. Nama yang hanya beda huruf, mirip, atau
+  mengandung tag lain hanya menjadi saran (keyakinan di bawah 50%): biayanya
+  tetap di nama iklan sampai sarannya diklik di tab Matching. Saran untuk iklan
+  bernama kembar disimpan per Ad ID.
 - **Unit iklan:** satu unit per Ad ID. Ekspor tanpa kolom Ad ID dikelompokkan
   per nama; baris tanpa ID ikut ke satu-satunya Ad ID yang memakai nama itu.
   Ad ID yang dibulatkan spreadsheet (notasi E+, atau lebih dari 15 digit dengan
-  ekor nol) hanya ikut ke Ad ID utuh yang nilainya cocok dengan pembulatannya.
-  Tag per Ad ID disimpan di browser per akun dashboard.
-- **Laporan klik:** tanda "-" memisahkan lima slot sub_id. Slot pertama dipakai
-  bila ia sub_id yang dikenal: ada di laporan komisi, atau muncul sendirian di
-  laporan klik.
+  ekor nol) hanya ikut ke Ad ID utuh dengan nama yang sama dan nilai yang cocok
+  dengan pembulatannya. Tag per Ad ID disimpan di browser per akun dashboard.
+- **Laporan klik:** tanda "-" memisahkan lima slot sub_id. Bila ada tepat lima
+  slot, slot pertama adalah tag. Bila lebih, tag itu sendiri memuat "-": bila
+  empat slot terakhir kosong, seluruh nilai sebelumnya adalah tag; bila tidak,
+  dipakai sub_id terpanjang dari laporan komisi yang menjadi awalannya.
 - **Klik masuk rendah:** pemetaan ditandai bila klik Shopee pada tag kurang dari
   25% klik link Meta pada hari iklan berjalan dalam jendela laporan klik,
   setelah minimal 7 hari dan 300 klik Meta. Hari tanpa satu klik pun di laporan

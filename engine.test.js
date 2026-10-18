@@ -233,10 +233,15 @@ assert.equal(rct('TelesinGripvideo2-promo-agustus--'), 'TelesinGripvideo2', 'slo
 // Both reports come from one tracking system and Shopee keeps sub_ids that
 // differ only in case apart (MaskerDuckbill the ad, Maskerduckbill organic),
 // so a click spelled differently is a different sub_id.
-assert.equal(rct('TELESINGRIPVIDEO2-promo---'), 'TELESINGRIPVIDEO2-promo', 'beda huruf adalah sub_id lain');
+assert.equal(rct('TELESINGRIPVIDEO2-promo---'), 'TELESINGRIPVIDEO2', 'beda huruf adalah sub_id lain');
 assert.equal(rct('telesingripvideo2----'), 'telesingripvideo2', 'beda huruf tidak dipaksa menyatu');
-// A tag nobody knows stays whole rather than being chopped at its first dash.
-assert.equal(rct('kampanyelain-promo---'), 'kampanyelain-promo', 'tag asing tidak dipotong');
+// Five slots and four dashes: no slot holds a dash, so slot one is certain
+// even for a tag the commission report does not know (a test ad with clicks
+// but no orders). With more dashes, slot one is cut only where a known tag ends.
+assert.equal(rct('kampanyelain-promo---'), 'kampanyelain', 'lima slot: slot pertama pasti');
+assert.equal(rct('Bantal-Tidur----'), 'Bantal-Tidur', 'tanda - di dalam slot pertama');
+assert.equal(E.resolveClickTag('Bantal-Tidur-ad01---', E.tagLookup(['Bantal', 'Bantal-Tidur'])), 'Bantal-Tidur', 'tag terpanjang yang dikenal');
+assert.equal(rct('kampanye-lain'), 'kampanye-lain', 'bentuk lain tidak dipotong tanpa tag yang dikenal');
 assert.equal(rct('----'), '', 'semua slot kosong');
 assert.equal(rct('-promo---'), '-promo', 'slot pertama kosong bukan tag kita');
 

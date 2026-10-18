@@ -599,7 +599,7 @@ function bindBreakdown(tableId,lookup,cols){
       const it=lookup(tr.dataset.bd); if(!it)return;
       const det=document.createElement('tr');
       det.className='daydetail';
-      det.innerHTML=`<td colspan="${cols}">${breakdownHTML('Per hari · '+tr.dataset.bd,it.byDate,it.note)}</td>`;
+      det.innerHTML=`<td colspan="${cols}">${breakdownHTML('Per hari · '+(it.title||tr.dataset.bd),it.byDate,it.note)}</td>`;
       tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');
     };
     tr.onclick=open;
@@ -627,7 +627,7 @@ const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1]
 /* One name can belong to several ads (copies in other campaigns). Only then
    does the row say which one it is. */
 function repeatedNames(list){const seen=new Set(),twin=new Set();list.forEach(x=>{seen.has(x.adName)?twin.add(x.adName):seen.add(x.adName)});return twin}
-function whichAd(x){return x.campaign||(x.adId?'Ad ID '+x.adId:'tanpa Ad ID')}
+function whichAd(x){return [x.campaign,x.adId?'Ad ID '+x.adId:''].filter(Boolean).join(' · ')||'tanpa Ad ID'}
 function renderUnit(){
   const u=RESULT.adUnits;
   const r=RESULT.range;
@@ -658,7 +658,7 @@ function renderUnit(){
     <td class="num ${x.roi>=0?'pos':'neg'}">${x.spend?x.roi.toFixed(0)+'%':'—'}</td>
     <td class="num">${x.orders?rp(x.costPerOrder):'—'}</td></tr>`).join('');
   bindBreakdown('tblUnit',key=>{const a=RESULT.adUnits.find(x=>x.key===key);
-    return a?{byDate:a.byDate,note:a.estimated?'komisi & klik Shopee proporsional dari tag':''}:null},UC.length);
+    return a?{title:a.adName+(twin.has(a.adName)?' · '+whichAd(a):''),byDate:a.byDate,note:a.estimated?'komisi & klik Shopee proporsional dari tag':''}:null},UC.length);
 }
 function renderLeak(){
   const r=RESULT.range;
@@ -914,10 +914,12 @@ document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
 /* A suggestion used to mean opening Kelola Tag and typing the mapping by hand
    — the setup people choose this tool to avoid. Each suggested tag is now a
    button that saves that one mapping and recalculates. */
-function suggestHtml(m){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
+function suggestHtml(m,twin){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
+  // Several ads share this name: the choice is stored for this Ad ID only.
+  const key=twin&&m.adId?'id:'+m.adId:m.adName.trim();
   const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
-  return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
-$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
+  return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-key="${esc(key)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptKey||b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
   try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
   // Keep the rows below in step: Simpan rebuilds the map from them, and would
   // otherwise drop the mapping just accepted.
@@ -932,7 +934,7 @@ function renderMatch(){
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
     const cap=lowCapture(m)?`<br><small class="leak-bad">Klik masuk rendah: klik Shopee di tag ini hanya ${Math.round(m.capture.pct)}% dari klik Meta selama iklan jalan. Cek link iklan.</small>`:'';
     return `<tr><td><b>${esc(m.adName)}</b>${twin.has(m.adName)?`<br><small>${esc(whichAd(m))}</small>`:''}</td><td><span class="pill">${esc(m.tag)}</span>${cap}</td>
-      <td>${esc(m.method)}${suggestHtml(m)}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
   // The mapping table now lives behind one button, so that button has to say
