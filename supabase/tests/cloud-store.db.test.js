@@ -110,17 +110,20 @@ const save = (b, acct, kind, rows, name) => b.store.saveDaily(acct.id, kind, [],
 const affiliate = (id, date = '2026-09-01', extra = {}) => ({
   'ID Pemesanan': id, 'ID Produk': 'p-' + id, 'Status Pesanan': 'Selesai', 'Waktu Pemesanan': date + ' 10:00:00',
   'Tag_link1': 'Serum A', 'Total Komisi per Produk(Rp)': 1234.5, 'Nilai Pembelian(Rp)': 10000, 'Jumlah': 1, ...extra });
+const AD_ID = '120212345678901234', AD_ID_2 = '120212345678905678';
 const ad = (date = '2026-09-01', extra = {}) => ({ 'Ad name': 'Serum A', 'Reporting starts': date,
   'Amount spent (IDR)': 1000.25, 'Impressions': 5000, 'Reach': 4000, 'Link clicks': 37, 'Landing page views': 30, ...extra });
 const click = (time, date = '2026-09-01', extra = {}) => ({ 'Waktu Klik': date + ' ' + time, 'Tag_link': 'Serum A',
   'Wilayah Klik': 'Jakarta', 'Perujuk': 'Facebook', ...extra });
 
 // Strip what legitimately differs between stores (ids, timestamps, set order).
+const canon = value => JSON.stringify(value, (key, v) => v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
 const shape = rows => rows.map(row => {
   const { id, account_id, created_at, updated_at, merge_version, ...rest } = row;
   if (rest.order_keys) rest.order_keys = [...rest.order_keys].sort();
   return rest;
-}).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}).sort((a, b) => canon(a).localeCompare(canon(b)));
 async function snapshot(store, acct) {
   const out = {};
   for (const kind of ['affiliate', 'ads', 'clicks']) out[kind] = shape(await store.range(acct.id, kind));
@@ -150,8 +153,8 @@ test('a second browser pulls the same history and both keep merging', async () =
   assert.deepEqual(await snapshot(b.local, acctB), await snapshot(a.local, acctA));
   // B adds ads, A (cache now one revision behind) adds overlapping affiliate rows.
   await save(b, acctB, 'ads', [ad(), ad('2026-09-02')]);
-  const res = await save(a, acctA, 'affiliate', [affiliate('o2'), affiliate('o3')], 'aff-2.csv');
-  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 1 }, 'o2 row is deduplicated across browsers');
+  const res = await save(a, acctA, 'affiliate', [affiliate('o2'), affiliate('o2', '2026-09-01', { 'ID Produk': 'p-x' }), affiliate('o3')], 'aff-2.csv');
+  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 2 }, 'order o2 is recognized across browsers');
   await b.store.sync(NAME);
   assert.deepEqual(await snapshot(b.local, acctB), await snapshot(a.local, acctA));
   const [row] = await b.local.range(acctB.id, 'affiliate');
@@ -171,6 +174,13 @@ test('shared totals equal a local-only store fed the same files', async () => {
     ['ads', [ad('2026-09-01', { 'Link clicks': 1, 'Ad delivery': '' })]],
     ['clicks', [click('10:00:00'), click('10:00:01', '2026-09-01', { 'Wilayah Klik': 'Bandung' })]],
     ['clicks', [click('10:00:01', '2026-09-01', { 'Wilayah Klik': 'Bandung' }), click('11:00:00', '2026-09-01', { 'Perujuk': '__proto__' })]],
+    // A revised commission report: x2 completed with a corrected commission, x4 cancelled.
+    ['affiliate', [affiliate('x1'), affiliate('x2', '2026-09-02', { 'Total Komisi per Produk(Rp)': 1000.3 }),
+      affiliate('x3', '2026-09-02', { 'Status Pesanan': 'Dibatalkan' }), affiliate('x4', '2026-09-02', { 'Status Pesanan': 'Dibatalkan' })]],
+    // Pulled ads with IDs (two ads share a name), then a re-pull with corrected spend.
+    ['ads', [ad('2026-09-03', { 'Ad ID': AD_ID, 'Ad delivery': 'Aktif' }), ad('2026-09-03', { 'Ad ID': AD_ID_2, 'Amount spent (IDR)': 77.7 })]],
+    ['ads', [ad('2026-09-03', { 'Ad ID': AD_ID, 'Amount spent (IDR)': 999.95 }), ad('2026-09-03', { 'Ad ID': AD_ID_2, 'Amount spent (IDR)': 77.7 }),
+      ad('2026-09-04', { 'Ad ID': AD_ID, 'Impressions': 0, 'Link clicks': 0 })]],
   ];
   for (const [kind, rows] of files) {
     const shared = await save(a, acct, kind, rows);
@@ -180,6 +190,67 @@ test('shared totals equal a local-only store fed the same files', async () => {
   assert.deepEqual(await snapshot(a.local, acct), await snapshot(plain, plainAcct));
   const clicks = await a.local.range(acct.id, 'clicks');
   assert.equal(clicks[0].by_source.__proto__, 1);
+  const [revised] = await a.local.range(acct.id, 'affiliate', '2026-09-02', '2026-09-02');
+  assert.equal(revised.comm, 1000.3, 'revised orders replace, cancelled orders drop out');
+  assert.equal(revised.comm_pending, 0);
+  assert.equal(revised.orders, 1);
+  assert.equal(revised.excluded, 2);
+  const pulled = await a.local.range(acct.id, 'ads', '2026-09-03', '2026-09-03');
+  assert.deepEqual(pulled.map(r => r.spend).sort((x, y) => x - y), [77.7, 999.95]);
+  assert.equal(pulled.find(r => r.ad_id === AD_ID).delivery, 'Aktif', 'a re-pull without status keeps the saved one');
+  // Same totals as the database computes itself.
+  const remote = await a.client.rpc('daily_export_account', { p_account_id: a.store.state.get('Parity').remoteId });
+  const { revision, reset_revision, totals, ...backup } = remote;
+  assert.deepEqual(shape(DailyStore.validateBackup(backup).data.affiliate), shape(await plain.range(plainAcct.id, 'affiliate')));
+});
+
+test('a revised commission report replaces orders for the whole team', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a, 'Revisi');
+  const pending = { 'Status Pesanan': 'Tertunda' };
+  await save(a, acctA, 'affiliate', [affiliate('r1', '2026-09-15', pending), affiliate('r2', '2026-09-15', pending), affiliate('r3', '2026-09-16')]);
+  const acctB = await account(b, 'Revisi');
+  const res = await save(b, acctB, 'affiliate', [affiliate('r1', '2026-09-15'), affiliate('r2', '2026-09-15', { 'Status Pesanan': 'Dibatalkan' }),
+    affiliate('r3', '2026-09-16')], 'revisi.csv');
+  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 1 });
+  await a.store.sync('Revisi');
+  const [day] = await a.local.range(acctA.id, 'affiliate', '2026-09-15', '2026-09-15');
+  assert.equal(day.comm, 1234.5);
+  assert.equal(day.comm_done, 1234.5);
+  assert.equal(day.comm_pending, 0);
+  assert.equal(day.orders, 1);
+  assert.equal(day.excluded, 1);
+  assert.equal(Number(psql(DB_URL, `select count(*) from dashboard.row_hashes h join dashboard.accounts a on a.id = h.account_id
+    where a.name = 'Revisi'`)), 0, 'commission days keep no fingerprints');
+});
+
+test('the database itself refuses the double counts a browser check would catch', async () => {
+  const a = await browser('admin@example.com');
+  const acct = await account(a, 'Penjaga');
+  await save(a, acct, 'ads', [ad('2026-09-20')]);
+  const link = () => a.store.state.get('Penjaga');
+  // A pulled row for the same ad and day as a saved CSV row, sent around the browser check.
+  const [pulled] = A.aggregate('ads', [ad('2026-09-20', { 'Ad ID': AD_ID })]);
+  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: 'ads', p_expected_revision: link().revision,
+    p_records: [pulled], p_hashes: [], p_upload: { file_hash: 'pull-1', rows: 1 } }), /sekali tanpa Ad ID[\s\S]*2026-09-20/);
+  await assert.rejects(save(a, acct, 'ads', [ad('2026-09-20', { 'Ad ID': AD_ID })], 'pull.csv'), /sekali tanpa Ad ID/);
+  // A fingerprint-format commission day converts only with all of its orders.
+  const backup = await a.local.exportAccount(acct.id);
+  backup.affiliate = [{ account_id: acct.id, date: '2026-09-21', tag: 'Serum A', comm: 2469, comm_done: 2469, comm_pending: 0,
+    gmv: 20000, qty: 2, refund: 0, orders: 2, order_keys: ['k1', 'k2'].map(orderId => A.hashRow({ orderId })).sort(),
+    excluded: 0, rows: 2, merge_version: 1 }];
+  backup.rowhashes.push(...['1', '2'].map(n => ({ account_id: acct.id, kind: 'affiliate', hash: n.repeat(16), date: '2026-09-21' })));
+  await a.store.importAccount(acct.id, backup, { replace: true });
+  const [partial] = A.aggregate('affiliate', [affiliate('k1', '2026-09-21')]);
+  await assert.rejects(a.client.rpc('daily_ingest', { p_account_id: link().remoteId, p_kind: 'affiliate', p_expected_revision: link().revision,
+    p_records: [partial], p_hashes: [], p_upload: { file_hash: 'partial', rows: 1 } }), /format lama/);
+  await assert.rejects(save(a, acct, 'affiliate', [affiliate('k1', '2026-09-21')]), /format lama/);
+  await save(a, acct, 'affiliate', [affiliate('k1', '2026-09-21'), affiliate('k2', '2026-09-21')]);
+  const [day] = await a.local.range(acct.id, 'affiliate', '2026-09-21', '2026-09-21');
+  assert.equal(day.merge_version, 2);
+  assert.equal(day.comm, 2469);
+  assert.equal(Number(psql(DB_URL, `select count(*) from dashboard.row_hashes h join dashboard.accounts a on a.id = h.account_id
+    where a.name = 'Penjaga' and h.kind = 'affiliate'`)), 0);
 });
 
 test('the same file is skipped and a stale revision is refused', async () => {
@@ -350,6 +421,20 @@ test('the database refuses history a browser could not load back', async () => {
     'undated fingerprint': d => { d.rowhashes[0].date = null; },
     'missing fingerprint': d => { d.rowhashes.pop(); },
     'file name control character': d => { d.uploads[0].file_name = 'x\u0001.csv'; },
+    'order parts that do not add up': d => { d.affiliate[0].comm += 1; },
+    'order part without rows': d => { Object.values(d.affiliate[0].order_parts)[0][7] = 0; },
+    'order part key': d => { const [key] = Object.keys(d.affiliate[0].order_parts); d.affiliate[0].order_parts['clear-' + key.slice(6)] = d.affiliate[0].order_parts[key]; delete d.affiliate[0].order_parts[key]; },
+    'order identities on an order-part record': d => { d.affiliate[0].order_keys = Object.keys(d.affiliate[0].order_parts); },
+    'order parts on a fingerprint record': d => { d.affiliate[0].merge_version = 1; d.affiliate[0].order_keys = []; d.affiliate[0].orders = 0; },
+    'Ad ID on a row without merge version 2': d => {
+      d.ads.push({ account_id: d.account.id, date: '2026-09-30', ad_unit: 'Y', ad_id: '123456789', spend: 1, impressions: 1, reach: 1, clicks: 0,
+        shop_clicks: 0, lpv: 0, results: 0, rows: 1, cpm: 0, cpc: 0, ctr: 0, delivery: '', merge_version: 1 });
+      d.rowhashes.push({ account_id: d.account.id, kind: 'ads', hash: 'h-ad-id', date: '2026-09-30' });
+    },
+    'malformed Ad ID': d => {
+      d.ads.push({ account_id: d.account.id, date: '2026-09-30', ad_unit: 'Y', ad_id: '12ab', spend: 1, impressions: 1, reach: 1, clicks: 0,
+        shop_clicks: 0, lpv: 0, results: 0, rows: 1, cpm: 0, cpc: 0, ctr: 0, delivery: '', merge_version: 2 });
+    },
     'ad delivery control character': d => {
       d.ads.push({ account_id: d.account.id, date: '2026-09-30', ad_unit: 'X', spend: 1, impressions: 1, reach: 1, clicks: 0,
         shop_clicks: 0, lpv: 0, results: 0, rows: 1, cpm: 0, cpc: 0, ctr: 0, delivery: 'a\u0002', merge_version: 1 });

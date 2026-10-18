@@ -5,14 +5,25 @@
    numbers written to a server are not.
 
    Grain:
-     affiliate → (date, tag)      from (order, product) transaction rows
-     ads       → (date, ad_unit)  already daily in Meta's export
+     affiliate → (date, tag)      from (order, product) transaction rows,
+                                  holding one part per order (order_parts)
+     ads       → (date, ad_key)   already daily in Meta's export; ad_key is
+                                  the Ad ID when the row has one, else the name
      clicks    → (date, tag)      from individual click rows
 
-   Dedup key is a hash of the WHOLE row. A composite key like
-   order+product+time+commission looks reasonable but silently drops 1.408
-   legitimate rows in the reference data — one order carries several products
-   at different prices, and those rows collide on every "obvious" key.
+   Two ways a later upload meets saved history (merge_version):
+     2  Revisions replace. A commission report lists every item of each order
+        it contains, so an order in a new file replaces that order's saved
+        part: Tertunda → Selesai updates, it never adds the order again.
+        An ad row with an Ad ID replaces the saved (date, Ad ID) row, so a
+        re-pull of recent days takes Meta's corrected numbers.
+     1  Unseen rows add. Clicks are immutable events and Meta exports without
+        IDs have nothing stable to replace by, so rows are deduplicated by a
+        fingerprint of the WHOLE row and only unseen rows are added. A
+        composite key like order+product+time+commission looks reasonable but
+        silently drops 1.408 legitimate rows in the reference data — one order
+        carries several products at different prices, and those rows collide
+        on every "obvious" key.
 */
 'use strict';
 
@@ -92,6 +103,43 @@ const DailyAgg = (() => {
   };
   const rowDate = (r, kind) => day(r[kind === 'affiliate' ? 'Waktu Pemesanan' : kind === 'ads' ? 'Reporting starts' : 'Waktu Klik']);
 
+  // Meta ad IDs are digit strings. Spreadsheets keep 15 significant digits,
+  // so a longer ID whose tail is all zeros was probably rounded and could
+  // stand for several ads; such a row is keyed by name, like an export
+  // without IDs. That fallback is the safe direction: it never merges ads.
+  function adIdOf(r) {
+    const id = String(r['Ad ID'] == null ? '' : r['Ad ID']).trim();
+    if (!/^\d{6,20}$/.test(id)) return '';
+    return id.length > 15 && /^0+$/.test(id.slice(15)) ? '' : id;
+  }
+  // Rows whose saved history adds rather than replaces carry fingerprints.
+  const fingerprinted = (kind, r) => kind === 'clicks' || (kind === 'ads' && !adIdOf(r));
+  const mergeVersion = (kind, record) =>
+    kind === 'affiliate' ? (record.order_parts ? 2 : 1) : kind === 'ads' && record.ad_id ? 2 : 1;
+
+  /* One part per order: [comm, comm_done, comm_pending, gmv, qty, refund,
+     excluded, rows]. Rows without an order ID get a part of their own, keyed
+     by their fingerprint. Totals are always summed over the parts in key
+     order, so the browser and the database get bit-identical numbers. */
+  const ORDER_KEY = /^[0-9a-f]{16}$/, PART_KEY = /^(?:r:)?[0-9a-f]{16}$/;
+  const AMOUNTS = ['comm', 'comm_done', 'comm_pending', 'gmv', 'qty', 'refund'];
+  function sortedParts(parts) {
+    const out = {};
+    for (const key of Object.keys(parts).sort()) out[key] = parts[key];
+    return out;
+  }
+  function partsTotals(parts) {
+    const totals = { comm: 0, comm_done: 0, comm_pending: 0, gmv: 0, qty: 0, refund: 0, orders: 0, excluded: 0, rows: 0 };
+    for (const key of Object.keys(parts).sort()) {
+      const part = parts[key];
+      AMOUNTS.forEach((name, i) => { totals[name] += part[i]; });
+      totals.excluded += part[6];
+      totals.rows += part[7];
+      if (ORDER_KEY.test(key) && part[7] > part[6]) totals.orders++;
+    }
+    return totals;
+  }
+
   /* Drop rows whose full-content hash was already seen. Returns the survivors
      plus the hashes, so a caller can persist them for cross-file dedup. */
   function dedupe(rows, seenHashes) {
@@ -114,7 +162,7 @@ const DailyAgg = (() => {
     return { kept, hashes, duplicates, total: rows.length };
   }
 
-  /* affiliate transactions → one record per (date, tag)
+  /* affiliate transactions → one record per (date, tag), one part per order
 
      Excluded from realized figures: "Dibatalkan" and "Belum Dibayar". The
      dashboard's engine.js drops both, and a daily store that kept unpaid
@@ -129,32 +177,29 @@ const DailyAgg = (() => {
       const status = String(r['Status Pesanan'] || '').trim();
       const key = date + '|' + tag;
       let b = by.get(key);
-      if (!b) {
-        b = { date, tag, comm: 0, comm_done: 0, comm_pending: 0, gmv: 0, qty: 0,
-              refund: 0, orders: new Set(), excluded: 0, rows: 0 };
-        by.set(key, b);
-      }
-      const comm = num(pick(r, ['Total Komisi per Produk(Rp)', 'Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)']));
-      b.rows++;
-      if (EXCLUDE.has(status)) { b.excluded++; continue; }
-      b.comm += comm;
-      if (status === 'Selesai') b.comm_done += comm;
-      else if (status === 'Tertunda') b.comm_pending += comm;
-      b.gmv += num(r['Nilai Pembelian(Rp)']);
-      b.qty += num(r['Jumlah']);
-      b.refund += num(r['Jumlah Pengembalian Dana(Rp)']);
+      if (!b) { b = { date, tag, parts: new Map() }; by.set(key, b); }
       const orderId = String(r['ID Pemesanan'] || '').trim();
-      if (orderId) b.orders.add(hashRow({ orderId }));
+      const id = orderId ? hashRow({ orderId }) : 'r:' + hashRow(r);
+      let part = b.parts.get(id);
+      if (!part) { part = [0, 0, 0, 0, 0, 0, 0, 0]; b.parts.set(id, part); }
+      part[7]++;
+      if (EXCLUDE.has(status)) { part[6]++; continue; }
+      const comm = num(pick(r, ['Total Komisi per Produk(Rp)', 'Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)']));
+      part[0] += comm;
+      if (status === 'Selesai') part[1] += comm;
+      else if (status === 'Tertunda') part[2] += comm;
+      part[3] += num(r['Nilai Pembelian(Rp)']);
+      part[4] += num(r['Jumlah']);
+      part[5] += num(r['Jumlah Pengembalian Dana(Rp)']);
     }
-    return [...by.values()].map(b => ({
-      date: b.date, tag: b.tag,
-      comm: b.comm, comm_done: b.comm_done, comm_pending: b.comm_pending,
-      gmv: b.gmv, qty: b.qty, refund: b.refund,
-      orders: b.orders.size, order_keys: [...b.orders], excluded: b.excluded, rows: b.rows,
-    })).sort((a, b) => a.date.localeCompare(b.date) || a.tag.localeCompare(b.tag));
+    return [...by.values()].map(b => {
+      const order_parts = sortedParts(Object.fromEntries(b.parts));
+      return { date: b.date, tag: b.tag, ...partsTotals(order_parts), order_parts };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.tag.localeCompare(b.tag));
   }
 
-  /* Meta ads export → one record per (date, ad_unit).
+  /* Meta ads export → one record per (date, ad_key): the Ad ID when the row
+     has a usable one, else the ad name (ad_unit is the name either way).
      Already daily, but the same ad can appear on several rows per day. */
   function aggregateAds(rows) {
     const by = new Map();
@@ -162,13 +207,15 @@ const DailyAgg = (() => {
       const date = day(r['Reporting starts']);
       if (!isDate(date)) continue;
       const unit = String(pick(r, ['Ad name', 'Campaign name', 'Ad set name'])).trim() || '(tanpa nama)';
-      const key = date + '|' + unit;
+      const id = adIdOf(r), adKey = id ? 'id:' + id : 'name:' + unit;
+      const key = date + '|' + adKey;
       let b = by.get(key);
       if (!b) {
-        b = { date, ad_unit: unit, spend: 0, impressions: 0, reach: 0, clicks: 0,
+        b = { date, ad_id: id, ad_key: adKey, ad_unit: unit, spend: 0, impressions: 0, reach: 0, clicks: 0,
               shop_clicks: 0, lpv: 0, results: 0, delivery: '', rows: 0 };
         by.set(key, b);
       }
+      if (id) b.ad_unit = unit;
       b.rows++;
       b.spend += num(pick(r, ['Amount spent (IDR)', 'Amount spent']));
       b.impressions += num(r['Impressions']);
@@ -186,7 +233,7 @@ const DailyAgg = (() => {
       cpm: b.impressions > 0 ? b.spend / b.impressions * 1000 : 0,
       cpc: b.clicks > 0 ? b.spend / b.clicks : 0,
       ctr: b.impressions > 0 ? b.clicks / b.impressions * 100 : 0,
-    })).sort((a, b) => a.date.localeCompare(b.date) || a.ad_unit.localeCompare(b.ad_unit));
+    })).sort((a, b) => a.date.localeCompare(b.date) || a.ad_key.localeCompare(b.ad_key));
   }
 
   /* click report → one record per (date, tag), with breakdowns kept compact */
@@ -225,6 +272,94 @@ const DailyAgg = (() => {
     };
   }
 
+  /* The one ingestion path, shared by the browser store and the shared
+     database: drop invalid dates, deduplicate, aggregate. Rows that replace
+     (orders, ad IDs) are deduplicated within the file only; fingerprinted
+     rows also against the fingerprints already saved (known). */
+  function prepare(kind, rows, known) {
+    const saved = known instanceof Set ? known : new Set(known || []);
+    const valid = rows.filter(r => isDate(rowDate(r, kind)));
+    const seen = new Set(), kept = [], hashes = [];
+    let duplicates = 0;
+    for (const r of valid) {
+      // The validated reader normalizes numeric cells/headers. Old v2 row
+      // guards hash the original strings, so test that exact source shape too.
+      const h = hashRow(r), source = r[Symbol.for('affiliate-dashboard.source-row')];
+      const sourceHash = source ? hashRow(source) : h, fp = fingerprinted(kind, r);
+      const duplicate = seen.has(h) || seen.has(sourceHash) || (fp && (saved.has(h) || saved.has(sourceHash)));
+      seen.add(h); seen.add(sourceHash);
+      if (duplicate) { duplicates++; continue; }
+      kept.push(r);
+      if (fp) hashes.push({ hash: h, date: rowDate(r, kind) });
+    }
+    const dates = valid.map(r => rowDate(r, kind)).sort();
+    return { records: aggregate(kind, kept), hashes, duplicates, invalid: rows.length - valid.length,
+      period: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null };
+  }
+
+  const recordKey = (kind, r) => r.date + '|' + (kind === 'ads' ? r.ad_key || 'name:' + r.ad_unit : r.tag);
+  const AD_FIELDS = ['ad_unit', 'spend', 'impressions', 'reach', 'clicks', 'shop_clicks', 'lpv', 'results', 'rows'];
+  const samePart = (a, b) => Array.isArray(a) && a.length === b.length && a.every((value, i) => value === b[i]);
+
+  /* What the incoming records change. stored maps recordKey → saved record.
+     Order parts and ID rows identical to what is saved are left out and
+     counted as duplicate rows; an affiliate record keeps only its changed
+     parts, which the store (or the database) merges into the saved record. */
+  function changes(kind, records, stored) {
+    const write = [];
+    let duplicates = 0;
+    for (const r of records) {
+      const saved = stored.get(recordKey(kind, r));
+      if (kind === 'affiliate' && r.order_parts && saved && saved.order_parts) {
+        const parts = {};
+        for (const [key, part] of Object.entries(r.order_parts)) {
+          if (samePart(saved.order_parts[key], part)) duplicates += part[7];
+          else parts[key] = part;
+        }
+        if (Object.keys(parts).length) write.push({ ...r, ...partsTotals(parts), order_parts: parts });
+      } else if (kind === 'ads' && r.ad_id && saved && AD_FIELDS.every(f => saved[f] === r[f]) &&
+          (!r.delivery || r.delivery === saved.delivery)) {
+        duplicates += r.rows;
+      } else write.push(r);
+    }
+    return { write, duplicates };
+  }
+
+  /* Day-level rules before anything is written. days maps each incoming date
+     to every saved record of that kind and date. Returns the dates whose
+     fingerprints the write removes (affiliate days converted to order parts).
+       - An affiliate day saved in the fingerprint format (merge_version 1)
+         converts only as a whole: every such record of the day must be in
+         the file, with all of its orders. Otherwise its fingerprints and the
+         new parts would disagree.
+       - One ad must not be saved twice for a day, once from an export without
+         IDs (by name) and once with its Ad ID: that is the same spend. */
+  function checkDays(kind, records, days) {
+    const clear = [];
+    if (kind === 'affiliate') {
+      for (const [date, saved] of days) {
+        const incoming = new Map(records.filter(r => r.date === date).map(r => [r.tag, r]));
+        const v1 = saved.filter(r => r.merge_version === 1);
+        const touched = v1.filter(r => incoming.has(r.tag));
+        if (!touched.length) continue;
+        const missing = v1.filter(r => !incoming.has(r.tag) || !(r.order_keys || []).every(key => key in incoming.get(r.tag).order_parts));
+        if (missing.length) throw new Error(`Riwayat komisi ${date} tersimpan dalam format lama dan file ini tidak memuat semua pesanannya `
+          + `(${missing.slice(0, 3).map(r => r.tag).join(', ')}). Riwayat lama tanggal itu perlu dihapus lalu diunggah ulang dengan laporan lengkapnya.`);
+        clear.push(date);
+      }
+    } else if (kind === 'ads') {
+      const clashes = [];
+      for (const [date, saved] of days) {
+        const mine = records.filter(r => r.date === date), all = saved.concat(mine);
+        const byName = new Set(all.filter(r => !r.ad_id).map(r => r.ad_unit)), byId = new Set(all.filter(r => r.ad_id).map(r => r.ad_unit));
+        for (const r of mine) if ((r.ad_id ? byName : byId).has(r.ad_unit)) clashes.push(`${date} (${r.ad_unit})`);
+      }
+      if (clashes.length) throw new Error('Iklan ini sudah tersimpan dari sumber lain pada tanggal yang sama, sekali tanpa Ad ID (ekspor CSV) dan sekali dengan Ad ID: '
+        + [...new Set(clashes)].slice(0, 5).join(', ') + '. Hapus tanggal itu di Data Tersimpan lalu simpan lagi agar biaya tidak terhitung dua kali.');
+    }
+    return clear;
+  }
+
   function aggregate(kind, rows) {
     if (kind === 'affiliate') return aggregateAffiliate(rows);
     if (kind === 'ads') return aggregateAds(rows);
@@ -232,9 +367,21 @@ const DailyAgg = (() => {
     throw new Error('Jenis laporan tidak dikenal');
   }
 
-  // Incoming records contain only unseen source rows. Add their contributions
-  // instead of overwriting the already stored day with a partial total.
+  // Saved record + incoming record for the same key. Order parts and ad rows
+  // with an ID replace (merge_version 2); otherwise incoming records hold only
+  // unseen source rows, so their contributions add instead of overwriting the
+  // stored day with a partial total.
   function mergeDaily(kind, previous, incoming) {
+    if (kind === 'affiliate' && incoming.order_parts) {
+      if (!previous.order_parts && !(Array.isArray(previous.order_keys) && previous.order_keys.every(key => key in incoming.order_parts))) {
+        throw new Error(`Riwayat lama ${incoming.date} (${incoming.tag}) perlu dihapus lalu diunggah ulang sebelum digabung`);
+      }
+      const order_parts = sortedParts({ ...(previous.order_parts || {}), ...incoming.order_parts });
+      const result = { ...previous, ...incoming, ...partsTotals(order_parts), order_parts };
+      delete result.order_keys;
+      return result;
+    }
+    if (kind === 'ads' && incoming.ad_id) return { ...previous, ...incoming, delivery: incoming.delivery || previous.delivery || '' };
     const result = { ...previous, ...incoming };
     const fields = kind === 'affiliate'
       ? ['comm', 'comm_done', 'comm_pending', 'gmv', 'qty', 'refund', 'excluded', 'rows']
@@ -260,8 +407,9 @@ const DailyAgg = (() => {
   }
 
   return {
-    hashRow, hashRows, dedupe,
-    aggregateAffiliate, aggregateAds, aggregateClicks,
+    hashRow, hashRows, dedupe, prepare, changes, checkDays, recordKey,
+    aggregateAffiliate, aggregateAds, aggregateClicks, adIdOf, fingerprinted, mergeVersion,
+    partsTotals, sortedParts, ORDER_KEY, PART_KEY, AMOUNTS,
     planIngest, num, day, isDate, rowDate, aggregate, mergeDaily,
   };
 })();

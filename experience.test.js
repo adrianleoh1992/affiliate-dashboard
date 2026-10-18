@@ -384,7 +384,8 @@ async function main() {
     assert.equal((await storedRows(page)).reduce((sum, row) => sum + row.comm, 0), 200);
     const restored = await backup(page);
     assert.equal(restored.account.name, 'Account B');
-    assert.ok(restored.rowhashes.length > 0);
+    assert.ok(restored.affiliate.length && restored.affiliate.every(row => row.merge_version === 2 && row.order_parts));
+    assert.ok(restored.uploads.length > 0);
   });
 
   test('canceling or rejecting a corrupt backup preserves stored history', async page => {

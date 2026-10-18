@@ -6,9 +6,11 @@
    is its cache, so every tab keeps reading what it already reads:
 
      - the browser keeps the revision of the shared account its cache mirrors;
-     - a save deduplicates against that cache, aggregates with DailyAgg (the
-       one calculation path), and sends only aggregates plus fingerprints to
-       daily_ingest, which refuses the write if the revision moved;
+     - a save runs the same DailyAgg steps as the browser store against that
+       cache (deduplicate, aggregate, check the days, keep what changes) and
+       sends only those records plus fingerprints to daily_ingest, which
+       merges like DailyAgg.mergeDaily and refuses the write if the revision
+       moved;
      - after every write the cache fetches only the rows changed since its
        revision (daily_changes), checks its record counts against the
        database, and reloads the whole account when they differ.
@@ -171,6 +173,7 @@ const CloudStore = (() => {
   function legacyDates(data) {
     const dates = new Set();
     for (const kind of KINDS) for (const row of data[kind]) {
+      if (row.merge_version === 2) continue;
       if (row.merge_version !== 1 || (kind === 'affiliate' && !Array.isArray(row.order_keys))) dates.add(row.date);
     }
     if (data.rowhashes.some(row => !row.date)) dates.add('tanpa tanggal');
@@ -360,19 +363,19 @@ const CloudStore = (() => {
       let result = null, link = null;
       for (let attempt = 0; attempt < 2 && !result; attempt++) {
         link = await this.ready(name, { create: true });
-        const known = await this.local.knownRowHashes(accountId, kind);
-        const valid = o.rawRows.filter(row => A.isDate(A.rowDate(row, kind)));
-        const dates = valid.map(row => A.rowDate(row, kind)).sort();
-        const dedup = A.dedupe(valid, known);
-        const aggregates = A.aggregate(kind, dedup.kept);
+        // Exactly what DailyStore.saveDaily decides, against the cache at link.revision.
+        const prep = A.prepare(kind, o.rawRows, await this.local.knownRowHashes(accountId, kind));
+        const days = new Map();
+        for (const date of new Set(prep.records.map(r => r.date))) days.set(date, await this.local.range(accountId, kind, date, date));
+        A.checkDays(kind, prep.records, days);
+        const diff = A.changes(kind, prep.records, new Map([...days.values()].flat().map(r => [A.recordKey(kind, r), r])));
         try {
           result = await this.client.rpc('daily_ingest', {
             p_account_id: link.remoteId, p_kind: kind, p_expected_revision: link.revision,
-            p_records: aggregates,
-            p_hashes: dedup.kept.map((row, index) => ({ hash: dedup.hashes[index], date: A.rowDate(row, kind) })),
+            p_records: diff.write, p_hashes: prep.hashes,
             p_upload: { file_hash: o.fileHash || A.hashRows(o.rawRows), file_name: o.fileName || '',
-              rows: o.sourceRows || o.rawRows.length, duplicates: dedup.duplicates,
-              period_start: dates[0] || null, period_end: dates[dates.length - 1] || null },
+              rows: o.sourceRows || o.rawRows.length, duplicates: prep.duplicates + diff.duplicates,
+              period_start: prep.period ? prep.period.start : null, period_end: prep.period ? prep.period.end : null },
           });
         } catch (error) {
           // Someone else saved first: refresh the cache and dedupe again once.

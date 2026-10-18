@@ -2,7 +2,8 @@
    commits in one IndexedDB transaction; raw CSV rows are never persisted. */
 'use strict';
 const DailyStore = (() => {
-  const DB_NAME = 'affiliate_daily', VERSION = 2;
+  // Version 3: ads are keyed by ad_key (Ad ID, or the name when a row has none).
+  const DB_NAME = 'affiliate_daily', VERSION = 3;
   const KINDS = ['affiliate', 'ads', 'clicks'];
   const BACKUP_FORMAT = 'affiliate-daily-backup', BACKUP_VERSION = 1;
   const MAX_BACKUP_RECORDS = 500000;
@@ -50,7 +51,7 @@ const DailyStore = (() => {
       return value;
     };
     object(input, ['format', 'version', 'database_version', 'exported_at', 'account', ...KINDS, 'uploads', 'rowhashes', 'parameters'], 'berkas');
-    if (input.format !== BACKUP_FORMAT || input.version !== BACKUP_VERSION || input.database_version !== VERSION)
+    if (input.format !== BACKUP_FORMAT || input.version !== BACKUP_VERSION || ![2, VERSION].includes(input.database_version))
       bad('format/versi tidak didukung. Gunakan cadangan lengkap terbaru, bukan ekspor riwayat lama atau snapshot');
     stamp(input.exported_at, 'waktu ekspor');
     const source = object(input.account, ['id', 'kind', 'name', 'created'], 'akun');
@@ -81,11 +82,22 @@ const DailyStore = (() => {
     };
     const timestamps = (row, clean) => {
       for (const field of ['created_at', 'updated_at']) if (row[field] !== undefined) clean[field] = stamp(row[field], field);
-      if (row.merge_version !== undefined) {
-        if (row.merge_version !== 1) bad('versi agregasi tidak didukung');
-        clean.merge_version = 1;
-      }
+      if (row.merge_version !== undefined) clean.merge_version = row.merge_version;
       return clean;
+    };
+    // Order parts of a merge_version 2 commission record (DailyAgg.partsTotals).
+    const orderParts = value => {
+      object(value, null, 'rincian pesanan');
+      const entries = Object.entries(value);
+      if (!entries.length || entries.length > MAX_BACKUP_RECORDS) bad('rincian pesanan tidak valid');
+      const out = {};
+      for (const [key, part] of entries) {
+        if (!agg().PART_KEY.test(key) || !Array.isArray(part) || part.length !== 8) bad('rincian pesanan tidak valid');
+        part.forEach((value, i) => number(value, 'rincian pesanan', i >= 6));
+        if (part[7] < 1 || part[6] > part[7]) bad('rincian pesanan tidak valid');
+        out[key] = [...part];
+      }
+      return agg().sortedParts(out);
     };
     const amounts = {
       affiliate: ['comm', 'comm_done', 'comm_pending', 'gmv', 'qty', 'refund', 'orders', 'excluded', 'rows'],
@@ -94,11 +106,19 @@ const DailyStore = (() => {
     };
     for (const kind of KINDS) {
       const field = kind === 'ads' ? 'ad_unit' : 'tag';
-      const extras = kind === 'affiliate' ? ['order_keys'] : kind === 'ads' ? ['delivery'] : ['by_region', 'by_source'];
+      const extras = kind === 'affiliate' ? ['order_keys', 'order_parts'] : kind === 'ads' ? ['delivery', 'ad_id', 'ad_key'] : ['by_region', 'by_source'];
       list(kind, ['date', field, ...amounts[kind], ...extras, 'merge_version', 'created_at', 'updated_at'], row => {
         const clean = { date: date(row.date, 'tanggal ' + kind), [field]: string(row[field], field) };
         for (const name of amounts[kind]) clean[name] = number(row[name], kind + '.' + name, ['orders', 'excluded', 'rows'].includes(name) || kind === 'clicks');
-        if (kind === 'affiliate') {
+        const version = row.merge_version;
+        if (version !== undefined && version !== 1 && (version !== 2 || kind === 'clicks')) bad('versi agregasi tidak didukung');
+        if (kind === 'affiliate' && version === 2) {
+          if (row.order_keys !== undefined) bad('identitas order tidak konsisten');
+          clean.order_parts = orderParts(row.order_parts);
+          const totals = agg().partsTotals(clean.order_parts);
+          if (amounts.affiliate.some(name => totals[name] !== clean[name])) bad('jumlah komisi tidak sesuai rincian pesanannya');
+        } else if (kind === 'affiliate') {
+          if (row.order_parts !== undefined) bad('rincian pesanan hanya untuk agregasi versi 2');
           if (row.order_keys !== undefined) {
             if (!Array.isArray(row.order_keys) || row.order_keys.length > MAX_BACKUP_RECORDS ||
                 row.order_keys.some(key => typeof key !== 'string' || !/^[a-f0-9]{16}$/.test(key)) ||
@@ -106,9 +126,16 @@ const DailyStore = (() => {
             clean.order_keys = [...row.order_keys];
           } else if (row.merge_version === 1) bad('identitas order untuk agregasi gabungan hilang');
           if (row.excluded > row.rows || row.orders > row.rows - row.excluded) bad('jumlah order/baris tidak konsisten');
-        } else if (kind === 'ads') {
+        }
+        if (kind === 'ads') {
           clean.delivery = string(row.delivery, 'status iklan', 256, true);
-        } else {
+          const id = row.ad_id === undefined ? '' : row.ad_id;
+          if (typeof id !== 'string' || (version === 2 ? !/^\d{6,20}$/.test(id) : id !== '')) bad('Ad ID tidak valid');
+          const key = id ? 'id:' + id : 'name:' + clean.ad_unit;
+          if (row.ad_key !== undefined && row.ad_key !== key) bad('kunci iklan tidak valid');
+          clean.ad_id = id;
+          clean.ad_key = key;
+        } else if (kind === 'clicks') {
           for (const name of extras) {
             const values = object(row[name], null, name);
             // Object.fromEntries preserves literal CSV labels such as
@@ -119,7 +146,7 @@ const DailyStore = (() => {
           }
         }
         return timestamps(row, clean);
-      }, row => JSON.stringify([row.date, row[field]]));
+      }, row => JSON.stringify([row.date, kind === 'ads' ? row.ad_key : row[field]]));
     }
     list('rowhashes', ['kind', 'hash', 'date'], row => {
       if (!KINDS.includes(row.kind)) bad('jenis fingerprint');
@@ -137,15 +164,17 @@ const DailyStore = (() => {
       if (row.uploaded_at !== undefined) clean.uploaded_at = stamp(row.uploaded_at, 'waktu unggahan');
       return clean;
     }, row => JSON.stringify([row.kind, row.file_hash]));
-    // Dated fingerprints must belong to an existing aggregate date. Keeping
-    // orphan guards would silently suppress a later valid CSV upload.
+    // Dated fingerprints must belong to an aggregate date that uses them
+    // (merge_version 2 records have none). Keeping orphan guards would
+    // silently suppress a later valid CSV upload.
     if (!options.partial) for (const kind of KINDS) {
-      const dates = new Set(result[kind].map(row => row.date));
+      const fingerprinted = result[kind].filter(row => row.merge_version !== 2);
+      const dates = new Set(fingerprinted.map(row => row.date));
       if (result.rowhashes.some(row => row.kind === kind && row.date && !dates.has(row.date))) bad('fingerprint tanpa data harian');
       const guarded = new Set(result.rowhashes.filter(row => row.kind === kind && row.date).map(row => row.date));
       if (result[kind].some(row => row.merge_version === 1 && !guarded.has(row.date))) bad('fingerprint agregasi gabungan hilang');
       const rowsByDay = new Map(), hashesByDay = new Map();
-      for (const row of result[kind]) {
+      for (const row of fingerprinted) {
         const day = rowsByDay.get(row.date) || { count: 0, modern: true };
         day.count += kind === 'clicks' ? row.clicks : row.rows;
         day.modern = day.modern && row.merge_version === 1;
@@ -189,7 +218,7 @@ const DailyStore = (() => {
         db.onversionchange = () => db.close();
         if (blocked) db.close(); else resolve(db);
       };
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = event => {
         const db = req.result, tx = req.transaction;
         if (!db.objectStoreNames.contains('accounts')) {
           db.createObjectStore('accounts', { keyPath: 'id', autoIncrement: true })
@@ -198,10 +227,23 @@ const DailyStore = (() => {
         for (const kind of KINDS) {
           if (!db.objectStoreNames.contains(kind)) {
             const s = db.createObjectStore(kind, { keyPath: 'id', autoIncrement: true });
-            const field = kind === 'ads' ? 'unit' : 'tag';
-            s.createIndex('acct_date_' + field, ['account_id', 'date', kind === 'ads' ? 'ad_unit' : 'tag'], { unique: true });
+            if (kind === 'ads') s.createIndex('acct_date_key', ['account_id', 'date', 'ad_key'], { unique: true });
+            else s.createIndex('acct_date_tag', ['account_id', 'date', 'tag'], { unique: true });
             s.createIndex('acct_date', ['account_id', 'date']);
           }
+        }
+        // v3: one ad name may now hold several Ad IDs on a day, so the unique
+        // key moves from the name to ad_key. Saved rows are name-keyed.
+        const ads = tx.objectStore('ads');
+        if (!ads.indexNames.contains('acct_date_key')) {
+          if (ads.indexNames.contains('acct_date_unit')) ads.deleteIndex('acct_date_unit');
+          ads.createIndex('acct_date_key', ['account_id', 'date', 'ad_key'], { unique: true });
+          ads.openCursor().onsuccess = e => {
+            const cursor = e.target.result;
+            if (!cursor) return;
+            if (!cursor.value.ad_key) cursor.update({ ...cursor.value, ad_id: '', ad_key: 'name:' + cursor.value.ad_unit });
+            cursor.continue();
+          };
         }
         let uploads;
         if (!db.objectStoreNames.contains('uploads')) {
@@ -304,52 +346,59 @@ const DailyStore = (() => {
         (await rq(tx.objectStore('rowhashes').index('acct_kind').getAll([accountId, kind]))).map(r => r.hash)));
     }
     async existingKeys(accountId, kind) {
-      const field = kindOf(kind) === 'ads' ? 'ad_unit' : 'tag';
-      return new Set((await this.range(accountId, kind)).map(r => `${r.date}|${r[field]}`));
+      kindOf(kind);
+      return new Set((await this.range(accountId, kind)).map(r => agg().recordKey(kind, r)));
     }
 
-    // New ingestion passes rawRows for transactional row dedup. They are used
-    // only in memory; the store retains daily figures, hashed order IDs and
-    // dated row fingerprints. The older aggregate API remains a replacement.
+    // New ingestion passes rawRows; DailyAgg.prepare/checkDays/changes decide
+    // what a file changes, the same way for the shared database. Raw rows are
+    // used only in memory; the store retains daily figures, order parts under
+    // hashed order IDs and dated row fingerprints. The older aggregate API
+    // (records + rowHashes) remains a replacement.
     async saveDaily(accountId, kind, records, opts) {
       kindOf(kind);
       const o = opts || {}, A = agg(), field = kind === 'ads' ? 'ad_unit' : 'tag';
-      const indexName = kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag';
+      const incremental = Array.isArray(o.rawRows);
       return this.transaction(['accounts', kind, 'rowhashes', 'uploads'], 'readwrite', async tx => {
         if (!await rq(tx.objectStore('accounts').get(accountId))) throw new Error('Akun tidak ditemukan');
         const uploads = tx.objectStore('uploads');
         if (o.fileHash && await rq(uploads.index('acct_kind_hash').get([accountId, kind, o.fileHash]))) {
           return { added: 0, updated: 0, duplicates: o.sourceRows || 0, skipped: true };
         }
-        const hs = tx.objectStore('rowhashes');
+        const hs = tx.objectStore('rowhashes'), store = tx.objectStore(kind);
         const knownRows = await rq(hs.index('acct_kind').getAll([accountId, kind]));
-        const known = new Map(knownRows.map(r => [r.hash, r]));
-        let hashes = [], duplicates = o.duplicates || 0, period = o.period;
-        const incremental = Array.isArray(o.rawRows);
+        let hashes = [], duplicates = o.duplicates || 0, period = o.period, clear = [];
         if (incremental) {
-          const valid = o.rawRows.filter(r => A.isDate(A.rowDate(r, kind)));
-          const dates = valid.map(r => A.rowDate(r, kind)).sort();
-          period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
-          const dedup = A.dedupe(valid, new Set(known.keys()));
-          duplicates = dedup.duplicates;
-          records = A.aggregate(kind, dedup.kept);
-          hashes = dedup.kept.map((r, i) => ({ hash: dedup.hashes[i], date: A.rowDate(r, kind) }));
+          const prep = A.prepare(kind, o.rawRows, knownRows.map(r => r.hash));
+          const days = new Map();
+          for (const date of new Set(prep.records.map(r => r.date))) {
+            const saved = await rq(store.index('acct_date').getAll([accountId, date]));
+            const legacy = saved.find(r => r.merge_version !== 1 && r.merge_version !== 2 &&
+              prep.records.some(x => A.recordKey(kind, x) === A.recordKey(kind, r)));
+            if (legacy) throw new Error(`Riwayat lama ${date} perlu dihapus lalu diunggah ulang sebelum digabung`);
+            days.set(date, saved);
+          }
+          clear = A.checkDays(kind, prep.records, days);
+          const diff = A.changes(kind, prep.records, new Map([...days.values()].flat().map(r => [A.recordKey(kind, r), r])));
+          records = diff.write;
+          hashes = prep.hashes;
+          duplicates = prep.duplicates + diff.duplicates;
+          period = prep.period;
         } else {
+          const known = new Set(knownRows.map(r => r.hash));
           hashes = [...new Set(o.rowHashes || [])].filter(h => !known.has(h)).map(hash => ({ hash,
             date: records.length && records.every(r => r.date === records[0].date) ? records[0].date : null }));
         }
-        const store = tx.objectStore(kind), idx = store.index(indexName);
+        const idx = store.index(kind === 'ads' ? 'acct_date_key' : 'acct_date_tag');
         let added = 0, updated = 0;
         for (const r of records || []) {
           if (!A.isDate(r.date) || typeof r[field] !== 'string' || !r[field]) throw new Error('Record harian tidak valid');
-          const found = await rq(idx.get([accountId, r.date, r[field]]));
-          if (incremental && found && found.merge_version !== 1) {
-            throw new Error(`Riwayat lama ${r.date} perlu dihapus lalu diunggah ulang sebelum digabung`);
-          }
-          const rec = incremental && found ? A.mergeDaily(kind, found, r) : { ...r };
+          const record = kind === 'ads' && !r.ad_key ? { ...r, ad_id: r.ad_id || '', ad_key: 'name:' + r.ad_unit } : r;
+          const found = await rq(idx.get([accountId, record.date, kind === 'ads' ? record.ad_key : record.tag]));
+          const rec = incremental && found ? A.mergeDaily(kind, found, record) : { ...record };
           delete rec.id;
           rec.account_id = accountId;
-          if (incremental) rec.merge_version = 1;
+          if (incremental) rec.merge_version = A.mergeVersion(kind, rec);
           if (found) {
             await rq(store.put({ ...rec, id: found.id, created_at: found.created_at, updated_at: new Date().toISOString() }));
             updated++;
@@ -357,6 +406,10 @@ const DailyStore = (() => {
             await rq(store.add({ ...rec, created_at: new Date().toISOString() }));
             added++;
           }
+        }
+        // Converted affiliate days keep no fingerprints: order parts replace them.
+        for (const date of clear) {
+          (await rq(hs.index('acct_kind_date').getAllKeys([accountId, kind, date]))).forEach(key => hs.delete(key));
         }
         // No caught ConstraintError: duplicate guards were checked in this
         // same serialized transaction. Other failures must roll everything back.
@@ -489,8 +542,8 @@ const DailyStore = (() => {
             (u.period_start <= date && u.period_end >= date))).forEach(u => ups.delete(u.id));
         }
         for (const kind of KINDS) {
-          const field = kind === 'ads' ? 'ad_unit' : 'tag';
-          const s = tx.objectStore(kind), idx = s.index(kind === 'ads' ? 'acct_date_unit' : 'acct_date_tag');
+          const field = kind === 'ads' ? 'ad_key' : 'tag';
+          const s = tx.objectStore(kind), idx = s.index(kind === 'ads' ? 'acct_date_key' : 'acct_date_tag');
           for (const row of data[kind]) {
             const found = await rq(idx.get([accountId, row.date, row[field]]));
             await rq(s.put({ ...row, account_id: accountId, ...(found ? { id: found.id } : {}) }));

@@ -1,10 +1,18 @@
 -- Shared daily history for every dashboard account.
 --
--- Mirrors the browser store (daily-store.js, database version 2): daily
--- aggregates per (account, date, tag | ad unit), dated row fingerprints for
+-- Mirrors the browser store (daily-store.js, database version 3): daily
+-- aggregates per (account, date, tag | ad key), dated row fingerprints for
 -- dedup, and the upload log. Raw CSV rows, buyer data, product names and
 -- clear order IDs never reach this database; order identities are the same
 -- 16-hex hashes the browser already keeps.
+--
+-- How a later upload meets saved history (DailyAgg, "merge_version"):
+--   2  revisions replace: a commission record holds one part per order, and
+--      an order in a new file replaces its saved part (Tertunda → Selesai
+--      updates instead of adding); an ad row with a Meta Ad ID replaces the
+--      saved (date, Ad ID) row.
+--   1  unseen rows add: clicks and Meta exports without IDs are deduplicated
+--      by whole-row fingerprints and only unseen rows are added.
 --
 -- Access model: the anon key is public. Tables live in the private schema
 -- "dashboard", which the Data API does not expose, so neither anon nor
@@ -16,8 +24,9 @@
 --
 -- Everything stored here must pass DailyStore.validateBackup when a browser
 -- pulls it, so the column checks below mirror that validator: finite numbers
--- within JavaScript's safe range, labels without control characters, and
--- one dated fingerprint per aggregated source row.
+-- within JavaScript's safe range, labels without control characters, order
+-- parts whose sums are the record's totals, and one dated fingerprint per
+-- aggregated source row of a merge_version 1 record.
 --
 -- Every written row carries the account revision that wrote it ("rev"), and
 -- deleted days leave a marker, so browsers fetch only what changed since the
@@ -63,6 +72,40 @@ language sql immutable set search_path = pg_catalog, pg_temp as $$
     else coalesce((select sum((value #>> '{}')::numeric)::bigint from jsonb_each(counts)), 0) end
 $$;
 
+-- Order parts of a merge_version 2 commission record: {key: [comm, comm_done,
+-- comm_pending, gmv, qty, refund, excluded, rows]}, key = 16-hex order hash
+-- or "r:" + row fingerprint for a row without an order ID.
+create or replace function dashboard._parts_ok(parts jsonb) returns boolean
+language sql immutable set search_path = pg_catalog, pg_temp as $$
+  select case when parts is null or jsonb_typeof(parts) <> 'object' or parts = '{}'::jsonb then false
+    when exists (select 1 from jsonb_each(parts) e where e.key !~ '^(r:)?[0-9a-f]{16}$'
+      or jsonb_typeof(e.value) <> 'array' or jsonb_array_length(e.value) <> 8) then false
+    else not exists (select 1 from jsonb_each(parts) e, jsonb_array_elements(e.value) with ordinality x(v, i)
+      where jsonb_typeof(x.v) <> 'number'
+        or (x.i <= 6 and not dashboard._num_ok((x.v #>> '{}')::float8))
+        or (x.i > 6 and ((x.v #>> '{}')::numeric < 0 or (x.v #>> '{}')::numeric <> trunc((x.v #>> '{}')::numeric)
+          or (x.v #>> '{}')::numeric > 9007199254740991)))
+      and not exists (select 1 from jsonb_each(parts) e
+        where (e.value ->> 7)::numeric < 1 or (e.value ->> 6)::numeric > (e.value ->> 7)::numeric) end
+$$;
+
+-- Totals of order parts exactly as DailyAgg.partsTotals sums them: one
+-- addition at a time in key order, so both sides get the same doubles.
+create or replace function dashboard._parts_totals(parts jsonb) returns double precision[]
+language sql immutable set search_path = pg_catalog, pg_temp as $$
+  select array[
+    coalesce(sum((value ->> 0)::float8 order by key collate "C"), 0)::float8,
+    coalesce(sum((value ->> 1)::float8 order by key collate "C"), 0)::float8,
+    coalesce(sum((value ->> 2)::float8 order by key collate "C"), 0)::float8,
+    coalesce(sum((value ->> 3)::float8 order by key collate "C"), 0)::float8,
+    coalesce(sum((value ->> 4)::float8 order by key collate "C"), 0)::float8,
+    coalesce(sum((value ->> 5)::float8 order by key collate "C"), 0)::float8,
+    (count(*) filter (where key ~ '^[0-9a-f]{16}$' and (value ->> 7)::numeric > (value ->> 6)::numeric))::float8,
+    coalesce(sum((value ->> 6)::numeric), 0)::float8,
+    coalesce(sum((value ->> 7)::numeric), 0)::float8]
+  from jsonb_each(parts)
+$$;
+
 create domain dashboard.day as date check (value between date '0001-01-01' and date '9999-12-31');
 create domain dashboard.amount as double precision check (dashboard._num_ok(value));
 
@@ -95,22 +138,34 @@ create table dashboard.daily_affiliate (
   qty dashboard.amount not null,
   refund dashboard.amount not null,
   orders integer not null check (orders >= 0),
-  order_keys text[] not null default '{}',
+  -- merge_version 1: order identities only (the day is fingerprinted).
+  order_keys text[],
+  -- merge_version 2: one part per order; totals are their sums.
+  order_parts jsonb,
+  merge_version smallint not null default 1 check (merge_version in (1, 2)),
   excluded integer not null check (excluded >= 0),
   rows integer not null check (rows >= 0),
   rev bigint not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz,
   primary key (account_id, date, tag),
-  check (orders = cardinality(order_keys) and dashboard._valid_order_keys(order_keys)),
+  check (coalesce(case when merge_version = 1
+    then order_parts is null and order_keys is not null and orders = cardinality(order_keys) and dashboard._valid_order_keys(order_keys)
+    else order_keys is null and dashboard._parts_ok(order_parts)
+      and array[comm, comm_done, comm_pending, gmv, qty, refund, orders, excluded, rows]::float8[] = dashboard._parts_totals(order_parts) end, false)),
   check (excluded <= rows and orders <= rows - excluded)
 );
 
 create table dashboard.daily_ads (
   account_id bigint not null references dashboard.accounts (id) on delete cascade,
   date dashboard.day not null,
-  -- Meta ad name as the browser store keys it today (not ad_id).
+  -- Meta ad name (a label; several ads can share one).
   ad_unit text not null check (dashboard._label_ok(ad_unit, 2048)),
+  -- Meta Ad ID of a merge_version 2 row; '' for exports without IDs.
+  ad_id text not null default '',
+  -- "id:<ad_id>" or "name:<ad_unit>": the row's identity within a day.
+  ad_key text not null,
+  merge_version smallint not null default 1 check (merge_version in (1, 2)),
   spend dashboard.amount not null,
   impressions dashboard.amount not null,
   reach dashboard.amount not null,
@@ -126,7 +181,9 @@ create table dashboard.daily_ads (
   rev bigint not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz,
-  primary key (account_id, date, ad_unit)
+  primary key (account_id, date, ad_key),
+  check (case when merge_version = 2 then ad_id ~ '^[0-9]{6,20}$' and ad_key = 'id:' || ad_id
+    else ad_id = '' and ad_key = 'name:' || ad_unit end)
 );
 
 create table dashboard.daily_clicks (
@@ -253,16 +310,21 @@ language sql security definer set search_path = dashboard, pg_temp as $$
 $$;
 
 -- The day-level invariants validateBackup checks: every fingerprint's date has
--- aggregates of its kind, and each day has one fingerprint per source row.
-create or replace function dashboard._assert_consistent(p_account_id bigint) returns void
+-- merge_version 1 aggregates of its kind, and each such day has one
+-- fingerprint per source row. p_dates limits the check to those days.
+create or replace function dashboard._assert_consistent(p_account_id bigint, p_dates date[] default null) returns void
 language plpgsql stable security definer set search_path = dashboard, pg_temp as $$
 declare bad record;
 begin
   with sums as (
-    select 'affiliate' kind, date, sum(rows)::bigint n from dashboard.daily_affiliate where account_id = p_account_id group by date
-    union all select 'ads', date, sum(rows)::bigint from dashboard.daily_ads where account_id = p_account_id group by date
-    union all select 'clicks', date, sum(clicks)::bigint from dashboard.daily_clicks where account_id = p_account_id group by date),
-  hashes as (select kind, date, count(*) n from dashboard.row_hashes where account_id = p_account_id group by kind, date)
+    select 'affiliate' kind, date, sum(rows)::bigint n from dashboard.daily_affiliate
+      where account_id = p_account_id and merge_version = 1 and (p_dates is null or date = any(p_dates)) group by date
+    union all select 'ads', date, sum(rows)::bigint from dashboard.daily_ads
+      where account_id = p_account_id and merge_version = 1 and (p_dates is null or date = any(p_dates)) group by date
+    union all select 'clicks', date, sum(clicks)::bigint from dashboard.daily_clicks
+      where account_id = p_account_id and (p_dates is null or date = any(p_dates)) group by date),
+  hashes as (select kind, date, count(*) n from dashboard.row_hashes
+    where account_id = p_account_id and (p_dates is null or date = any(p_dates)) group by kind, date)
   select coalesce(s.kind, h.kind) kind, coalesce(s.date, h.date) date into bad
   from sums s full join hashes h on s.kind = h.kind and s.date = h.date
   where s.n is distinct from h.n limit 1;
@@ -292,21 +354,22 @@ end $$;
 create or replace function dashboard._snapshot(p_account_id bigint, p_since bigint) returns jsonb
 language sql stable security definer set search_path = dashboard, pg_temp as $$
   select jsonb_build_object(
-    'format', 'affiliate-daily-backup', 'version', 1, 'database_version', 2,
+    'format', 'affiliate-daily-backup', 'version', 1, 'database_version', 3,
     'exported_at', dashboard._iso(now()), 'revision', a.revision, 'reset_revision', a.reset_revision,
     'account', jsonb_build_object('id', a.id, 'kind', a.kind, 'name', a.name, 'created', dashboard._iso(a.created_at)),
     'affiliate', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'account_id', x.account_id, 'date', x.date, 'tag', x.tag, 'comm', x.comm, 'comm_done', x.comm_done,
         'comm_pending', x.comm_pending, 'gmv', x.gmv, 'qty', x.qty, 'refund', x.refund, 'orders', x.orders,
-        'order_keys', to_jsonb(x.order_keys), 'excluded', x.excluded, 'rows', x.rows, 'merge_version', 1,
+        'order_keys', to_jsonb(x.order_keys), 'order_parts', x.order_parts, 'excluded', x.excluded, 'rows', x.rows,
+        'merge_version', x.merge_version,
         'created_at', dashboard._iso(x.created_at), 'updated_at', dashboard._iso(x.updated_at))) order by x.date, x.tag)
       from dashboard.daily_affiliate x where x.account_id = a.id and (p_since is null or x.rev > p_since)), '[]'),
     'ads', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
-        'account_id', x.account_id, 'date', x.date, 'ad_unit', x.ad_unit, 'spend', x.spend,
+        'account_id', x.account_id, 'date', x.date, 'ad_unit', x.ad_unit, 'ad_id', x.ad_id, 'ad_key', x.ad_key, 'spend', x.spend,
         'impressions', x.impressions, 'reach', x.reach, 'clicks', x.clicks, 'shop_clicks', x.shop_clicks,
         'lpv', x.lpv, 'results', x.results, 'rows', x.rows, 'cpm', x.cpm, 'cpc', x.cpc, 'ctr', x.ctr,
-        'delivery', x.delivery, 'merge_version', 1,
-        'created_at', dashboard._iso(x.created_at), 'updated_at', dashboard._iso(x.updated_at))) order by x.date, x.ad_unit)
+        'delivery', x.delivery, 'merge_version', x.merge_version,
+        'created_at', dashboard._iso(x.created_at), 'updated_at', dashboard._iso(x.updated_at))) order by x.date, x.ad_key)
       from dashboard.daily_ads x where x.account_id = a.id and (p_since is null or x.rev > p_since)), '[]'),
     'clicks', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'account_id', x.account_id, 'date', x.date, 'tag', x.tag, 'clicks', x.clicks,
@@ -373,14 +436,17 @@ begin
   return jsonb_build_object('id', a.id, 'name', a.name, 'revision', a.revision);
 end $$;
 
--- Add the contribution of rows the browser deduplicated against the cache at
--- p_expected_revision. p_records come from DailyAgg.aggregate, p_hashes are
--- [{hash, date}] for exactly those rows, p_upload is the file log entry.
+-- Apply one saved file. The browser ran DailyAgg.prepare, checkDays and
+-- changes against its cache at p_expected_revision: p_records are the
+-- records that change something (affiliate records carry only changed order
+-- parts), p_hashes are [{hash, date}] for exactly the rows of merge_version 1
+-- records, p_upload is the file log entry. Merging follows DailyAgg.mergeDaily.
 create or replace function public.daily_ingest(p_account_id bigint, p_kind text, p_expected_revision bigint,
   p_records jsonb, p_hashes jsonb, p_upload jsonb) returns jsonb
 language plpgsql security definer set search_path = dashboard, pg_temp as $$
 declare
-  added integer := 0; updated integer := 0; mismatch date; new_revision bigint;
+  added integer := 0; updated integer := 0; mismatch date; new_revision bigint; bad record;
+  touched date[]; converted date[];
 begin
   perform dashboard._require_member();
   if p_kind not in ('affiliate', 'ads', 'clicks') then raise exception 'Jenis laporan tidak dikenal' using errcode = 'PT400'; end if;
@@ -395,63 +461,107 @@ begin
     return jsonb_build_object('added', 0, 'updated', 0, 'duplicates', coalesce((p_upload->>'rows')::int, 0),
       'skipped', true, 'revision', p_expected_revision);
   end if;
+  touched := array(select distinct (r->>'date')::date from jsonb_array_elements(p_records) r);
 
-  -- Every aggregated source row carries exactly one fingerprint of its date,
-  -- the invariant DailyStore.validateBackup checks on every pull. Merging two
-  -- consistent days keeps the day consistent.
+  -- Every source row of a merge_version 1 record carries exactly one
+  -- fingerprint of its date, the invariant DailyStore.validateBackup checks on
+  -- every pull. Merging two consistent days keeps the day consistent.
   with hashed as (select (h->>'date')::date d, count(*) n from jsonb_array_elements(p_hashes) h group by 1),
   counted as (
     select (r->>'date')::date d,
       sum(case when p_kind = 'clicks' then (r->>'clicks')::bigint else (r->>'rows')::bigint end) n
-    from jsonb_array_elements(p_records) r group by 1)
+    from jsonb_array_elements(p_records) r
+    where p_kind = 'clicks' or (p_kind = 'ads' and coalesce(r->>'ad_id', '') = '') group by 1)
   select coalesce(c.d, h.d) into mismatch from counted c full join hashed h on c.d = h.d
   where c.n is distinct from h.n limit 1;
   if found then raise exception 'Fingerprint tidak sesuai jumlah baris tanggal %', mismatch using errcode = 'PT400'; end if;
 
   if p_kind = 'affiliate' then
-    with up as (
+    -- A fingerprint-format record converts to order parts only with all of
+    -- its orders, and only together with every such record of its day.
+    select t.date, t.tag into bad
+    from jsonb_to_recordset(p_records) i(date date, tag text, order_parts jsonb)
+    join dashboard.daily_affiliate t on t.account_id = p_account_id and t.date = i.date and t.tag = i.tag
+    where t.merge_version = 1 and (jsonb_typeof(i.order_parts) is distinct from 'object'
+      or not (t.order_keys <@ array(select jsonb_object_keys(i.order_parts))))
+    limit 1;
+    if found then
+      raise exception 'Riwayat komisi % tersimpan dalam format lama dan file ini tidak memuat semua pesanannya (%). Riwayat lama tanggal itu perlu dihapus lalu diunggah ulang dengan laporan lengkapnya.',
+        bad.date, bad.tag using errcode = 'PT400';
+    end if;
+    converted := array(select distinct t.date from jsonb_to_recordset(p_records) i(date date, tag text)
+      join dashboard.daily_affiliate t on t.account_id = p_account_id and t.date = i.date and t.tag = i.tag
+      where t.merge_version = 1);
+
+    with merged as (
+      select i.date, i.tag, case when t.merge_version = 2 then t.order_parts || i.order_parts else i.order_parts end parts
+      from jsonb_to_recordset(p_records) i(date date, tag text, order_parts jsonb)
+      left join dashboard.daily_affiliate t on t.account_id = p_account_id and t.date = i.date and t.tag = i.tag),
+    up as (
       insert into dashboard.daily_affiliate as t (account_id, date, tag, comm, comm_done, comm_pending, gmv, qty,
-        refund, orders, order_keys, excluded, rows, rev)
-      select p_account_id, r.date, r.tag, r.comm, r.comm_done, r.comm_pending, r.gmv, r.qty, r.refund,
-        cardinality(dashboard._text_union(r.order_keys, '{}')), dashboard._text_union(r.order_keys, '{}'), r.excluded, r.rows,
-        new_revision
-      from jsonb_to_recordset(p_records) r(date date, tag text, comm float8, comm_done float8, comm_pending float8,
-        gmv float8, qty float8, refund float8, order_keys text[], excluded int, rows int)
+        refund, orders, order_keys, order_parts, merge_version, excluded, rows, rev)
+      select p_account_id, m.date, m.tag, x.s[1], x.s[2], x.s[3], x.s[4], x.s[5], x.s[6], x.s[7]::int, null, m.parts, 2,
+        x.s[8]::int, x.s[9]::int, new_revision
+      from merged m cross join lateral (select dashboard._parts_totals(m.parts) s) x
       on conflict (account_id, date, tag) do update set
-        comm = t.comm + excluded.comm, comm_done = t.comm_done + excluded.comm_done,
-        comm_pending = t.comm_pending + excluded.comm_pending, gmv = t.gmv + excluded.gmv,
-        qty = t.qty + excluded.qty, refund = t.refund + excluded.refund,
-        order_keys = dashboard._text_union(t.order_keys, excluded.order_keys),
-        orders = cardinality(dashboard._text_union(t.order_keys, excluded.order_keys)),
-        excluded = t.excluded + excluded.excluded, rows = t.rows + excluded.rows,
-        rev = excluded.rev, updated_at = now()
+        comm = excluded.comm, comm_done = excluded.comm_done, comm_pending = excluded.comm_pending,
+        gmv = excluded.gmv, qty = excluded.qty, refund = excluded.refund, orders = excluded.orders,
+        order_keys = null, order_parts = excluded.order_parts, merge_version = 2,
+        excluded = excluded.excluded, rows = excluded.rows, rev = excluded.rev, updated_at = now()
       returning (xmax = 0) inserted)
     select count(*) filter (where inserted), count(*) filter (where not inserted) into added, updated from up;
+
+    select c into mismatch from unnest(converted) c where exists (select 1 from dashboard.daily_affiliate
+      where account_id = p_account_id and date = c and merge_version = 1) limit 1;
+    if found then
+      raise exception 'Riwayat komisi % tersimpan dalam format lama dan file ini tidak memuat semua tag tanggal itu. Riwayat lama tanggal itu perlu dihapus lalu diunggah ulang dengan laporan lengkapnya.',
+        mismatch using errcode = 'PT400';
+    end if;
+    -- Converted days keep no fingerprints: order parts replace them.
+    delete from dashboard.row_hashes where account_id = p_account_id and kind = 'affiliate' and date = any(converted);
   elsif p_kind = 'ads' then
+    -- Rows with an Ad ID replace; rows without one add their unseen rows.
     with up as (
-      insert into dashboard.daily_ads as t (account_id, date, ad_unit, spend, impressions, reach, clicks, shop_clicks,
-        lpv, results, rows, cpm, cpc, ctr, delivery, rev)
-      select p_account_id, r.date, r.ad_unit, r.spend, r.impressions, r.reach, r.clicks, r.shop_clicks, r.lpv,
-        r.results, r.rows,
+      insert into dashboard.daily_ads as t (account_id, date, ad_unit, ad_id, ad_key, merge_version, spend, impressions,
+        reach, clicks, shop_clicks, lpv, results, rows, cpm, cpc, ctr, delivery, rev)
+      select p_account_id, r.date, r.ad_unit, coalesce(r.ad_id, ''),
+        case when coalesce(r.ad_id, '') <> '' then 'id:' || r.ad_id else 'name:' || r.ad_unit end,
+        case when coalesce(r.ad_id, '') <> '' then 2 else 1 end,
+        r.spend, r.impressions, r.reach, r.clicks, r.shop_clicks, r.lpv, r.results, r.rows,
         case when r.impressions > 0 then r.spend / r.impressions * 1000 else 0 end,
         case when r.clicks > 0 then r.spend / r.clicks else 0 end,
         case when r.impressions > 0 then r.clicks / r.impressions * 100 else 0 end,
         coalesce(r.delivery, ''), new_revision
-      from jsonb_to_recordset(p_records) r(date date, ad_unit text, spend float8, impressions float8, reach float8,
-        clicks float8, shop_clicks float8, lpv float8, results float8, rows int, delivery text)
-      on conflict (account_id, date, ad_unit) do update set
-        spend = t.spend + excluded.spend, impressions = t.impressions + excluded.impressions,
-        reach = t.reach + excluded.reach, clicks = t.clicks + excluded.clicks,
-        shop_clicks = t.shop_clicks + excluded.shop_clicks, lpv = t.lpv + excluded.lpv,
-        results = t.results + excluded.results, rows = t.rows + excluded.rows,
-        cpm = case when t.impressions + excluded.impressions > 0
+      from jsonb_to_recordset(p_records) r(date date, ad_unit text, ad_id text, spend float8, impressions float8,
+        reach float8, clicks float8, shop_clicks float8, lpv float8, results float8, rows int, delivery text)
+      on conflict (account_id, date, ad_key) do update set
+        ad_unit = excluded.ad_unit,
+        spend = case when excluded.merge_version = 2 then excluded.spend else t.spend + excluded.spend end,
+        impressions = case when excluded.merge_version = 2 then excluded.impressions else t.impressions + excluded.impressions end,
+        reach = case when excluded.merge_version = 2 then excluded.reach else t.reach + excluded.reach end,
+        clicks = case when excluded.merge_version = 2 then excluded.clicks else t.clicks + excluded.clicks end,
+        shop_clicks = case when excluded.merge_version = 2 then excluded.shop_clicks else t.shop_clicks + excluded.shop_clicks end,
+        lpv = case when excluded.merge_version = 2 then excluded.lpv else t.lpv + excluded.lpv end,
+        results = case when excluded.merge_version = 2 then excluded.results else t.results + excluded.results end,
+        rows = case when excluded.merge_version = 2 then excluded.rows else t.rows + excluded.rows end,
+        cpm = case when excluded.merge_version = 2 then excluded.cpm when t.impressions + excluded.impressions > 0
           then (t.spend + excluded.spend) / (t.impressions + excluded.impressions) * 1000 else 0 end,
-        cpc = case when t.clicks + excluded.clicks > 0 then (t.spend + excluded.spend) / (t.clicks + excluded.clicks) else 0 end,
-        ctr = case when t.impressions + excluded.impressions > 0
+        cpc = case when excluded.merge_version = 2 then excluded.cpc when t.clicks + excluded.clicks > 0
+          then (t.spend + excluded.spend) / (t.clicks + excluded.clicks) else 0 end,
+        ctr = case when excluded.merge_version = 2 then excluded.ctr when t.impressions + excluded.impressions > 0
           then (t.clicks + excluded.clicks) / (t.impressions + excluded.impressions) * 100 else 0 end,
         delivery = coalesce(nullif(excluded.delivery, ''), t.delivery), rev = excluded.rev, updated_at = now()
       returning (xmax = 0) inserted)
     select count(*) filter (where inserted), count(*) filter (where not inserted) into added, updated from up;
+
+    -- One ad saved by name and by Ad ID on the same day is the same spend twice.
+    select a.date, a.ad_unit into bad from dashboard.daily_ads a
+    join dashboard.daily_ads b on b.account_id = a.account_id and b.date = a.date and b.ad_unit = a.ad_unit and b.merge_version = 2
+    where a.account_id = p_account_id and a.merge_version = 1 and a.date = any(touched) limit 1;
+    if found then
+      raise exception 'Iklan ini sudah tersimpan dari sumber lain pada tanggal yang sama, sekali tanpa Ad ID (ekspor CSV) dan sekali dengan Ad ID: % (%). Hapus tanggal itu di Data Tersimpan lalu simpan lagi agar biaya tidak terhitung dua kali.',
+        bad.date, bad.ad_unit using errcode = 'PT400';
+    end if;
   else
     with up as (
       insert into dashboard.daily_clicks as t (account_id, date, tag, clicks, by_region, by_source, rev)
@@ -476,6 +586,7 @@ begin
     coalesce((p_upload->>'rows')::int, 0), added, updated, coalesce((p_upload->>'duplicates')::int, 0),
     (p_upload->>'period_start')::date, (p_upload->>'period_end')::date, auth.uid(), new_revision);
 
+  perform dashboard._assert_consistent(p_account_id, touched);
   perform dashboard._commit(p_account_id, new_revision);
   return jsonb_build_object('added', added, 'updated', updated,
     'duplicates', coalesce((p_upload->>'duplicates')::int, 0), 'skipped', false, 'revision', new_revision);
@@ -525,19 +636,22 @@ begin
   delete from dashboard.day_deletions where account_id = p_account_id;
 
   insert into dashboard.daily_affiliate (account_id, date, tag, comm, comm_done, comm_pending, gmv, qty, refund,
-    orders, order_keys, excluded, rows, rev, created_at, updated_at)
-  select p_account_id, r.date, r.tag, r.comm, r.comm_done, r.comm_pending, r.gmv, r.qty, r.refund,
-    r.orders, coalesce(r.order_keys, '{}'), r.excluded, r.rows, new_revision, coalesce(r.created_at, now()), r.updated_at
+    orders, order_keys, order_parts, merge_version, excluded, rows, rev, created_at, updated_at)
+  select p_account_id, r.date, r.tag, r.comm, r.comm_done, r.comm_pending, r.gmv, r.qty, r.refund, r.orders,
+    case when coalesce(r.merge_version, 1) = 1 then coalesce(r.order_keys, '{}') else r.order_keys end, r.order_parts, coalesce(r.merge_version, 1),
+    r.excluded, r.rows, new_revision, coalesce(r.created_at, now()), r.updated_at
   from jsonb_to_recordset(coalesce(p_backup->'affiliate', '[]')) r(date date, tag text, comm float8, comm_done float8,
-    comm_pending float8, gmv float8, qty float8, refund float8, orders int, order_keys text[], excluded int, rows int,
-    created_at timestamptz, updated_at timestamptz);
-  insert into dashboard.daily_ads (account_id, date, ad_unit, spend, impressions, reach, clicks, shop_clicks, lpv,
-    results, rows, cpm, cpc, ctr, delivery, rev, created_at, updated_at)
-  select p_account_id, r.date, r.ad_unit, r.spend, r.impressions, r.reach, r.clicks, r.shop_clicks, r.lpv,
+    comm_pending float8, gmv float8, qty float8, refund float8, orders int, order_keys text[], order_parts jsonb,
+    merge_version smallint, excluded int, rows int, created_at timestamptz, updated_at timestamptz);
+  insert into dashboard.daily_ads (account_id, date, ad_unit, ad_id, ad_key, merge_version, spend, impressions, reach,
+    clicks, shop_clicks, lpv, results, rows, cpm, cpc, ctr, delivery, rev, created_at, updated_at)
+  select p_account_id, r.date, r.ad_unit, coalesce(r.ad_id, ''),
+    case when coalesce(r.ad_id, '') <> '' then 'id:' || r.ad_id else 'name:' || r.ad_unit end, coalesce(r.merge_version, 1),
+    r.spend, r.impressions, r.reach, r.clicks, r.shop_clicks, r.lpv,
     r.results, r.rows, r.cpm, r.cpc, r.ctr, coalesce(r.delivery, ''), new_revision, coalesce(r.created_at, now()), r.updated_at
-  from jsonb_to_recordset(coalesce(p_backup->'ads', '[]')) r(date date, ad_unit text, spend float8, impressions float8,
-    reach float8, clicks float8, shop_clicks float8, lpv float8, results float8, rows int, cpm float8, cpc float8,
-    ctr float8, delivery text, created_at timestamptz, updated_at timestamptz);
+  from jsonb_to_recordset(coalesce(p_backup->'ads', '[]')) r(date date, ad_unit text, ad_id text, merge_version smallint,
+    spend float8, impressions float8, reach float8, clicks float8, shop_clicks float8, lpv float8, results float8, rows int,
+    cpm float8, cpc float8, ctr float8, delivery text, created_at timestamptz, updated_at timestamptz);
   insert into dashboard.daily_clicks (account_id, date, tag, clicks, by_region, by_source, rev, created_at, updated_at)
   select p_account_id, r.date, r.tag, r.clicks, r.by_region, r.by_source, new_revision, coalesce(r.created_at, now()), r.updated_at
   from jsonb_to_recordset(coalesce(p_backup->'clicks', '[]')) r(date date, tag text, clicks int, by_region jsonb,

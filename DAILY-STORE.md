@@ -7,10 +7,12 @@ reload tanpa mengunggah ulang laporan affiliate.
 ## Yang disimpan
 
 - Akun yang dipilih pengguna.
-- Agregat per `(akun, tanggal, tag)` untuk affiliate dan klik.
-- Agregat per `(akun, tanggal, ad unit)` untuk Meta Ads.
-- Fingerprint baris dengan tanggal dan jenis laporan, fingerprint file,
-  identitas order yang di-hash, serta log unggahan.
+- Agregat per `(akun, tanggal, tag)` untuk affiliate dan klik. Agregat komisi
+  menyimpan rincian per pesanan (`order_parts`, kunci hash ID Pemesanan).
+- Agregat per `(akun, tanggal, Ad ID)` untuk Meta Ads, atau per nama iklan bila
+  baris tidak membawa Ad ID (`ad_key` = `id:<Ad ID>` atau `name:<nama iklan>`).
+- Fingerprint baris dengan tanggal dan jenis laporan (hanya untuk klik dan iklan
+  tanpa Ad ID), fingerprint file, serta log unggahan.
 
 CSV mentah, nama produk, toko, dan ID order mentah tidak dipersistenkan oleh
 alur simpan harian. Data berada di IndexedDB pada origin browser yang sama.
@@ -19,10 +21,20 @@ alur simpan harian. Data berada di IndexedDB pada origin browser yang sama.
 
 Rencana simpan hanya merupakan pratinjau. Transaksi penulisan memeriksa ulang
 file dan fingerprint baris agar dua tab atau dua proses simpan dengan rencana
-lama tidak menambahkan baris yang sama. Kontribusi baru digabung ke agregat
-lama, bukan menimpa seluruh total dengan sebagian baris. Order menggunakan
-union identitas agar tambahan produk dari pesanan yang sama tidak menambah
-jumlah order.
+lama tidak menambahkan baris yang sama. Aturan gabung (`merge_version`):
+
+- **2, mengganti:** komisi per pesanan dan iklan dengan Ad ID. Pesanan yang ada
+  di file mengganti rincian pesanan yang sama; pesanan lain tetap. Total harian
+  dihitung ulang dari rincian dengan urutan kunci yang tetap, sehingga browser
+  dan database bersama menghasilkan angka yang identik.
+- **1, menambah:** klik dan iklan tanpa Ad ID. Baris yang belum dikenal
+  ditambahkan ke agregat lama; baris identik dilewati lewat fingerprint.
+
+Iklan yang sama pada tanggal yang sama tidak boleh tersimpan dengan nama dan
+dengan Ad ID sekaligus; penyimpanan itu ditolak agar tidak terhitung dua kali.
+Riwayat komisi lama (format 1, union hash order) dikonversi ke format 2 hanya
+bila file baru memuat semua pesanan hari itu untuk tag tersebut; file sebagian
+ditolak dengan petunjuk hapus tanggal lalu unggah ulang.
 
 Menghapus satu tanggal membersihkan penanda baris tanggal itu dan membatalkan
 penanda file yang relevan. Unggah ulang laporan yang mencakup beberapa hari
@@ -31,10 +43,14 @@ Penghapusan akun membersihkan data, penanda deduplikasi, dan log terkait.
 
 ## Laporan koreksi
 
-Hash seluruh baris mengenali duplikat identik, bukan revisi status atau nilai.
-Tanpa ID unik per item, sistem tidak boleh menebak baris mana yang harus
-dihapus. Untuk koreksi, hapus tanggal terdampak per jenis laporan, lalu simpan
-ulang laporan lengkap yang benar. Hapus juga file lama dari analisis sebelum
+Laporan komisi yang direvisi dan tarikan ulang iklan dengan Ad ID mengganti
+angka lama secara otomatis. File revisi komisi harus memuat semua baris produk
+dari setiap pesanan yang dimuatnya. Pesanan yang hilang dari laporan revisi
+tidak dihapus otomatis.
+
+Untuk klik dan ekspor iklan tanpa Ad ID, hash seluruh baris hanya mengenali
+duplikat identik, bukan revisi nilai. Untuk koreksi jenis itu, hapus tanggal
+terdampak per jenis laporan, lalu simpan ulang laporan lengkap yang benar. Hapus juga file lama dari analisis sebelum
 mengunggah file koreksi.
 
 Migrasi mempertahankan agregat lama. Penggabungan bertumpang tindih yang
@@ -50,9 +66,10 @@ dan impor laporan lengkap yang benar. Aplikasi tidak menebak kemiripan baris.
 ## Backup dan pemulihan
 
 Di **Data Tersimpan**, **Unduh backup** menghasilkan JSON berformat
-`affiliate-daily-backup`, `version: 1`, `database_version: 2`. Backup berisi
-metadata akun, semua agregat affiliate/iklan/klik, fingerprint, identitas order
-yang di-hash, log unggahan, dan parameter analisis sebagai referensi. JSON
+`affiliate-daily-backup`, `version: 1`, `database_version: 3` (backup
+`database_version: 2` tetap dapat dipulihkan). Backup berisi metadata akun,
+semua agregat affiliate/iklan/klik termasuk rincian pesanan yang di-hash,
+fingerprint, log unggahan, dan parameter analisis sebagai referensi. JSON
 ditulis ringkas; batas ekspor dan impor sama, 50 MiB, dengan maksimum total
 500.000 record. Ekspor yang melebihi batas tidak dinyatakan sebagai backup siap
 dipulihkan.

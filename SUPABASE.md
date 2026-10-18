@@ -8,17 +8,18 @@ sama untuk semua anggota tim.
 ## Yang disimpan
 
 Isi database sama dengan riwayat harian di browser, satu baris per
-`(akun, tanggal, tag)` untuk komisi dan klik, dan per `(akun, tanggal, nama iklan)`
-untuk Meta Ads, ditambah fingerprint baris (dedup) dan log unggahan. Semua akun
+`(akun, tanggal, tag)` untuk komisi dan klik, dan per `(akun, tanggal, ad_key)`
+untuk Meta Ads (`id:<Ad ID>`, atau `name:<nama iklan>` bila tanpa Ad ID),
+ditambah fingerprint baris (dedup) dan log unggahan. Semua akun
 ada di tabel yang sama dengan kolom `account_id`, di schema privat `dashboard`.
 
 | Tabel | Isi |
 |---|---|
 | `accounts` | Nama akun dashboard, `revision` (naik setiap kali ada penulisan) dan `reset_revision` (revisi penggantian seluruh akun terakhir) |
-| `daily_affiliate` | Komisi, komisi selesai/tertunda, GMV, qty, refund, jumlah order, hash order |
-| `daily_ads` | Spend, impresi, reach, klik, LPV, hasil, CPM/CPC/CTR |
+| `daily_affiliate` | Komisi, komisi selesai/tertunda, GMV, qty, refund, jumlah order, rincian per pesanan (`order_parts`, kunci hash) |
+| `daily_ads` | Ad ID, nama iklan, spend, impresi, reach, klik, LPV, hasil, CPM/CPC/CTR |
 | `daily_clicks` | Klik Shopee per tag dengan rincian wilayah dan perujuk |
-| `row_hashes` | Satu fingerprint per baris sumber agar unggahan ulang tidak menggandakan angka |
+| `row_hashes` | Fingerprint per baris sumber untuk klik dan iklan tanpa Ad ID, agar unggahan ulang tidak menggandakan angka |
 | `uploads` | Log file: nama, jumlah baris, baru/diperbarui/duplikat, periode, pengunggah |
 | `day_deletions` | Penanda tanggal yang dihapus, agar browser lain ikut menghapusnya |
 | `team_members` | Pengguna Supabase Auth yang boleh membaca dan menulis |
@@ -31,13 +32,19 @@ Token Meta Ads tidak pernah disimpan di database.
 
 ## Cara kerja sinkronisasi
 
-- Browser menyimpan revisi akun yang sedang ia cerminkan. **Simpan** melakukan
-  dedup terhadap salinan itu, menghitung agregat dengan `DailyAgg` (jalur hitung
-  yang sama dengan mode lokal), lalu mengirim agregat dan fingerprint ke fungsi
-  `daily_ingest`. Bila anggota lain menyimpan lebih dulu, database menolak
+- Browser menyimpan revisi akun yang sedang ia cerminkan. **Simpan** menjalankan
+  langkah `DailyAgg` yang sama dengan mode lokal terhadap salinan itu (dedup,
+  agregasi, pemeriksaan hari, pilih yang berubah), lalu mengirim hasilnya ke
+  fungsi `daily_ingest`. Bila anggota lain menyimpan lebih dulu, database menolak
   (revisi berubah), browser menarik data terbaru dan mengulang sekali.
-- Penggabungan di database sama dengan `DailyAgg.mergeDaily`: angka dijumlahkan,
-  order digabung sebagai himpunan hash, CPM/CPC/CTR dihitung ulang dari total.
+- Penggabungan di database sama dengan `DailyAgg.mergeDaily`. Komisi diganti per
+  pesanan dan iklan dengan Ad ID diganti per `(tanggal, Ad ID)`
+  (`merge_version` 2); klik dan iklan tanpa Ad ID dijumlahkan (`merge_version` 1).
+  Total komisi dihitung ulang dari rincian pesanan dengan urutan kunci yang sama
+  dengan browser, sehingga angkanya identik. CPM/CPC/CTR dihitung ulang dari
+  total. Database sendiri juga menolak iklan yang tersimpan dengan nama dan Ad ID
+  pada hari yang sama, serta konversi hari komisi format lama yang tidak memuat
+  semua pesanannya.
 - Setelah setiap penulisan, browser menarik **hanya baris yang berubah** sejak
   revisinya (`daily_changes`), termasuk tanggal yang dihapus, lalu mencocokkan
   jumlah record dengan database. Bila tidak cocok, atau akun baru saja diganti
@@ -65,7 +72,8 @@ Token Meta Ads tidak pernah disimpan di database.
   tanggalnya; hapus tanggal itu lalu unggah ulang CSV-nya.
 - Database menolak isi yang tidak bisa dimuat kembali oleh browser (label kosong
   atau berkarakter kontrol, angka di luar batas aman JavaScript, peta klik bukan
-  bilangan bulat, fingerprint tanpa tanggal atau tidak sesuai jumlah baris), agar
+  bilangan bulat, rincian pesanan yang tidak sama dengan totalnya, Ad ID tidak
+  valid, fingerprint tanpa tanggal atau tidak sesuai jumlah baris), agar
   satu penulisan buruk tidak mengunci seluruh tim.
 
 ## Keamanan
@@ -114,7 +122,8 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres REQUIRE_DB=1 n
 Uji ini membuat database sementara di Postgres lokal, menerapkan migrasi dengan
 pengganti minimal untuk `auth` Supabase, lalu menjalankan dua "browser" (IndexedDB
 terpisah) terhadap database yang sama: penggabungan, dedup lintas browser,
-paritas angka dengan mode lokal, revisi basi, konflik data offline, hapus
+paritas angka dengan mode lokal, laporan komisi revisi, tarikan ulang iklan
+dengan Ad ID, penolakan simpan ganda nama/Ad ID di database, revisi basi, konflik data offline, hapus
 tanggal, pemulihan backup, sinkron bertahap, akun yang dikosongkan, penolakan
 riwayat lama dan isi yang tidak valid, kegagalan penarikan setelah simpan, sesi
 login, RLS, dan alur login sampai simpan di Chromium. Tanpa Postgres, uji
@@ -123,8 +132,14 @@ dilewati kecuali `REQUIRE_DB=1`.
 ## Batasan yang diketahui
 
 - Unduhan penuh pertama (dan setelah pemulihan backup) memuat seluruh akun,
-  termasuk satu fingerprint per baris sumber. Untuk satu bulan data ini beberapa
-  MB; riwayat bertahun-tahun akan memperlambat unduhan pertama di browser baru.
-- Iklan dikelompokkan per **nama iklan**, sama seperti penyimpanan browser.
-  Nama iklan yang sama dipakai di beberapa kampanye akan tergabung. Kunci
-  `ad_id` memerlukan perubahan di pembaca CSV dan penyimpanan browser juga.
+  termasuk rincian per pesanan dan fingerprint klik/iklan. Untuk satu bulan data
+  ini beberapa MB; riwayat bertahun-tahun akan memperlambat unduhan pertama di
+  browser baru.
+- Ekspor CSV Meta **tanpa kolom Ad ID** tetap dikelompokkan per nama iklan dan
+  dijumlahkan. Nama iklan yang sama di beberapa kampanye akan tergabung, dan
+  file revisi tanpa Ad ID ditambahkan, bukan mengganti. Pakai tarikan API atau
+  sertakan kolom Ad ID di ekspor Ads Manager.
+- Pesanan yang hilang dari laporan komisi revisi tidak dihapus otomatis; hapus
+  tanggalnya lalu unggah ulang bila pesanan memang dihapus Shopee.
+- Ad ID yang dibulatkan Excel (lebih dari 15 digit dan berakhir nol) dianggap
+  tidak ada, sehingga baris itu disimpan per nama iklan.

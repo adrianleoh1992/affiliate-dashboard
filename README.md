@@ -130,15 +130,23 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
 
 ## Data revisi dan pemulihan
 
-Deduplikasi memakai seluruh isi baris. Baris yang status, komisi, atau metriknya
-berubah bukan baris identik. Ekspor tidak selalu menyediakan ID unik per item,
-sehingga aplikasi tidak dapat memastikan apakah perubahan itu koreksi atau
-transaksi lain yang sah.
+Laporan komisi disimpan per pesanan (ID Pemesanan di-hash). Menyimpan laporan
+yang direvisi, misalnya status Tertunda menjadi Selesai, **mengganti** angka
+setiap pesanan yang ada di file itu; pesanan yang tidak ada di file tetap seperti
+sebelumnya. Laporan Meta Ads yang membawa **Ad ID** (tarikan API atau ekspor
+dengan kolom Ad ID) mengganti angka per tanggal dan Ad ID, sehingga iklan dengan
+nama sama tetap terpisah. File revisi harus memuat semua baris produk dari setiap
+pesanan yang dimuatnya.
 
-Untuk laporan **koreksi**, hapus file lama dari analisis. Pada **Data Tersimpan**,
-hapus tanggal terdampak untuk jenis laporan yang bersangkutan, lalu unggah dan
-simpan kembali laporan lengkap yang benar untuk tanggal tersebut. Jangan
-menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
+Ekspor CSV Meta tanpa Ad ID, laporan klik, dan baris komisi tanpa ID Pemesanan
+masih dideduplikasi dengan seluruh isi baris: baris identik dilewati, baris yang
+berubah ditambahkan. Satu iklan pada tanggal yang sama tidak boleh disimpan
+sekali dengan nama saja dan sekali dengan Ad ID; penyimpanan seperti itu ditolak.
+
+Untuk **koreksi** laporan jenis itu, hapus file lama dari analisis. Pada
+**Data Tersimpan**, hapus tanggal terdampak untuk jenis laporan yang
+bersangkutan, lalu unggah dan simpan kembali laporan lengkap yang benar untuk
+tanggal tersebut. Jangan menambahkan laporan koreksi ke total lama. Penghapusan per hari membersihkan
 penanda deduplikasi yang diperlukan agar unggah ulang dapat memulihkan hari itu.
 
 Database versi lama tetap dipertahankan. Agregat lama yang tidak memiliki

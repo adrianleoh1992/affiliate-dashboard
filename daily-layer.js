@@ -84,39 +84,48 @@
     $('ingestPlan').classList.add('hidden');
     if (!STORE || !account || account.name !== shopeeName() || !files.length) return;
     const plan = { acct: account, items: [], total: { added: 0, updated: 0, dup: 0 } };
+    // The same steps saveDaily takes (DailyAgg.prepare/checkDays/changes), run
+    // against saved history plus the earlier files of this batch.
     const cache = new Map(), batchFiles = new Map();
     for (const f of files) {
       if (!['affiliate', 'ads', 'clicks'].includes(f.type)) continue;
       const rows = f.rowsData || [];
       if (!rows.length) continue;
       if (!cache.has(f.type)) {
-        const [known, existing] = await Promise.all([
-          STORE.knownRowHashes(account.id, f.type), STORE.existingKeys(account.id, f.type),
-        ]);
-        cache.set(f.type, { known, existing, dates: new Set([...existing].map(key => key.slice(0, 10))) });
+        const [known, saved] = await Promise.all([STORE.knownRowHashes(account.id, f.type), STORE.range(account.id, f.type)]);
+        cache.set(f.type, { known, stored: new Map(saved.map(r => [A.recordKey(f.type, r), r])) });
       }
-      const { known, existing, dates } = cache.get(f.type);
+      const { known, stored } = cache.get(f.type);
       const fileHash = A.hashRows(rows), batchKey = f.type + '|' + fileHash;
       const seen = batchFiles.get(batchKey) || await STORE.seenFile(account.id, fileHash, f.type);
-      const valid = rows.filter(r => A.isDate(A.rowDate(r, f.type)));
-      const dedup = A.dedupe(valid, known);
-      const records = A.aggregate(f.type, dedup.kept);
-      const keyFields = f.type === 'ads' ? ['date', 'ad_unit'] : ['date', 'tag'];
-      const ing = A.planIngest(records, existing, keyFields);
+      const prep = A.prepare(f.type, rows, known);
+      const days = new Map();
+      for (const date of new Set(prep.records.map(r => r.date))) days.set(date, [...stored.values()].filter(r => r.date === date));
+      let error = '', diff = { write: [], duplicates: 0 };
+      try { A.checkDays(f.type, prep.records, days); diff = A.changes(f.type, prep.records, stored); }
+      catch (e) { error = e.message; }
+      const added = diff.write.filter(r => !stored.has(A.recordKey(f.type, r))).length;
+      const updated = diff.write.length - added;
+      const dates = new Set([...stored.values()].map(r => r.date));
       plan.items.push({
-        file: f.name, kind: f.type, fileHash, seenBefore: seen,
-        sourceRows: rows.length, duplicates: dedup.duplicates, invalid: rows.length - valid.length,
-        overlapsDate: records.some(record => dates.has(record.date)),
-        rawRows: rows, records, added: ing.newCount, updated: ing.updateCount,
-        period: ing.period, days: ing.days,
+        file: f.name, kind: f.type, fileHash, seenBefore: seen, error,
+        sourceRows: rows.length, duplicates: prep.duplicates + diff.duplicates, invalid: prep.invalid,
+        overlapsDate: prep.records.some(record => dates.has(record.date)),
+        adds: f.type === 'clicks' || (f.type === 'ads' && prep.records.some(r => !r.ad_id)),
+        rawRows: rows, records: prep.records, added: error ? 0 : added, updated: error ? 0 : updated,
+        period: prep.period, days: new Set(prep.records.map(r => r.date)).size,
       });
-      if (!seen) {
-        records.forEach(r => existing.add(keyFields.map(key => r[key]).join('|')));
-        records.forEach(r => dates.add(r.date));
+      if (!seen && !error) {
+        for (const r of diff.write) {
+          const key = A.recordKey(f.type, r), found = stored.get(key);
+          try { stored.set(key, found ? { ...A.mergeDaily(f.type, found, r), merge_version: A.mergeVersion(f.type, r) } : { ...r, merge_version: A.mergeVersion(f.type, r) }); }
+          catch (_) { /* reported by saveDaily */ }
+        }
+        prep.hashes.forEach(h => known.add(h.hash));
         batchFiles.set(batchKey, { uploaded_at: new Date().toISOString() });
-        plan.total.added += ing.newCount;
-        plan.total.updated += ing.updateCount;
-        plan.total.dup += dedup.duplicates;
+        plan.total.added += added;
+        plan.total.updated += updated;
+        plan.total.dup += prep.duplicates + diff.duplicates;
       }
     }
     if (revision !== PLAN_REV || ACCT !== account || account.name !== shopeeName()) return;
@@ -127,7 +136,7 @@
   function renderPlan() {
     if (!PLAN || !PLAN.items.length) { $('ingestPlan').classList.add('hidden'); return; }
     $('planAcct').textContent = PLAN.acct.name;
-    const writable = PLAN.items.some(it => !it.seenBefore && (it.added || it.updated));
+    const writable = PLAN.items.some(it => !it.seenBefore && !it.error && (it.added || it.updated));
     const allSeen = PLAN.items.length && PLAN.items.every(it => it.seenBefore);
 
     if (allSeen) {
@@ -142,6 +151,7 @@
         const pills = it.seenBefore
           ? `<span class="plan-pill seen">sudah diunggah ${new Date(it.seenBefore.uploaded_at)
               .toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })} — dilewati</span>`
+          : it.error ? `<span class="plan-pill dup">tidak disimpan: ${esc(it.error)}</span>`
           : [
               it.added ? `<span class="plan-pill new">${nf(it.added)} baru</span>` : '',
               it.updated ? `<span class="plan-pill upd">${nf(it.updated)} diperbarui</span>` : '',
@@ -155,8 +165,12 @@
           <div class="plan-nums">${pills}${per}</div></div>`;
       }).join('');
     }
-    if (PLAN.items.some(it => !it.seenBefore && it.overlapsDate)) {
-      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> penyimpanan hanya mengenali duplikat dengan isi baris yang sama. Jika status, komisi, atau angka laporan lama berubah, hapus tanggal terkait dari Riwayat Harian lalu unggah ulang laporan lengkap tanggal tersebut sebelum menyimpan. Menambahkan laporan revisi langsung dapat menghitung ulang transaksi lama.</p>');
+    const overlapping = PLAN.items.filter(it => !it.seenBefore && !it.error && it.overlapsDate);
+    if (overlapping.some(it => it.kind === 'ads' && it.adds)) {
+      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> ekspor iklan tanpa kolom Ad ID hanya dikenali duplikat bila isi barisnya sama. Jika Meta merevisi angkanya, hapus tanggal terkait dari Riwayat Harian lalu unggah ulang laporan lengkap tanggal tersebut, atau pakai tarikan dari Ads Manager (dengan Ad ID) yang mengganti angka lama.</p>');
+    }
+    if (overlapping.some(it => it.kind === 'affiliate' || (it.kind === 'ads' && !it.adds))) {
+      $('planRows').insertAdjacentHTML('afterbegin', '<p class="hint"><b>Periode bertumpuk:</b> pesanan dan iklan ber-Ad ID di file ini menggantikan angka tersimpannya (misalnya Tertunda menjadi Selesai), tidak dijumlahkan dua kali. Pesanan dan iklan lain pada tanggal itu tetap.</p>');
     }
 
     $('ingestPlan').querySelector('.ingest-head').classList.toggle('hidden', allSeen);
@@ -217,7 +231,9 @@
       return byDay.get(d);
     };
     aff.forEach(r => { const b = touch(r.date); b.comm += r.comm || 0; b.pending += r.comm_pending || 0;
-      if (Array.isArray(r.order_keys)) r.order_keys.forEach(key => b.orderKeys.add(key));
+      // One order can sit under two tags; count it once per day.
+      if (r.order_parts) Object.entries(r.order_parts).forEach(([key, part]) => { if (A.ORDER_KEY.test(key) && part[7] > part[6]) b.orderKeys.add(key); });
+      else if (Array.isArray(r.order_keys)) r.order_keys.forEach(key => b.orderKeys.add(key));
       else b.orders += r.orders || 0;
       b.gmv += r.gmv || 0; });
     ads.forEach(r => { const b = touch(r.date); b.spend += r.spend || 0; b.clicks += r.clicks || 0;
@@ -393,10 +409,11 @@
     const plan = PLAN, account = plan.acct;
     SAVING = true;
     btn.disabled = true; btn.textContent = 'Menyimpan...';
-    let added = 0, updated = 0, skipped = 0;
+    let added = 0, updated = 0, skipped = 0, refused = [];
     try {
       for (const it of plan.items) {
         if (it.seenBefore) { skipped++; continue; }
+        if (it.error) { refused.push(it); continue; }
         const res = await STORE.saveDaily(account.id, it.kind, it.records, {
           rawRows: it.rawRows, fileHash: it.fileHash, fileName: it.file,
           sourceRows: it.sourceRows, duplicates: it.duplicates, period: it.period,
@@ -409,6 +426,7 @@
       $('ingestPlan').classList.add('hidden');
       $('savedNote').innerHTML = `<b>Tersimpan ke ${esc(account.name)}</b> — ${nf(added)} baris baru, ${nf(updated)} diperbarui`
         + (skipped ? `, ${skipped} file dilewati karena sudah pernah diunggah` : '')
+        + (refused.length ? `. <b>${refused.length} file tidak disimpan</b> (${esc(refused[0].file)}): ${esc(refused[0].error)}` : '')
         + `. Buka tab <b>Data Tersimpan</b> untuk melihat trennya.`
         + (window.__cloudStore ? (STORE.enabled ? ' Tercatat juga di database bersama untuk seluruh tim.'
           : ' <b>Hanya tersimpan di browser ini</b>: masuk ke Database bersama di tab Data Tersimpan agar tim ikut melihatnya.') : '');
