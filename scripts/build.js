@@ -9,9 +9,13 @@ const assets = ['index.html', 'index-daily.html', 'styles.css', 'app.js', 'engin
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 for (const file of assets) fs.cpSync(path.join(root, file), path.join(out, file), { recursive: true });
-// Vercel env vars SUPABASE_URL and SUPABASE_ANON_KEY switch on the shared
-// database. Only the public anon/publishable key belongs here, never service_role.
-const supabase = { url: (process.env.SUPABASE_URL || '').trim(), anonKey: (process.env.SUPABASE_ANON_KEY || '').trim() };
+// The shared database. Defaults to the team's Supabase project; the Vercel env
+// vars SUPABASE_URL and SUPABASE_ANON_KEY override it, and SUPABASE_URL=off
+// builds a browser-only dashboard. Only the public publishable key belongs
+// here, never service_role: it is visible in the page anyway.
+const DEFAULT_SUPABASE = { url: 'https://ilvwkdjrdjqwyigzdiyz.supabase.co', anonKey: 'sb_publishable_9ktCfxxP4kITsC9Im-sxBQ_ZF2hNXwV' };
+const fromEnv = { url: (process.env.SUPABASE_URL || '').trim(), anonKey: (process.env.SUPABASE_ANON_KEY || '').trim() };
+const supabase = fromEnv.url === 'off' ? { url: '', anonKey: '' } : fromEnv.url || fromEnv.anonKey ? fromEnv : DEFAULT_SUPABASE;
 if (supabase.url || supabase.anonKey) {
   if (!/^https:\/\/[^/\s]+$/.test(supabase.url) || !supabase.anonKey) throw new Error('SUPABASE_URL (https://…) dan SUPABASE_ANON_KEY harus diisi bersama');
   // Allowlist: a publishable key, or a legacy JWT whose role is anon. Anything

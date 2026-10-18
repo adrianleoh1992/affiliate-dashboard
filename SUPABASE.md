@@ -117,9 +117,11 @@ Token Meta Ads tidak pernah disimpan di database.
    insert into dashboard.team_members (user_id)
    select id from auth.users where email in ('anda@contoh.com', 'tim@contoh.com');
    ```
-4. Di Vercel, **Settings → Environment Variables**, isi `SUPABASE_URL`
-   (`https://<ref>.supabase.co`) dan `SUPABASE_ANON_KEY` (publishable key
-   `sb_publishable_…` atau legacy anon key), lalu deploy ulang.
+4. `scripts/build.js` sudah memakai project tim (`ilvwkdjrdjqwyigzdiyz`) secara
+   bawaan. Untuk project lain, isi `SUPABASE_URL` (`https://<ref>.supabase.co`)
+   dan `SUPABASE_ANON_KEY` (publishable key `sb_publishable_…` atau legacy anon
+   key) di Vercel **Settings → Environment Variables**; `SUPABASE_URL=off`
+   membuat dashboard tanpa database bersama. Deploy ulang setelah mengubahnya.
 5. Buka **Data Tersimpan → Database bersama**, masuk, dan simpan laporan seperti biasa.
 
 Menghapus anggota: `delete from dashboard.team_members where user_id = ...;`
