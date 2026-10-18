@@ -197,20 +197,28 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
   alasan keputusan menyebut dasar yang matang.
 - **Lag dan order:** distribusi lag dan penyelesaian menghitung order unik,
   bukan jumlah baris produk. Rekomendasi H+0 tetap dapat bernilai nol.
-- **Mapping:** urutannya mapping manual nama iklan (dinormalisasi), segmen pipa
-  yang sama persis dengan tag, nama iklan yang sama persis dengan sub_id di
-  laporan komisi **atau** laporan klik, lalu tag yang pernah didapat Ad ID itu
-  dari nama persisnya. "Sama persis" memperhatikan huruf besar-kecil; spasi dan
-  tanda baca diabaikan. Nama yang hanya beda huruf, mirip, atau mengandung tag
-  lain hanya menjadi saran (keyakinan di bawah 50%): biayanya tetap di nama
-  iklan sampai sarannya diklik di tab Matching.
+- **Mapping:** urutannya mapping manual nama iklan, segmen pipa yang sama
+  persis dengan tag, nama iklan yang sama persis dengan sub_id di laporan
+  komisi **atau** laporan klik, nama lama iklan yang sama di data yang dimuat,
+  lalu tag yang pernah didapat Ad ID itu dari nama persisnya. "Sama persis"
+  memperhatikan huruf besar-kecil; spasi dan tanda baca diabaikan. Mapping
+  manual yang ditulis dengan huruf kapital hanya berlaku untuk ejaan itu; yang
+  huruf kecil semua (termasuk mapping lama) berlaku untuk semua ejaan. Nama
+  yang hanya beda huruf, mirip, atau mengandung tag lain hanya menjadi saran
+  (keyakinan di bawah 50%): biayanya tetap di nama iklan sampai sarannya
+  diklik di tab Matching.
 - **Unit iklan:** satu unit per Ad ID. Ekspor tanpa kolom Ad ID dikelompokkan
   per nama; baris tanpa ID ikut ke satu-satunya Ad ID yang memakai nama itu.
-  Ad ID yang dibulatkan spreadsheet (lebih dari 15 digit dengan ekor nol) tidak
-  dipakai. Tag per Ad ID disimpan di browser per akun dashboard.
+  Ad ID yang dibulatkan spreadsheet (notasi E+, atau lebih dari 15 digit dengan
+  ekor nol) hanya ikut ke Ad ID utuh yang nilainya cocok dengan pembulatannya.
+  Tag per Ad ID disimpan di browser per akun dashboard.
+- **Laporan klik:** tanda "-" memisahkan lima slot sub_id. Slot pertama dipakai
+  bila ia sub_id yang dikenal: ada di laporan komisi, atau muncul sendirian di
+  laporan klik.
 - **Klik masuk rendah:** pemetaan ditandai bila klik Shopee pada tag kurang dari
   25% klik link Meta pada hari iklan berjalan dalam jendela laporan klik,
-  setelah minimal 7 hari dan 300 klik Meta.
+  setelah minimal 7 hari dan 300 klik Meta. Hari tanpa satu klik pun di laporan
+  klik (file yang tidak dimuat) tidak dihitung.
 - **Klik:** perbandingan Meta dan Shopee menggunakan cakupan tanggal laporan
   klik. Data klik yang belum lengkap membatasi diagnosis kebocoran.
 - **Kandidat organik:** Maks Biaya/Order merupakan batas biaya per pesanan

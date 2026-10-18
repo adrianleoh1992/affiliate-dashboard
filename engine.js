@@ -177,17 +177,22 @@ function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '
 function strictKey(s) { return String(s == null ? '' : s).replace(/[^A-Za-z0-9]/g, ''); }
 
 /* Finds the tag a name spells exactly. A tag spelled identically wins; two
-   tags that differ only in punctuation are a tie and resolve to nothing. */
+   tags that differ only in punctuation are a tie and resolve to nothing.
+   With keepDash the "-" counts, for the click report, where it separates
+   sub_id slots: "BantalTidur-2309A" is BantalTidur with 2309A in slot two,
+   not the tag BantalTidur2309A. */
 function tagLookup(tags) {
-  const same = new Set(), byKey = new Map();
+  const same = new Set(), byKey = new Map(), byDash = new Map();
+  const add = (map, k, t) => { if (k) map.set(k, map.has(k) && map.get(k) !== t ? null : t); };
   for (const t of tags || []) {
     if (!t) continue;
     same.add(t);
-    const k = strictKey(t);
-    if (k) byKey.set(k, byKey.has(k) && byKey.get(k) !== t ? null : t);
+    add(byKey, strictKey(t), t);
+    add(byDash, dashKey(t), t);
   }
-  return s => (same.has(s) ? s : byKey.get(strictKey(s)) || '');
+  return (s, keepDash) => (same.has(s) ? s : (keepDash ? byDash.get(dashKey(s)) : byKey.get(strictKey(s))) || '');
 }
+function dashKey(s) { return String(s == null ? '' : s).replace(/[^A-Za-z0-9-]/g, ''); }
 
 /* The click report packs all five sub-id slots into ONE column, joined by
    dashes: "tag1-tag2-tag3-tag4-tag5". Stripping the trailing dashes leaves a
@@ -197,14 +202,15 @@ function tagLookup(tags) {
    7.226 of its clicks and no spend.
 
    Splitting blindly would break any tag that legitimately contains a dash, so
-   the first slot is only taken when the commission report actually knows it.
-   `known` is a tagLookup() over the commission report's tags, and it follows
-   the same case rule as the ad matching: both reports come from one tracking
-   system, so a click spelled differently is a different sub_id. */
+   the first slot is only taken when it is a known sub_id: a tag in the
+   commission report, or one the click report itself shows with every other
+   slot empty. `known` is a tagLookup() over those, and it follows the same
+   case rule as the ad matching: both reports come from one tracking system,
+   so a click spelled differently is a different sub_id. */
 function resolveClickTag(raw, known) {
   const t = cleanTag(raw);
   if (!t) return t;
-  const whole = known(t);
+  const whole = known(t, true);
   if (whole) return whole;
   const first = t.split('-')[0].trim();
   return (first && known(first)) || t;
@@ -332,9 +338,14 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   if (!n) return { tag: raw, method: 'kosong', confidence: 0 };
 
   // An explicit correction wins over an embedded pipe tag. Manual mappings
-  // apply to the full normalized ad name, never unrelated substring names.
-  const map = tagMap || {};
-  const manual = Object.keys(map).find(k => normalize(k) === n && String(map[k] || '').trim());
+  // apply to the full ad name, never unrelated substring names. A mapping
+  // written with capitals holds for that spelling only, so mapping TumblerIG
+  // cannot take Tumblerig off its exact tag; one in lower case (as every
+  // mapping saved before case mattered is) holds for any spelling.
+  const map = tagMap || {}, key = strictKey(raw);
+  const keys = Object.keys(map).filter(k => String(map[k] || '').trim());
+  const manual = keys.find(k => strictKey(k) === key)
+    ?? keys.find(k => strictKey(k) === normalize(k) && normalize(k) === n);
   if (manual !== undefined) return { tag: cleanTag(map[manual]), method: 'Manual', confidence: 1 };
 
   const find = tagLookup(affiliateTags);
@@ -378,9 +389,10 @@ function matchAdToTag(adName, affiliateTags, tagMap, noPipe) {
   return loose ? suggestion(raw, loose) : { tag: raw, method: 'Tidak cocok', confidence: 0 };
 }
 
-// A near match offered for review: the spend stays on the ad's own name.
+// A near match offered for review: the spend stays on the ad's own name, and
+// the confidence stays under 0.5, the line the app reads as "not assigned".
 function suggestion(raw, m) {
-  if (m.candidateTag) return m;
+  if (m.candidateTag) return Object.assign({}, m, { confidence: Math.min(0.45, m.confidence) });
   return { tag: raw, candidateTag: m.tag, method: m.method, confidence: Math.min(0.45, m.confidence) };
 }
 
@@ -454,6 +466,24 @@ function intactAdId(v) {
   const id = String(v == null ? '' : v).trim();
   if (!/^\d{6,20}$/.test(id)) return '';
   return id.length > 15 && /^0+$/.test(id.slice(15)) ? '' : id;
+}
+/* Whether a damaged ID cell can be the intact `id`: the value it shows must
+   round to the same number at the precision it kept — 15 significant digits
+   for trailing zeros, the mantissa's digits for scientific notation. */
+function idAgrees(cell, id) {
+  const s = String(cell == null ? '' : cell).trim();
+  let value, unit;
+  const sci = /^(\d)(?:[.,](\d+))?e\+?(\d{1,2})$/i.exec(s);
+  if (sci) {
+    const frac = sci[2] || '', exp = Number(sci[3]);
+    if (exp < frac.length) return false;
+    value = BigInt(sci[1] + frac) * 10n ** BigInt(exp - frac.length);
+    unit = 10n ** BigInt(exp - frac.length);
+  } else if (/^\d{16,20}$/.test(s)) {
+    value = BigInt(s); unit = 10n ** BigInt(s.length - 15);
+  } else return false;
+  const diff = BigInt(id) - value;
+  return (diff < 0n ? -diff : diff) * 2n <= unit;
 }
 
 /* ── Main analysis ───────────────────────────────────────────────────────── */
@@ -603,8 +633,9 @@ function analyze(data, options) {
      appears only in the click report, and used to be called "Tidak cocok".
      The commission report still decides how a click's joined slots split. */
   const commTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
-  const commKnown = tagLookup(commTags);
-  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), commKnown));
+  const soloClickTags = fClk.map(r => cleanTag(pick(r, COL.clk.tag))).filter(t => t && !t.includes('-'));
+  const knownTags = tagLookup(commTags.concat(soloClickTags));
+  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), knownTags));
   const affiliateTags = [...new Set(commTags.concat(clickTagOf.filter(Boolean)))];
 
   /* ── Ads aggregation + matching, per ad ─────────────────────────────────
@@ -615,21 +646,33 @@ function analyze(data, options) {
      usable ID joins the one ad that carries its name, so an uploaded export
      and a pull of later days stay one ad; a name several ads share cannot be
      split and stays a unit of its own. */
-  const unitOf = [], unitInfo = dict(), idsByName = dict();
+  /* A damaged ID (rounded by a spreadsheet, or a genuine one ending in zeros)
+     joins the one intact ID it can be; failing that, a digits-only one keeps
+     its own unit (with its name) and anything else falls back to the name. */
+  const unitOf = [], unitInfo = dict(), idsByName = dict(), intactIds = new Set();
   fAds.forEach(r => {
     const id = intactAdId(pick(r, COL.ads.id));
     if (!id) return;
+    intactIds.add(id);
     const name = String(pick(r, COL.ads.name) || '');
     (idsByName[name] = idsByName[name] || new Set()).add(id);
   });
   fAds.forEach((r, i) => {
     const name = String(pick(r, COL.ads.name) || '');
-    let id = intactAdId(pick(r, COL.ads.id));
-    if (!id && idsByName[name] && idsByName[name].size === 1) id = idsByName[name].values().next().value;
-    const key = id ? 'id:' + id : 'name:' + name;
+    const cell = String(pick(r, COL.ads.id) || '').trim();
+    let id = intactAdId(cell), key = '';
+    if (!id && cell) {
+      const fits = [...intactIds].filter(x => idAgrees(cell, x));
+      if (fits.length === 1) id = fits[0];
+      // Two ads can round to one value, so the name still has to agree.
+      else if (/^\d+$/.test(cell)) key = 'raw:' + cell + '|' + name;
+    }
+    if (!id && !key && !cell && idsByName[name] && idsByName[name].size === 1) id = idsByName[name].values().next().value;
+    key = id ? 'id:' + id : key || 'name:' + name;
     unitOf[i] = key;
     const d = dayOnly(pick(r, COL.ads.date));
-    const s = unitInfo[key] || (unitInfo[key] = { adId: id, name, campaign: '', date: '' });
+    const s = unitInfo[key] || (unitInfo[key] = { adId: id, name, names: new Map(), campaign: '', date: '' });
+    if (!(s.names.get(name) >= d)) s.names.set(name, d);
     // The newest row names the ad: a rename shows there first.
     if (d >= s.date) {
       s.date = d; s.name = name;
@@ -638,18 +681,28 @@ function analyze(data, options) {
     }
   });
 
-  /* The ad's tag. An exact name decides and is remembered per Ad ID (handed
-     back as learnedIds for the app to store), so a renamed ad keeps its tag.
-     A remembered tag never beats a manual mapping or the current exact name,
-     only a suggestion. */
-  const unitMatch = dict(), learnedIds = {};   // keys are digit-only Ad IDs
+  /* The ad's tag, from its newest name. When that name decides nothing, an
+     older name of the same ad in this data can (a rename inside the period),
+     then the tag the Ad ID earned earlier. An exact name is remembered per Ad
+     ID (learnedIds, stored by the app), so a renamed ad keeps its tag; a
+     manual mapping drops a remembered tag that disagrees (forgetIds), so a
+     correction is not undone by the next rename. */
+  const unitMatch = dict(), learnedIds = {}, forgetIds = [];   // digit-only Ad IDs
+  const isSure = x => x.confidence >= 0.85 && !x.candidateTag;
   Object.keys(unitInfo).forEach(key => {
     const u = unitInfo[key];
-    let m = matchAdToTag(u.name, affiliateTags, tagMap);
-    const sure = m.confidence >= 0.85 && !m.candidateTag;
-    if (u.adId && (m.method === 'Exact' || m.method === 'Pipe')) learnedIds[u.adId] = m.tag;
+    let m = matchAdToTag(u.name, affiliateTags, tagMap), base = m.method;
+    if (!isSure(m)) {
+      const older = [...u.names].filter(([nm]) => nm !== u.name).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
+      for (const [nm] of older) {
+        const o = matchAdToTag(nm, affiliateTags, tagMap);
+        if (isSure(o)) { m = { tag: o.tag, method: o.method + ' (nama lama)', confidence: 0.9, oldName: nm }; base = o.method; break; }
+      }
+    }
     const kept = u.adId && Object.prototype.hasOwnProperty.call(adIdMap, u.adId) ? cleanTag(adIdMap[u.adId]) : '';
-    if (!sure && kept) m = { tag: kept, method: 'Ad ID', confidence: 0.9 };
+    if (u.adId && (base === 'Exact' || base === 'Pipe')) learnedIds[u.adId] = m.tag;
+    else if (kept && /^(Pipe\+)?Manual$/.test(base) && kept !== m.tag) forgetIds.push(u.adId);
+    if (!isSure(m) && kept) m = { tag: kept, method: 'Ad ID', confidence: 0.9 };
     unitMatch[key] = m;
   });
 
@@ -882,7 +935,9 @@ function analyze(data, options) {
       let metaClicks = 0, shopeeHits = 0, days = 0;
       Object.keys(b.daily).forEach(d => {
         const dd = b.daily[d];
-        if (!isDate(d) || d < clkStart || d > clkEnd || !(dd.spend > 0)) return;
+        // A day with no click at all in the report is a missing file, not a
+        // broken link: Rizqie's real outage still logged 36 clicks.
+        if (!isDate(d) || d < clkStart || d > clkEnd || !(dd.spend > 0) || !clickDaily[d]) return;
         metaClicks += dd.clicks; shopeeHits += dd.shopeeClicks || 0; days++;
       });
       if (metaClicks > 0) {
@@ -1136,7 +1191,7 @@ function analyze(data, options) {
   return {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
-    kpi, tags, adUnits, daily, matchLog, learnedIds, lagProfile, lagCal, settlement, actions,
+    kpi, tags, adUnits, daily, matchLog, learnedIds, forgetIds, lagProfile, lagCal, settlement, actions,
     statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
       const v = statusDay[d];
       const done = v.done.size, pending = v.pending.size, unpaid = v.unpaid.size,
@@ -1311,6 +1366,6 @@ function buildTrend(snapshots, account) {
 return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
-  cleanTag, resolveClickTag, strictKey, tagLookup, intactAdId, COL, pick, topOf, variantOf, variantClash, overlapScore,
+  cleanTag, resolveClickTag, strictKey, tagLookup, intactAdId, idAgrees, COL, pick, topOf, variantOf, variantClash, overlapScore,
 };
 });

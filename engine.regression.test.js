@@ -348,4 +348,87 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   assert.equal(analyze({ affiliate: [aff('o1')], ads }).tags.find(t => t.tag === 'A').capture, null, 'no click report, no verdict');
 }
 
+/* ── Review round 1 ────────────────────────────────────────────────────── */
+{
+  // Mapping TumblerIG by hand must not take Tumblerig off its exact tag.
+  const tags = ['tumblerig', 'Tumblerig'];
+  assert.equal(E.matchAdToTag('Tumblerig', tags, { TumblerIG: 'tumblerig' }).method, 'Exact');
+  assert.equal(E.matchAdToTag('TumblerIG', tags, { TumblerIG: 'tumblerig' }).method, 'Manual');
+  // A mapping in lower case (every mapping saved before case mattered) still
+  // holds for any spelling.
+  assert.equal(E.matchAdToTag('Telesin Video 2', ['TelesinGripvideo2'], { 'telesin video 2': 'TelesinGripvideo2' }).method, 'Manual');
+  assert.equal(E.matchAdToTag('TumblerIG', tags, { tumblerig: 'Tumblerig' }).tag, 'Tumblerig');
+}
+{
+  // A rename inside the period: the older exact name still decides, and is learned.
+  const id = '120212345678901234';
+  const r = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Kuku' })],
+    ads: [ad('2026-08-01', 100, { 'Ad name': 'Kuku', 'Ad ID': id }), ad('2026-08-02', 100, { 'Ad name': 'Kuku baru (salinan)', 'Ad ID': id })] });
+  assert.equal(r.adUnits.length, 1);
+  assert.equal(r.matchLog[0].adName, 'Kuku baru (salinan)');
+  assert.equal(r.matchLog[0].method, 'Exact (nama lama)');
+  assert.equal(r.tags.find(t => t.tag === 'Kuku').spend, 200);
+  assert.deepEqual(r.learnedIds, { [id]: 'Kuku' });
+}
+{
+  // "BantalTidur-2309A" in the click report is BantalTidur with slot two
+  // filled, not the tag BantalTidur2309A.
+  const known = E.tagLookup(['BantalTidur', 'BantalTidur2309A']);
+  assert.equal(E.resolveClickTag('BantalTidur-2309A---', known), 'BantalTidur');
+  assert.equal(E.resolveClickTag('BantalTidur2309A----', known), 'BantalTidur2309A');
+  // A click-only sub_id with slot two filled splits when the click report
+  // also shows it alone.
+  const r = analyze({ affiliate: [aff('o1', 500)], ads: [ad('2026-08-01', 300, { 'Ad name': 'TesBaru' })],
+    clicks: [click('2026-08-01', { 'Tag_link': 'TesBaru----' }), click('2026-08-01', { 'Tag_link': 'TesBaru-promo---', 'Klik ID': 'k2' })] });
+  assert.equal(r.matchLog[0].method, 'Exact');
+  assert.equal(r.tags.find(t => t.tag === 'TesBaru').shopeeClicks, 2);
+  assert.ok(!r.tags.some(t => t.tag === 'TesBaru-promo'), 'no phantom tag');
+}
+{
+  // Every suggestion stays under the "assigned" line, Lemah included.
+  for (const [name, tags] of [['Kaos Polos', ['KaosPolosHitamXyz']], ['produk baru solid', ['HelmRsixSolid', 'produk lama']]]) {
+    const m = E.matchAdToTag(name, tags, {});
+    assert.ok(m.confidence <= 0.45, `${name}: ${m.method} ${m.confidence}`);
+  }
+}
+{
+  // A manual correction drops the remembered tag it overrides, so the next
+  // rename does not bring the rejected tag back.
+  const id = '120212345678901234';
+  const r = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Varo' }), aff('o2', 500, { 'Tag_link1': 'VaroSetelanJumbo1' })],
+    ads: [ad('2026-08-01', 100, { 'Ad name': 'Varo', 'Ad ID': id })], tagMap: { Varo: 'VaroSetelanJumbo1' }, adIdMap: { [id]: 'Varo' } });
+  assert.equal(r.matchLog[0].tag, 'VaroSetelanJumbo1');
+  assert.deepEqual(r.forgetIds, [id]);
+  assert.deepEqual(r.learnedIds, {});
+}
+{
+  // A damaged ID joins the one intact ID it can be, and only that one.
+  assert.ok(E.idAgrees('1.20212E+17', '120212345678901234'));
+  assert.ok(E.idAgrees('120212345678902000', '120212345678901789'), 'rounded up');
+  assert.ok(!E.idAgrees('120212345678901000', '120212345678905678'));
+  assert.ok(!E.idAgrees('abc', '120212345678905678'));
+  const X = '120212345678901234';
+  const r = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Kuku' })],
+    ads: [ad('2026-08-01', 100, { 'Ad name': 'Kuku', 'Ad ID': '120212345678901000' }),
+          ad('2026-08-01', 900, { 'Ad name': 'Kuku', 'Ad ID': '120212345678906000' }),
+          ad('2026-08-02', 100, { 'Ad name': 'Kuku', 'Ad ID': X })] });
+  assert.equal(r.adUnits.find(u => u.adId === X).spend, 200);
+  assert.equal(r.adUnits.length, 2, "the other ad's spend is not reported as X");
+  // A genuine 17-digit ID ending in 00 is not merged into another ad with the same name.
+  const g = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Kuku' })],
+    ads: [ad('2026-08-01', 100, { 'Ad name': 'Kuku', 'Ad ID': '23851234567890500' }),
+          ad('2026-08-01', 300, { 'Ad name': 'Kuku', 'Ad ID': '23859999999999123' })] });
+  assert.equal(g.adUnits.length, 2);
+}
+{
+  // Days the click report does not cover at all are left out of the capture.
+  const days = Array.from({ length: 9 }, (_, i) => `2026-08-0${i + 1}`);
+  const ads = days.map(d => ad(d, 100, { 'Ad name': 'Varo', 'Link clicks': 100 }));
+  const clicks = ['2026-08-01', '2026-08-09'].flatMap(d => Array.from({ length: 90 }, (_, i) => click(d, { 'Tag_link': 'Varo----', 'Klik ID': d + i })));
+  const cap = analyze({ affiliate: [aff('o1', 500, { 'Tag_link1': 'Varo' })], ads, clicks }).tags.find(t => t.tag === 'Varo').capture;
+  assert.equal(cap.days, 2);
+  assert.equal(cap.metaClicks, 200);
+  assert.equal(cap.low, false);
+}
+
 console.log('engine regression tests: PASS');

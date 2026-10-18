@@ -29,7 +29,7 @@ function saveMap(m){localStorage.setItem(LS.map+'_'+active(),JSON.stringify(m))}
    typed, and a manual mapping or the current exact name always beats it. */
 const ADMAP='adash_admap_v1';
 function adIdMap(){try{const m=JSON.parse(readStorage(ADMAP+'_'+active()));return m&&typeof m==='object'&&!Array.isArray(m)?Object.fromEntries(Object.entries(m).filter(([k,v])=>/^\d+$/.test(k)&&typeof v==='string'&&v)):{}}catch(e){return{}}}
-function rememberAdIds(learned){const m=adIdMap();let changed=false;Object.entries(learned||{}).forEach(([k,v])=>{if(m[k]!==v){m[k]=v;changed=true}});if(changed)try{localStorage.setItem(ADMAP+'_'+active(),JSON.stringify(m))}catch(e){}}
+function rememberAdIds(learned,forget){const m=adIdMap();let changed=false;Object.entries(learned||{}).forEach(([k,v])=>{if(m[k]!==v){m[k]=v;changed=true}});(forget||[]).forEach(k=>{if(k in m){delete m[k];changed=true}});if(changed)try{localStorage.setItem(ADMAP+'_'+active(),JSON.stringify(m))}catch(e){}}
 const SNAP_STATUSES=new Set(['scale','pantau','stop','organik','evaluasi']);
 function validSnapshot(x){
   if(!x||typeof x!=='object'||!Number.isSafeInteger(x.id)||x.id<0||typeof x.saved!=='string'||!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/.test(x.saved)||!Number.isFinite(Date.parse(x.saved.replace(' ','T'))))return false;
@@ -242,7 +242,7 @@ function renderPeriod(){
 }
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
-function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map(),adIdMap:adIdMap()},o);rememberAdIds(RESULT.learnedIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
+function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map(),adIdMap:adIdMap()},o);rememberAdIds(RESULT.learnedIds,RESULT.forgetIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
 function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
@@ -917,7 +917,7 @@ document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
 function suggestHtml(m){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
   const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
   return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
-$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[E.normalize(b.dataset.acceptAd)]=b.dataset.acceptTag;
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
   try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
   // Keep the rows below in step: Simpan rebuilds the map from them, and would
   // otherwise drop the mapping just accepted.
@@ -1120,7 +1120,7 @@ document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{
 });
 $('btnAddMap').onclick=()=>{$('mapRows').insertAdjacentHTML('beforeend',mapRow('',''));bindDel()};
 $('btnSaveMap').onclick=()=>{const m=Object.create(null);$('mapRows').querySelectorAll('.maprow').forEach(r=>{
-  const k=E.normalize(r.querySelector('[data-k]').value),v=r.querySelector('[data-v]').value.trim();
+  const k=r.querySelector('[data-k]').value.trim(),v=r.querySelector('[data-v]').value.trim();
   if(k&&v)m[k]=v});try{saveMap(m)}catch(e){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')} closeModal($('mapModal'));toast('Mapping disimpan');recalc()};
 const MODAL_OPENERS=new WeakMap();
 function openModal(id){const m=$(id),previous=document.querySelector('.modal.show'),opener=previous?(MODAL_OPENERS.get(previous)||document.activeElement):document.activeElement;document.querySelectorAll('.modal.show').forEach(x=>closeModal(x,false));MODAL_OPENERS.set(m,opener);m.classList.add('show');m.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');requestAnimationFrame(()=>m.querySelector('.modal-box').focus())}
