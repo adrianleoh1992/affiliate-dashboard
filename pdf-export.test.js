@@ -474,6 +474,70 @@ async function main() {
     assert.ok(ppnText[1].includes('Komisi efektif - biaya iklan'));
     assert.ok(ppnText[1].some(line => line.endsWith(' | PPN biaya iklan 0% | Semua nilai uang dalam IDR')));
     console.log('PASS PDF names the PPN on every page without a PPN what-if');
+    // Must-scale account: 54 STOP tags losing Rp 165.000 each (Rp 9,72 jt gross STOP spend), three
+    // overbid PANTAU tags and a leaking link inside and outside STOP. Tag names are short, so any
+    // '...' on page 1 is a card note that did not fit the 4-column grid.
+    const scaleDate = '2026-09-01';
+    // [tag, spend, commission, Meta link clicks, Shopee clicks]
+    const scaleSpecs = [
+      ...Array.from({ length: 53 }, (_, i) => ['Stop ' + String(i + 1).padStart(2, '0'), 180000, 15000, 0, 0]),
+      ['Stop Bocor', 180000, 15000, 400, 0],    // STOP; none of 400 clicks arrive
+      ['Scale Bocor', 250000, 750000, 500, 50], // SCALE; 10% of 500 clicks arrive
+      ['Sedikit', 100000, 300000, 120, 12],     // also 10%, but 120 clicks is under the 300-click floor
+      ...[1, 2, 3].map(i => ['Bid ' + i, 100000, 144000, 200, 190]), // ROAS 1,44: PANTAU paying above its ideal CPC
+    ];
+    const mustScale = Engine.analyze({
+      affiliate: scaleSpecs.map(([tag, , commission], index) => ({ 'ID Pemesanan': 'scale-' + index, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': scaleDate + ' 10:00:00', 'Waktu Klik': scaleDate + ' 09:00:00', 'Tag_link1': tag,
+        'Total Komisi per Produk(Rp)': String(commission) })),
+      ads: scaleSpecs.map(([tag, spend, , meta]) => ({ 'Ad name': tag, 'Amount spent (IDR)': String(spend),
+        'Reporting starts': scaleDate, 'Reporting ends': scaleDate, 'Link clicks': String(meta), 'Ad delivery': 'active' })),
+      clicks: scaleSpecs.flatMap(([tag, , , , shopee]) => Array.from({ length: shopee }, () => ({
+        'Waktu Klik': scaleDate + ' 09:00:00', 'Tag_link': tag }))),
+    }, { ppn: 0, lagDays: 0, minDays: 1 });
+    const act = mustScale.actions, scaleLeak = tag => mustScale.tags.find(t => t.tag === tag).leak;
+    assert.equal(act.stopCount, 54);
+    assert.equal(act.overbidCount, 3);
+    assert.deepEqual([act.stopLoss, act.stopSpend, act.bidSaving, act.maxGain, act.reclaimable], [8910000, 9720000, 60000, 8970000, 9780000],
+      'fixture: STOP tags still earn, so the loss (and maxGain) differ from the gross spend (and reclaimable)');
+    assert.deepEqual([act.leakStopCount, act.leakLiveCount, mustScale.kpi.leakTags], [1, 1, 2], 'fixture: one leaking link inside STOP, one outside');
+    assert.deepEqual([act.leakWasteLive, act.leakWaste], [225000, 405000]);
+    assert.deepEqual([scaleLeak('Sedikit').severity, scaleLeak('Sedikit').reliable], ['bad', false], 'fixture: under 25% but too few clicks to judge');
+    const scaleReport = await page.evaluate(result => {
+      const api = window.jspdf.jsPDF.API, originalTable = api.autoTable, OriginalPDF = window.jspdf.jsPDF;
+      const tables = [], front = [];
+      api.autoTable = function (options) { tables.push({ head: options.head[0], body: options.body }); return originalTable.call(this, options); };
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 1) front.push([].concat(value).join(' '));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'lengkap', generatedAt: '2026-09-02' }); }
+      finally { api.autoTable = originalTable; window.jspdf.jsPDF = OriginalPDF; }
+      return { tables, front };
+    }, mustScale);
+    const cutOff = scaleReport.front.filter(label => label.endsWith('...'));
+    assert.deepEqual(cutOff, [], 'page-1 cards must not be truncated at 54 STOP tags and Rp 9,72 jt: ' + cutOff.join(' | '));
+    const scaleCard = label => scaleReport.front.slice(scaleReport.front.indexOf(label) + 1, scaleReport.front.indexOf(label) + 3);
+    assert.deepEqual(scaleCard('Rugi di Tag STOP'), ['Rp 8.910.000,00', '54 tag'], 'the STOP card quotes actions.stopLoss, not the gross stopSpend');
+    assert.deepEqual(scaleCard('Potensi perbaikan laba'), ['Rp 8.970.000,00', 'Batas atas: bid + rugi STOP'],
+      'the card quotes actions.maxGain, not the legacy reclaimable budget');
+    const priority = Object.fromEntries(scaleReport.tables.find(t => t.head[0] === 'Periksa').body.map(row => [row[0], row.slice(1)]));
+    assert.equal(priority['Tag berstatus Stop'][0], '54');
+    assert.ok(priority['Tag berstatus Stop'][1].startsWith('Rp 8.910.000,00 rugi | '), 'the Stop row leads with the loss: ' + priority['Tag berstatus Stop'][1]);
+    assert.ok(priority['Tag berstatus Stop'][1].includes('biaya Rp 9.720.000,00 | 1 tag cek link dulu'), 'gross STOP spend, off the page-1 card, stays in this row');
+    // The leaking STOP tag is already in the Stop row; this row claims only the live one.
+    assert.deepEqual(priority['Link perlu dicek (di luar Stop)'], ['1', 'Rp 225.000,00 biaya klik kurang (maks.)'],
+      'the link row uses leakLiveCount and leakWasteLive, not the all-tag totals');
+    const masuk = Object.fromEntries(scaleReport.tables.find(t => t.head[4] === 'Masuk').body.map(row => [row[0], row[4]]));
+    assert.equal(masuk['Sedikit'], '10,00%\ndata sedikit', 'under 300 Meta clicks a low arrival rate is not a link verdict');
+    assert.equal(masuk['Scale Bocor'], '10,00%\ncek link');
+    assert.equal(masuk['Stop Bocor'], '0,00%\ncek link');
+    console.log('PASS PDF must-scale cards fit page 1; STOP loss, maxGain and live link money match Prioritas tindakan and the leak table');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);
