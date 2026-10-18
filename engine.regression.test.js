@@ -148,12 +148,96 @@ assert.equal(saving.tags[0].status, 'stop');
 assert.equal(saving.actions.bidSaving, 0);
 near(saving.actions.reclaimable, 100);
 assert.ok(saving.actions.reclaimable <= saving.kpi.spend);
+// The STOP headline is the loss, not the gross spend: the tag still earned 10.
+near(saving.actions.stopComm, 10);
+near(saving.actions.stopLoss, 90);
+near(saving.actions.maxGain, 90);
+assert.ok(saving.actions.stopLoss <= saving.actions.stopSpend);
+assert.equal(saving.actions.stopLiveCount, 1, 'the fixture ad is still delivering');
+const noDelivery = analyze({ affiliate: [aff('1', 10)], ads: [ad('2026-08-01', 100, { 'Ad delivery': '' })] });
+assert.equal(noDelivery.tags[0].status, 'stop');
+assert.equal(noDelivery.actions.stopLiveCount, null, 'without a delivery column the live count is unknown, not zero');
 
 // An inactive latest row must override an older active delivery state.
 const inactive = analyze({ ads: [ad(), ad('2026-08-02', 100, { 'Ad delivery': 'inactive' })] });
 assert.equal(inactive.adUnits[0].active, false);
 assert.equal(inactive.adUnits[0].delivery, 'inactive');
 assert.equal(analyze({ ads: [ad('2026-08-01', 100, { 'Ad delivery': 'tidak aktif' })] }).adUnits[0].active, false);
+
+// Link health and click-loss totals. One order and one ads row per tag per day;
+// spec values are per day, so 4 days of 160 Meta clicks make 640.
+function linkFixture(spec, days) {
+  const affiliate = [], ads = [], clicks = [];
+  for (let i = 1; i <= days; i++) {
+    const date = '2026-08-0' + i;
+    for (const [tag, s] of Object.entries(spec)) {
+      ads.push(ad(date, s.spend, { 'Ad name': tag, 'Link clicks': s.meta }));
+      for (let c = 0; c < s.shopee; c++) clicks.push(click(date, { 'Tag_link': tag }));
+      const comm = typeof s.comm === 'function' ? s.comm(i) : s.comm;
+      if (comm) affiliate.push(aff(tag + i, comm, { 'Tag_link1': tag,
+        'Waktu Pemesanan': date + ' 10:00:00', 'Waktu Klik': date + ' 09:00:00' }));
+    }
+  }
+  return analyze({ affiliate, ads, clicks });
+}
+// A surplus on B is reported beside A's shortfall, never silently netted into it.
+const netting = linkFixture({ A: { spend: 100, meta: 10, shopee: 5, comm: 300 }, B: { spend: 100, meta: 20, shopee: 25, comm: 300 } }, 1);
+assert.equal(netting.kpi.lostClicks, 5);
+assert.equal(netting.kpi.gainClicks, 5);
+assert.equal(netting.kpi.netLostClicks, 0);
+near(netting.kpi.wastedLow, 0);
+near(netting.kpi.wasted, netting.tags.find(t => t.tag === 'A').leak.wasted);
+
+const health = linkFixture({
+  Broken: { spend: 1000, meta: 160, shopee: 0, comm: 100 },     // 0% of 640: STOP on its streak
+  LiveLeak: { spend: 1000, meta: 100, shopee: 10, comm: 5000 }, // 10% of 400 on a SCALE tag
+  Cheap: { spend: 1000, meta: 100, shopee: 38, comm: 1500 },    // 38%: amber, not a link verdict
+  Outside: { spend: 1000, meta: 100, shopee: 300, comm: 5000 }, // 300% of 400: outside traffic
+  Tiny: { spend: 1000, meta: 5, shopee: 1, comm: 3000 },        // 20% of 20: too few clicks
+  Faded: { spend: 1000, meta: 10, shopee: 10, comm: day => day === 1 ? 10000 : 0 }, // STOP, still net positive
+}, 4);
+const H = Object.fromEntries(health.tags.map(t => [t.tag, t]));
+assert.equal(H.Broken.status, 'stop');
+assert.equal(H.Broken.leak.severity, 'bad');
+assert.equal(H.Broken.leak.reliable, true);
+assert.match(H.Broken.reason, /^ROAS di bawah 1 selama 4 hari produksi berturut$/, 'the link warning must not replace the STOP reason');
+assert.equal(H.Broken.linkNote, 'hanya 0% klik sampai Shopee — cek link sebelum dimatikan');
+assert.equal(H.LiveLeak.status, 'scale');
+assert.equal(H.LiveLeak.linkNote, 'hanya 10% klik sampai Shopee — cek link');
+assert.equal(H.Cheap.leak.severity, 'warn');
+assert.equal(H.Cheap.linkNote, '');
+assert.equal(H.Outside.leak.severity, 'over');
+assert.equal(H.Outside.leak.reliable, true);
+assert.equal(H.Outside.status, 'scale', 'link health must not change verdicts');
+assert.match(H.Outside.linkNote, /ROAS memuat trafik lain, anggap batas atas$/);
+assert.equal(H.Tiny.leak.severity, 'bad');
+assert.equal(H.Tiny.leak.reliable, false);
+assert.equal(H.Tiny.linkNote, '');
+assert.equal(health.kpi.leakTags, 2, 'only reliable tags under 25% count as link problems');
+near(health.actions.leakWaste, H.Broken.leak.wasted + H.LiveLeak.leak.wasted);
+// A leaking STOP tag's spend is already in the STOP card; the link card keeps the rest.
+near(health.actions.leakWasteStop, H.Broken.leak.wasted);
+near(health.actions.leakWasteLive, H.LiveLeak.leak.wasted);
+assert.equal(health.actions.leakStopCount, 1);
+assert.equal(health.actions.leakLiveCount, 1);
+near(health.actions.leakWasteLive + health.actions.leakWasteStop, health.actions.leakWaste);
+// STOP money: loss, commission and spend reported apart; the tail adds profit changes only.
+assert.equal(H.Faded.status, 'stop');
+assert.equal(health.actions.stopCount, 2);
+assert.equal(health.actions.stopProfitCount, 1);
+assert.equal(health.actions.stopLiveCount, 2);
+near(health.actions.stopSpend, 8000);
+near(health.actions.stopComm, 10400);
+near(health.actions.stopLoss, 3600);
+near(health.actions.maxGain, health.actions.bidSaving + 3600);
+// Snapshots keep the real reason and gain no string fields (validSnapshot rejects them).
+const healthSnap = E.toSnapshot(health, { id: 1, saved: '2026-08-05 00:00:00' });
+for (const t of healthSnap.tags) for (const [k, v] of Object.entries(t)) {
+  assert.ok(['tag', 'label', 'reason', 'status'].includes(k) || v === null || Number.isFinite(v), 'snapshot tag field ' + k);
+}
+assert.ok(!healthSnap.tags.some(t => /cek link/.test(t.reason)));
+assert.deepEqual(Object.keys(healthSnap.kpi).filter(k => /^(wastedLow|lostClicks|gainClicks|netLostClicks)$/.test(k)), [],
+  'new click totals stay out of snapshots so older trend points do not read as zero');
 
 // Click-only data and dates are meaningful even without affiliate/ads rows.
 const clicksOnly = analyze({ clicks: [click()] });

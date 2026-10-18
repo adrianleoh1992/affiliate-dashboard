@@ -83,6 +83,11 @@ function diffDays(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 }
 function dict() { return Object.create(null); }
+/* Link health (README 5.6): under 25% of paid clicks arriving means the link or
+   sub_id is likely wrong; 25-70% is often just very cheap clicks; over 120% means
+   the tag also gets traffic from outside its ads, so its ROAS is an upper bound.
+   Judged only after enough paid clicks in the click window. */
+const LINK = { low: 25, warn: 70, over: 120, minClicks: 300 };
 // Comma decimals, matching the dashboard and PDF: 1,25x rather than 1.25x.
 function ratioText(n) { return n.toFixed(2).replace('.', ','); }
 function normalizeOptions(options) {
@@ -698,7 +703,7 @@ function analyze(data, options) {
   /* ── Per-tag verdicts ───────────────────────────────────────────────── */
   const targetMult = 1 + o.targetROI / 100;
 
-  function verdictFor(spend, commEff, daysProd, dailyRows, leak, hasPaidSpend) {
+  function verdictFor(spend, commEff, daysProd, dailyRows, hasPaidSpend) {
     let streak = 0;
     dailyRows.forEach(r => { if (r.roas < 1) streak++; else streak = 0; });
     const streakStop = streak >= o.streakDays;
@@ -726,9 +731,6 @@ function analyze(data, options) {
     } else {
       status = 'stop'; label = 'STOP';
       reason = `ROAS efektif matang ${ratioText(roasEff)}x di bawah titik impas`;
-    }
-    if (leak && leak.severity === 'bad' && status === 'stop') {
-      reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
     }
     return { status, label, reason, streak };
   }
@@ -770,7 +772,8 @@ function analyze(data, options) {
       const wasted = (winSpend / b.metaClicksWindow) * failed;
       leak = {
         metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
-        severity: pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad',
+        reliable: b.metaClicksWindow >= LINK.minClicks,
+        severity: pct < LINK.low ? 'bad' : pct < LINK.warn ? 'warn' : pct > LINK.over ? 'over' : 'ok',
       };
     }
 
@@ -803,8 +806,13 @@ function analyze(data, options) {
     const matureCommEff = Object.keys(b.daily).filter(isMature).reduce((sum, d) => sum + (b.daily[d].commEff || 0), 0);
     const matureRoasEff = matureSpend > 0 ? matureCommEff / matureSpend : 0;
     const v = spend > 0
-      ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, leak, true)
-      : verdictFor(spend, commEff, daysProd, dailyRows, leak, false);
+      ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, true)
+      : verdictFor(spend, commEff, daysProd, dailyRows, false);
+    /* Kept apart from reason, so the real STOP/SCALE reason stays visible. Not
+       stored in snapshots: validSnapshot accepts no extra string fields. */
+    const linkNote = !leak || !leak.reliable ? ''
+      : leak.severity === 'bad' ? `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link${v.status === 'stop' ? ' sebelum dimatikan' : ''}`
+      : leak.severity === 'over' ? `klik Shopee ${Math.round(leak.pct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas` : '';
 
     let bidHint = '';
     if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
@@ -829,7 +837,7 @@ function analyze(data, options) {
       shopeeClicks, cpcShopee, winSpend, winClicks,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
-      leak, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
+      leak, status: v.status, label: v.label, reason: v.reason, linkNote, streak: v.streak, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
@@ -911,6 +919,20 @@ function analyze(data, options) {
   const paidComm = paid.reduce((s, t) => s + t.commEff, 0);
   const organicComm = tags.filter(t => t.status === 'organik').reduce((s, t) => s + t.commEff, 0);
 
+  /* Per-tag shortfalls and surpluses on the click window. Part of one tag's
+     missing clicks can land on another tag (wrong sub_id); part of a surplus is
+     organic or other-account traffic. The data cannot tell which, so both ends
+     are kept: the per-tag sum and the net. */
+  const clickTags = tags.filter(t => t.leak);
+  const winMeta = clickTags.reduce((s, t) => s + t.leak.metaClicks, 0);
+  const winShopee = clickTags.reduce((s, t) => s + t.leak.shopeeClicks, 0);
+  const lostClicks = clickTags.reduce((s, t) => s + t.leak.failed, 0);
+  const gainClicks = clickTags.reduce((s, t) => s + Math.max(t.leak.shopeeClicks - t.leak.metaClicks, 0), 0);
+  const netLostClicks = Math.max(winMeta - winShopee, 0);
+  const wastedHigh = clickTags.reduce((s, t) => s + t.leak.wasted, 0);
+  // One rule for "check the link", shared by the banner count and the link money.
+  const linkBad = t => !!(t.leak && t.leak.reliable && t.leak.severity === 'bad');
+
   const kpi = {
     spend: totalSpend,
     comm: totalComm,
@@ -944,8 +966,11 @@ function analyze(data, options) {
     avgOrder: allOrders.size > 0 ? sum(t => t.gmv) / allOrders.size : 0,
     commRate: sum(t => t.gmv) > 0 ? totalComm / sum(t => t.gmv) * 100 : 0,
     shopeeClicks: fClk.length,
-    wasted: tags.reduce((s, t) => s + (t.leak ? t.leak.wasted : 0), 0),
-    leakTags: tags.filter(t => t.leak && t.leak.severity === 'bad').length,
+    wasted: wastedHigh, // upper end; same meaning as before, stored in snapshots
+    // Lower end: as if every surplus click were a misrouted paid click.
+    wastedLow: lostClicks > 0 ? wastedHigh * netLostClicks / lostClicks : 0,
+    lostClicks, gainClicks, netLostClicks,
+    leakTags: tags.filter(linkBad).length,
     excluded, statusCount,
     counts: { scale: 0, pantau: 0, stop: 0, organik: 0, evaluasi: 0 },
   };
@@ -979,7 +1004,18 @@ function analyze(data, options) {
   const stopTags = tags.filter(t => t.status === 'stop');
   const stopSpend = stopTags.reduce((s, t) => s + t.spend, 0);
   const stopLoss = Math.abs(stopTags.reduce((s, t) => s + Math.min(t.netEff, 0), 0));
-  const leakWaste = tags.reduce((s, t) => s + (t.leak && t.leak.severity === 'bad' ? t.leak.wasted : 0), 0);
+  const stopComm = stopTags.reduce((s, t) => s + t.commEff, 0);
+  const stopProfitCount = stopTags.filter(t => t.netEff > 0).length;
+  /* Most STOP tags are already off when the report is exported, so their loss
+     is history rather than a saving still to make. Null without a delivery column. */
+  const hasDelivery = adUnits.some(u => u.delivery);
+  const liveTags = new Set(adUnits.filter(u => u.active).map(u => u.tag));
+  const stopLiveCount = hasDelivery ? stopTags.filter(t => liveTags.has(t.tag)).length : null;
+  /* A leaking STOP tag's spend is already inside stopSpend. Split the link money
+     so the link card only claims tags where fixing the link is the action. */
+  const leakWaste = tags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
+  const leakWasteStop = stopTags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
+  const leakStopCount = stopTags.filter(linkBad).length;
 
   /* Organic tags earn with zero ad spend — the strongest ad candidates in the
      account, previously shown only as a purple badge with no suggestion. */
@@ -1007,8 +1043,12 @@ function analyze(data, options) {
 
   const actions = {
     bidSaving, overbidCount: overbid.length,
-    stopSpend, stopLoss, stopCount: stopTags.length,
-    leakWaste, reclaimable: bidSaving + stopSpend,
+    stopSpend, stopLoss, stopComm, stopProfitCount, stopLiveCount, stopCount: stopTags.length,
+    leakWaste, leakWasteStop, leakWasteLive: leakWaste - leakWasteStop,
+    leakStopCount, leakLiveCount: kpi.leakTags - leakStopCount,
+    // Profit changes only: the bid gap plus this period's loss on STOP tags.
+    maxGain: bidSaving + stopLoss,
+    reclaimable: bidSaving + stopSpend, // legacy: gross budget, not savings; kept for JSON export readers
     organicCandidates, concentration,
   };
 

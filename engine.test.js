@@ -66,6 +66,7 @@ assert.equal(a.leak.metaClicks, 20);
 assert.equal(a.leak.shopeeClicks, 2);
 assert.equal(a.leak.failed, 18);
 assert.equal(a.leak.severity, 'bad');
+assert.equal(a.leak.reliable, false, '20 Meta clicks are too few to judge a link');
 
 /* Verdict: mature ROAS is 275/100 = 2.75x. Aug 2-4 sit inside the
    3-day lag window and must not turn this profitable mature tag into STOP. */
@@ -78,7 +79,10 @@ assert.equal(r.range.matureUntil, '2026-08-01');
 const r2 = E.analyze(data, { ppn:0, minSpend:0, minDays:1, lagDays:0, streakDays:3 });
 const a2 = r2.tags.find(x => x.tag === 'A');
 assert.ok(a2.streak >= 3, 'without lag the streak should fire, got ' + a2.streak);
-assert.ok(/cek link/.test(a2.reason), 'severe leak should redirect the STOP reason: ' + a2.reason);
+// The link warning no longer replaces the STOP reason, and 20 clicks are too few to raise one.
+assert.match(a2.reason, /ROAS di bawah 1 selama \d+ hari produksi berturut/, 'the STOP reason must stay the real reason');
+assert.equal(a2.leak.reliable, false);
+assert.equal(a2.linkNote, '');
 
 /* Ad-unit grain */
 assert.equal(r.adUnits.length, 1);

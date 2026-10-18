@@ -221,20 +221,23 @@
     const metaClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.metaClicks), 0);
     const shopeeClicks = clickTags.reduce((sum, t) => sum + amount(t.leak.shopeeClicks), 0);
     const lostClicks = clickTags.reduce((sum, t) => sum + Math.max(0, amount(t.leak.metaClicks) - amount(t.leak.shopeeClicks)), 0);
+    // The per-tag sum stays the headline; the net is printed beside it because
+    // a surplus on one tag may or may not be another tag's misrouted clicks.
+    const netLost = Math.max(0, metaClicks - shopeeClicks);
     const hasClickComparison = clickTags.length > 0;
     const hasAds = amount(result.counts && result.counts.ads) > 0;
     section('Klik Meta dan Shopee');
     metricGrid([
       ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
       ['Klik Shopee', hasClickComparison ? integer(shopeeClicks) : '-', 'Jendela dan tag sama'],
-      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', 'Selisih turun per tag', lostClicks > 0],
+      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? 'Per tag; bersih ' + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
       ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Shopee / Meta'],
     ], 4);
     section('Prioritas anggaran');
     metricGrid([
       ['Hemat dari Turunkan Bid', money(a.bidSaving), integer(a.overbidCount) + ' tag di atas CPC ideal'],
-      ['Biaya di Tag STOP', money(a.stopSpend), integer(tags.filter(t => t.status === 'stop').length) + ' tag pada periode ini'],
-      ['Total bisa dialihkan', money(a.reclaimable), 'Estimasi dari biaya historis'],
+      ['Rugi di Tag STOP', money(a.stopLoss), integer(a.stopCount) + ' tag | biaya ' + money(a.stopSpend)],
+      ['Potensi perbaikan laba', money(a.maxGain), 'Batas atas: bid + rugi STOP'],
     ], 3);
     section('Keputusan utama');
     decisionBoard();
@@ -285,11 +288,13 @@
 
     section('Prioritas tindakan');
     table(['Periksa', 'Tag', 'Nilai terkait'], [
-      ['Tag berstatus Stop', integer(tags.filter(t => t.status === 'stop').length), money(a.stopSpend) + ' biaya periode ini'],
+      ['Tag berstatus Stop', integer(tags.filter(t => t.status === 'stop').length), money(a.stopLoss) + ' rugi | biaya ' + money(a.stopSpend)
+        + (amount(a.leakStopCount) ? ' | ' + integer(a.leakStopCount) + ' tag cek link dulu' : '')],
       ['Bid di atas target', integer(a.overbidCount), money(a.bidSaving) + ' selisih terhadap CPC ideal'],
-      ['Selisih klik berat', integer(tags.filter(t => t.leak && t.leak.severity === 'bad').length), money(a.leakWaste) + ' estimasi biaya terkait'],
+      // Leaking STOP tags are already counted in the Stop row above.
+      ['Link perlu dicek (di luar Stop)', integer(a.leakLiveCount), money(a.leakWasteLive) + ' biaya klik kurang (maks.)'],
     ], [74, 20, 88], { numeric: [1] });
-    paragraph('Nilai tindakan memakai biaya historis, bukan jaminan penghematan.', { size: 7 });
+    paragraph('Nilai tindakan adalah batas atas dari data historis. Pada kampanye dengan beberapa iklan, mematikan satu iklan belum tentu mengurangi biaya.', { size: 7 });
 
     section('Kandidat iklan dari organik', 'Maksimal 8 kandidat seperti pada dashboard. Komisi laporan sebelum bobot tertunda; batas biaya per pesanan memakai komisi efektif dan target ROI.');
     table(['Tag', 'Komisi laporan', 'Pesanan', 'Maks biaya / pesanan', 'Kanal utama'], array(a.organicCandidates).filter(c => !omittedTags.has(c.tag)).map(c => [
@@ -333,7 +338,7 @@
     if (mode === 'lengkap') {
       section('Alasan keputusan', 'Rincian penjelasan untuk penelusuran setiap tag.');
       table(['Tag', 'Keputusan', 'Alasan / langkah berikutnya'], tags.map(t => [t.tag, statusNames[t.status] || t.label,
-        [t.reason, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
+        [t.reason, t.linkNote, t.bidHint].filter(Boolean).join('\n') || '-']), [47, 25, 110], { statuses: tags.map(t => t.status) });
       section('Pencocokan nama iklan dan tag', 'Kandidat pada kecocokan lemah belum dianggap cocok. Periksa pemetaan manual sebelum mengandalkan keputusan tag tersebut.');
       table(['Nama iklan', 'Tag hasil / kandidat', 'Metode / keyakinan', 'Biaya + PPN'], array(result.matchLog).filter(m => !omittedTags.has(m.tag)).map(m => [
         m.adName, m.tag + (m.candidateTag ? '\nKandidat: ' + ((m.candidates && m.candidates.length) ? m.candidates.join(' / ') : m.candidateTag) : ''), m.method + '\n' + percent(amount(m.confidence) * 100), money(m.spend),
@@ -341,9 +346,11 @@
 
       section('Perbandingan klik Meta dan Shopee', r.clickStart ? 'Jendela ' + r.clickStart + ' s/d ' + r.clickEnd + '. Selisih positif dapat mencakup klik tambahan di luar iklan; selisih negatif perlu diperiksa.' : 'Tidak tersedia laporan klik pada periode ini.');
       const leaks = tags.filter(t => t.leak && finite(t.leak.pct));
-      table(['Tag', 'Klik Meta', 'Klik Shopee', 'Selisih', 'Masuk', 'Estimasi biaya selisih'], leaks.map(t => [
+      table(['Tag', 'Klik Meta', 'Klik Shopee', 'Selisih', 'Masuk', 'Biaya klik kurang (maks.)'], leaks.map(t => [
         t.tag, integer(t.leak.metaClicks), integer(t.leak.shopeeClicks), integer(amount(t.leak.shopeeClicks) - amount(t.leak.metaClicks)),
-        percent(t.leak.pct), money(t.leak.wasted),
+        // Same link-health flags as the dashboard; small samples are not judged.
+        percent(t.leak.pct) + (t.leak.reliable ? ({ bad: '\ncek link', over: '\nROAS batas atas' }[t.leak.severity] || '') : '\ndata sedikit'),
+        money(t.leak.wasted),
       ]), [50, 25, 25, 22, 24, 36], { numeric: [1, 2, 3, 4, 5], empty: 'Perbandingan klik belum dapat dihitung.' });
 
       section('Status pesanan per hari', 'Jumlah adalah pesanan per status, bukan baris produk. Pesanan yang tercatat pada beberapa status dapat dihitung pada setiap statusnya.');

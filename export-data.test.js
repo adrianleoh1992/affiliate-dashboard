@@ -12,6 +12,14 @@ test('CSV keeps decimal precision, zero, negative amounts and multiline text',()
   assert.equal(row['Biaya + PPN'],'1250.75');assert.equal(row['Komisi efektif'],'0');assert.equal(row['Laba efektif'],'-1250.75');
   assert.equal(row['Alasan'],result.tags[0].reason);assert.equal(row['ROAS efektif'],'');
 });
+test('tags CSV appends the link note after the existing columns',()=>{
+  const data={...result,tags:[{...result.tags[0],linkNote:'hanya 0% klik sampai Shopee — cek link'}]};
+  const p=Papa.parse(X.csv(data,{account:'Toko'}),{header:true,skipEmptyLines:true});
+  assert.equal(p.meta.fields[p.meta.fields.length-1],'Catatan link');
+  assert.equal(p.meta.fields.indexOf('Alasan')+1,p.meta.fields.indexOf('Biaya + PPN'),'existing column order is unchanged');
+  assert.equal(p.data[0]['Catatan link'],'hanya 0% klik sampai Shopee — cek link');
+  assert.equal(Papa.parse(X.csv(result,{}),{header:true,skipEmptyLines:true}).data[0]['Catatan link'],'');
+});
 test('CSV neutralizes source formulas without turning negative numbers into text',()=>{
   for(const tag of ['=SUM(A1)',' +1','\t@bad','-cmd','\uFEFF=1']){
     const data={...result,tags:[{...result.tags[0],tag}]};

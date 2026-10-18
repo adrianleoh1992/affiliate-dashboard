@@ -158,7 +158,7 @@ async function main() {
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
       for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
-        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
+        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Rugi di Tag STOP', 'Potensi perbaikan laba']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
       assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
@@ -219,15 +219,17 @@ async function main() {
         return results.map(result => {
           labels = [];
           DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' });
-          return ['Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
+          // The last entry is the Klik Hilang note, which names the per-tag sum and the net.
+          return ['Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1])
+            .concat([labels[labels.indexOf('Klik Hilang') + 2]]);
         });
       } finally { window.jspdf.jsPDF = OriginalPDF; }
     }, [clickSource, { ...clickSource, clicks: [] }, { ...clickSource, ads: [] }]
       .map(source => Engine.analyze(source, { ppn: 0, lagDays: 0 })));
-    assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%'],
+    assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%', 'Per tag; bersih 0'],
       'Dashboard compares matched tags in the click window; gains on one tag must not offset lost clicks on another');
-    assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
-    assert.deepEqual(clickReports[2], ['-', '-', '-', '-'], 'Without ads, a click comparison must remain unavailable');
+    assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-', 'Jumlah per tag'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
+    assert.deepEqual(clickReports[2], ['-', '-', '-', '-', 'Jumlah per tag'], 'Without ads, a click comparison must remain unavailable');
     console.log('PASS PDF dashboard click scope, per-tag losses and unavailable comparisons');
     const partialSources = Engine.analyze({
       affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',

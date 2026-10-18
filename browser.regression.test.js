@@ -499,6 +499,41 @@ async function main() {
     assert.match(await page.locator('#dgrid .dcard.scale').innerText(), /mencapai 2,5x/);
   });
 
+  test('link warnings sit beside the real STOP reason and the action cards do not count one rupiah twice', async page => {
+    const days = Array.from({ length: 8 }, (_, i) => '2026-08-0' + (i + 1));
+    const order = (tag, date, comm) => ({ ...aff(tag + date, tag, date), 'Total Komisi per Pesanan(Rp)': String(comm) });
+    const spend = (tag, date, clicks) => ({ ...ad(tag, 20000, date), 'Link clicks': String(clicks), 'Ad delivery': 'active' });
+    await upload(page, [
+      { name: 'affiliate.csv', rows: days.flatMap(d => [order('Broken', d, 2000), order('LiveLeak', d, 100000)]) },
+      // Broken: 1.280 paid clicks, none arrive. LiveLeak: 800 paid clicks, 10% arrive.
+      { name: 'ads.csv', rows: days.flatMap(d => [spend('Broken', d, 160), spend('LiveLeak', d, 100)]) },
+      // Identical rows are deduplicated on import, so each click gets its own minute.
+      { name: 'clicks.csv', rows: days.flatMap(d => Array.from({ length: 10 }, (_, i) => ({ ...click('LiveLeak', d), 'Waktu Klik': d + ' 09:0' + i + ':00' }))) }]);
+    const ui = await page.evaluate(() => ({
+      statuses: RESULT.tags.map(t => t.tag + ':' + t.status).sort(),
+      arrived: RESULT.tags.map(t => t.tag + ':' + t.leak.shopeeClicks + '/' + t.leak.metaClicks).sort(),
+      stopLoss: rp(RESULT.actions.stopLoss), linkLive: rp(RESULT.actions.leakWasteLive), linkAll: rp(RESULT.actions.leakWaste),
+      grid: [...document.querySelectorAll('#actionGrid .action-card')].map(card => card.innerText.replace(/\s+/g, ' ').trim()),
+      banner: document.getElementById('banners').innerText,
+      lost: document.querySelector('#clickKpis .kpi.bad .sub') ? document.querySelector('#clickKpis .kpi.bad .sub').innerText : '',
+      reason: [...document.querySelectorAll('#tblMain tbody tr')].find(tr => tr.innerText.includes('Broken')).querySelector('.rs').innerText,
+      leakHead: document.querySelector('#tblLeak thead').innerText,
+    }));
+    assert.deepEqual(ui.statuses, ['Broken:stop', 'LiveLeak:scale']);
+    assert.deepEqual(ui.arrived, ['Broken:0/1280', 'LiveLeak:80/800']);
+    assert.match(ui.reason, /^ROAS .+ · hanya 0% klik sampai Shopee — cek link sebelum dimatikan/, 'the real STOP reason comes first');
+    const stopCard = ui.grid.find(text => text.startsWith('Rugi di Tag STOP'));
+    assert.ok(stopCard && stopCard.includes(ui.stopLoss) && /1 tag cek link dulu/.test(stopCard), 'STOP card: ' + stopCard);
+    const linkCard = ui.grid.find(text => text.startsWith('Hilang karena Link'));
+    assert.ok(linkCard && linkCard.includes(ui.linkLive) && /1 tag di luar STOP/.test(linkCard), 'link card: ' + linkCard);
+    assert.ok(ui.grid.some(text => text.startsWith('Potensi perbaikan laba')));
+    assert.ok(!ui.grid.some(text => /Total bisa dialihkan|Biaya di Tag STOP/.test(text)));
+    assert.match(ui.banner, /2 tag: kurang dari 25% klik sampai Shopee\./);
+    assert.ok(ui.banner.includes(ui.linkAll), 'the banner quotes the money of the tags it counts');
+    assert.match(ui.lost, /^jumlah per tag · bersih [\d.]+ · biaya Rp.+–Rp/);
+    assert.match(ui.leakHead, /± Klik/);
+  });
+
   test('keyboard focus scrolls below the sticky header at every header height', async page => {
     for (const [width, sticky] of [[768, true], [1024, true], [1440, true], [390, false]]) {
       await page.setViewportSize({ width, height: 900 });

@@ -264,13 +264,20 @@ function renderActions(){
   const cards=[];
   if(A.bidSaving>0)cards.push(['money','Hemat dari Turunkan Bid',rp(A.bidSaving),
     `${A.overbidCount} tag membayar di atas CPC ideal`]);
-  if(A.stopSpend>0)cards.push(['risk','Biaya di Tag STOP',rp(A.stopSpend),
-    `${A.stopCount} tag, rugi ${rp(A.stopLoss)} periode ini`]);
-  if(A.leakWaste>0)cards.push(['risk','Hilang karena Link',rp(A.leakWaste),
-    'klik dibayar tapi tak sampai Shopee']);
-  // "Total Bisa Dialihkan" was just the sum of the two above it — a fourth tile
-  // carrying no new information. It reads as a trailing summary instead.
-  const tail=A.reclaimable>0?`<div class="action-card info"><div class="a-label">Total bisa dialihkan</div><div class="a-val">${rp(A.reclaimable)}</div></div>`:'';
+  // STOP tags still earn commission and are mostly off already, so the headline
+  // is this period's loss; gross spend and the rest of the context sit below it.
+  if(A.stopSpend>0)cards.push(['risk','Rugi di Tag STOP',rp(A.stopLoss),
+    `${A.stopCount} tag · biaya ${rp(A.stopSpend)}, komisi ${rp(A.stopComm)} periode ini`
+    +(A.stopLiveCount==null?'':A.stopLiveCount===0?' · semua iklannya sudah mati':` · ${A.stopLiveCount} masih ada iklan nyala`)
+    +(A.stopProfitCount?` · ${A.stopProfitCount} tag masih untung`:'')
+    +(A.leakStopCount?` · ${A.leakStopCount} tag cek link dulu`:'')]);
+  // Leaking STOP tags are already inside the STOP card; counting them here too
+  // would claim the same rupiah twice in one strip.
+  if(A.leakWasteLive>0)cards.push(['risk','Hilang karena Link',rp(A.leakWasteLive),
+    `${A.leakLiveCount} tag di luar STOP · biaya klik tak sampai Shopee (maks.)`]);
+  // A trailing summary, not a fourth tile. It adds profit changes only: gross
+  // STOP spend is not a saving while those tags still earn commission.
+  const tail=A.maxGain>0?`<div class="action-card info"><div class="a-label">Potensi perbaikan laba</div><div class="a-val">${rp(A.maxGain)}</div><div class="a-copy">batas atas · bid + rugi tag STOP periode ini</div></div>`:'';
   $('actionGrid').innerHTML=cards.map(c=>`<div class="action-card ${c[0]}">
     <div class="a-label">${c[1]}</div><div class="a-val">${c[2]}</div><div class="a-copy">${c[3]}</div></div>`).join('')+tail;
 }
@@ -380,7 +387,7 @@ function renderGaps(){
       <div class="gap-runs">${r.runs.map(x=>`<span class="gap-chip">${x.start}${x.n>1?' → '+x.end:''}<em>${x.n} hari</em></span>`).join('')}</div>
     </div>`).join('');
 }
-function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
+function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag: kurang dari 25% klik sampai Shopee.</b> Biaya klik yang tak sampai di tag itu maks. ${rp(r.actions.leakWaste)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
 // Four cards, matching the mind map. Every number that used to sit in its own
 // KPI tile is still here — it moved one level down, into the card it belongs to.
 // Eight tiles of equal weight meant nothing stood out; these four have a
@@ -554,15 +561,17 @@ function renderClickKpi(){
       ['CTR',pc(sC,im)],['CR',pc(od,sC)],
       ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
       ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
+    // Per-tag sum as the headline, the net beside it, and the money as a range:
+    // the data cannot tell a misrouted click from outside traffic.
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
-      lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
-      lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
-              ['Klik ekstra dari share',`+${nf(gained)}`,1]]
-            :[['Klik ekstra dari share',`+${nf(gained)}`,1]]),
-    kpiCard(pctIn<100?'bad':'','% Klik Masuk Shopee',dec(pctIn,1)+'%',
-      pctIn>100?'di atas 100% karena dibagikan orang':'sebagian klik tidak sampai',[
-      [`${gainTags.length} tag dibagikan`,`+${nf(gained)} klik`],
-      [`${lostTags.length} tag bocor`,`−${nf(lost)} klik`],
+      lost>0?`jumlah per tag · bersih ${nf(k.netLostClicks)} · biaya ${rp(k.wastedLow)}–${rp(k.wasted)}`:'tidak ada klik yang hilang',[
+      ...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
+      ['Kelebihan di tag lain',`+${nf(gained)}`,1],
+      lost>0&&['Biaya: bawah = semua kelebihan dianggap salah tag; atas = tidak ada','',1]]),
+    kpiCard(pctIn<70?'bad':'','% Klik Masuk Shopee',dec(pctIn,1)+'%',
+      pctIn>100?'di atas 100%: ada trafik di luar iklan':'sebagian klik tidak sampai',[
+      [`${gainTags.length} tag kelebihan klik`,`+${nf(gained)} klik`],
+      [`${lostTags.length} tag kekurangan klik`,`−${nf(lost)} klik`],
       ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]]));
   el.innerHTML=out.join('');
   bindDrill('clickKpis');
@@ -622,14 +631,14 @@ function bindBreakdown(tableId,lookup,cols){
   });
 }
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
-function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
+function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason,t.linkNote].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.leak.severity==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+FILTER+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';
@@ -674,20 +683,24 @@ function renderLeak(){
   const r=RESULT.range;
   $('leakRange').textContent=r.clickStart?`Klik report ${r.clickStart} s/d ${r.clickEnd}`:'Click report belum dimuat';
   const rows=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
-  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta','Klik Shopee','± Share','% Masuk','Biaya Terbuang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
+  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta','Klik Shopee','± Klik','% Masuk','Biaya Klik Kurang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblLeak').querySelector('tbody').innerHTML=rows.length?rows.sort((a,b)=>a.leak.pct-b.leak.pct).map(t=>{
     const L=t.leak;
-    // Signed, because the two directions mean opposite things. Extra clicks are
-    // people resharing the content; missing clicks are a broken link.
+    // Signed, because the two directions mean different things: missing clicks
+    // point at the link, extra clicks are outside traffic that inflates ROAS.
+    // Small samples are not judged. The note cell keeps a floor width so phones
+    // scroll the table sideways instead of growing very tall rows.
     const d=L.shopeeClicks-L.metaClicks;
-    const note=d<0
-      ? (L.severity==='bad'?'Sebagian besar klik tidak sampai — periksa link':'Ada klik yang tidak sampai, layak dicek')
-      : d>0?'Dibagikan orang di luar iklan — sinyal konten bagus':'Pas dengan klik berbayar';
+    const note=!L.reliable?`Belum bisa dinilai: ${nf(L.metaClicks)} klik iklan (perlu ±300)`
+      : L.severity==='bad'?'Kurang dari 25% klik sampai — periksa link'
+      : L.severity==='warn'?'Sebagian klik tidak sampai; wajar bila klik sangat murah'
+      : L.severity==='over'?'Jauh di atas klik iklan — ada trafik lain (organik, akun lain, atau iklan lain yang salah tag). ROAS tag ini batas atas'
+      : d>0?'Sedikit di atas klik iklan':d<0?'Selisih kecil, wajar':'Pas dengan klik berbayar';
     return `<tr><td><b>${esc(t.tag)}</b></td><td class="num">${nf(L.metaClicks)}</td><td class="num">${nf(L.shopeeClicks)}</td>
       <td class="num ${d<0?'neg':d>0?'pos':''}">${d>0?'+':''}${nf(d)}</td>
-      <td class="num leak-${L.severity}">${dec(L.pct,1)}%</td>
+      <td class="num ${L.reliable?'leak-'+L.severity:''}">${dec(L.pct,1)}%</td>
       <td class="num ${L.wasted>0?'neg':''}">${L.wasted>0?rp(L.wasted):'—'}</td>
-      <td style="white-space:normal;font-size:11px;color:var(--text-dim)">${note}</td></tr>`;
+      <td style="white-space:normal;min-width:220px;font-size:11px;color:var(--text-dim)">${note}</td></tr>`;
   }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat perbandingan klik.</td></tr>`;
 }
 function renderDaily(){
@@ -823,7 +836,7 @@ function renderTrend(){
     ['ROAS Gabungan',rx(n(last.roasEff))+dl(d.roasEff,pct)],
     ['Biaya',rp(n(last.spend))+dl(d.spend,rp,1)],
     ['Order',nf(n(last.orders))+dl(d.orders,nf)],
-    ['Terbuang',rp(n(last.wasted))+dl(d.wasted,rp,1)],
+    ['Biaya klik kurang (maks.)',rp(n(last.wasted))+dl(d.wasted,rp,1)],
     ['Organik',n(last.organicShare).toFixed(0)+'%'],['Snapshot',tr.series.length],
   ].map(x=>`<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
   const mv=tr.movers.slice(0,12);
