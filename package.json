@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "Local Meta Ads and Shopee affiliate decision dashboard",
   "scripts": {
-    "test": "npm run test:unit && npm run test:browser && npm run test:pdf",
+    "test": "npm run test:unit && npm run test:browser && npm run test:pdf && npm run test:db",
     "test:unit": "node engine.test.js && node engine.regression.test.js && node daily.regression.test.js && node import-pipeline.test.js && node export-data.test.js && node meta-api.test.js",
     "test:browser": "node browser.regression.test.js && node experience.test.js && node meta-connect.test.js",
     "vendor": "node scripts/vendor.js",
     "start": "node scripts/serve.js",
     "build": "node scripts/build.js",
-    "test:pdf": "node pdf-charts.test.js && node pdf-export.test.js"
+    "test:pdf": "node pdf-charts.test.js && node pdf-export.test.js",
+    "test:db": "node supabase/tests/cloud-store.db.test.js"
   },
   "repository": {
     "type": "git",

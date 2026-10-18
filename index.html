@@ -86,7 +86,7 @@
     <div id="ingestPlan" class="hidden">
       <div class="ingest-box">
         <div class="ingest-head"><b>Rencana simpan ke akun <span id="planAcct"></span></b>
-          <span class="sub">Baris unik ditambahkan ke total harian; baris identik dilewati. Laporan koreksi memerlukan penggantian tanggal terdampak.</span></div>
+          <span class="sub">Laporan komisi revisi mengganti angka per pesanan, dan iklan dengan Ad ID diganti per tanggal dan Ad ID. Klik dan iklan tanpa Ad ID ditambahkan ke total harian; baris identik dilewati.</span></div>
         <div id="planRows"></div>
         <div class="ingest-actions">
           <button class="btn ghost" id="btnSkipSave">Jangan simpan</button>
@@ -522,9 +522,12 @@
 <script src="engine.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
+<script src="supabase-config.js"></script>
+<script src="cloud-store.js"></script>
 <script src="import-pipeline.js"></script>
 <script src="export-data.js"></script>
 <script src="app.js"></script>
+<script src="cloud-panel.js"></script>
 <script src="meta-api.js"></script>
 <script src="meta-connect.js"></script>
 <script src="daily-layer.js"></script>
