@@ -56,7 +56,64 @@ async function main() {
     assert.equal(await page.locator('#tblMatch [data-accept-tag]').count(), 0, 'the question is gone once answered');
     await page.locator('#btnSaveMap').click();
     assert.equal(await spendOf('AtasanRebecca'), 300, 'Simpan must keep the mapping accepted by click');
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default')).atasan), 'AtasanRebecca');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_map_v3_default')).Atasan), 'AtasanRebecca');
+  });
+
+  test('ads sharing a name stay apart, a renamed ad keeps its tag, and a leaky link is flagged', async page => {
+    const id1 = '120212345678901234', id2 = '120212345678905678', id3 = '120212345678909999';
+    await page.evaluate(id => {
+      document.getElementById('ppn').value = '0';
+      localStorage.setItem('adash_admap_v1_default', JSON.stringify({ [id]: 'Bantal' }));
+    }, id3);
+    const days = Array.from({ length: 7 }, (_, i) => `2026-08-0${i + 1}`), ads = [], clicks = [];
+    days.forEach(d => {
+      ads.push({ ...ad('Bantal', 100, d), 'Ad ID': id1, 'Campaign name': '100826 | TST | Bantal', 'Link clicks': '60' });
+      ads.push({ ...ad('Bantal', 50, d), 'Ad ID': id2, 'Campaign name': '270926 | TST | Bantal', 'Link clicks': '0' });
+      for (let i = 0; i < 5; i++) clicks.push({ ...click('Bantal', d), 'Klik ID': d + '-' + i });
+    });
+    ads.push({ ...ad('Bantal lama', 30, '2026-08-01'), 'Ad ID': id3, 'Campaign name': 'Lama' });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Bantal')] },
+      { name: 'ads.csv', rows: ads }, { name: 'clicks.csv', rows: clicks }]);
+    const units = await page.evaluate(() => RESULT.adUnits.map(u => ({ key: u.key, adId: u.adId, spend: u.spend, tag: u.tag, method: u.method })));
+    assert.equal(units.length, 3, 'one unit per Ad ID');
+    assert.deepEqual(units.map(u => u.tag), ['Bantal', 'Bantal', 'Bantal']);
+    assert.equal(units.find(u => u.adId === id3).method, 'Ad ID', 'the renamed ad keeps its remembered tag');
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('adash_admap_v1_default')));
+    assert.deepEqual(stored, { [id1]: 'Bantal', [id2]: 'Bantal', [id3]: 'Bantal' }, 'exact names are remembered per Ad ID');
+
+    // The unit table names the campaign when a name repeats, and opens each ad's own days.
+    await page.evaluate(() => document.querySelector('[data-tab="units"], [data-tab="unit"]') && document.querySelector('[data-tab="units"], [data-tab="unit"]').click());
+    const rows = page.locator('#tblUnit tbody tr.dayrow');
+    assert.equal(await rows.count(), 3);
+    const texts = await rows.allInnerTexts();
+    assert.ok(texts.some(t => t.includes('100826 | TST | Bantal')) && texts.some(t => t.includes('270926 | TST | Bantal')));
+    const second = rows.filter({ hasText: '270926' });
+    await second.evaluate(tr => tr.click());
+    const detail = await page.locator('#tblUnit tr.daydetail').innerText();
+    assert.match(detail, /Rp50/);
+    assert.match(detail, /Bantal · 270926 \| TST \| Bantal · Ad ID 120212345678905678/i, 'the heading names the ad, not its internal key');
+
+    // 35 Shopee clicks for 430 Meta link clicks over 7 days: the mapping is flagged.
+    await page.locator('#btnMap').click();
+    assert.match(await page.locator('#tblMatch').innerText(), /Klik masuk rendah: klik Shopee di tag ini hanya 8% dari klik Meta/);
+    assert.equal(await page.locator('#mapAlert').innerText(), '3');
+  });
+
+  test('a suggestion picked for one of two ads sharing a name is saved for that Ad ID only', async page => {
+    const id1 = '120212345678901234', id2 = '120212345678905678';
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'GulingAnak')] },
+      { name: 'ads.csv', rows: [{ ...ad('Guling', 100), 'Ad ID': id1, 'Campaign name': 'K1' }, { ...ad('Guling', 300), 'Ad ID': id2, 'Campaign name': 'K2' }] }]);
+    await page.locator('#btnMap').click();
+    const pick = page.locator(`#tblMatch [data-accept-key="id:${id2}"]`);
+    assert.equal(await pick.count(), 1, 'each copy has its own button');
+    await pick.click();
+    const log = await page.evaluate(() => RESULT.matchLog.map(m => [m.adId, m.method, m.tag]));
+    assert.deepEqual(log.find(x => x[0] === id2), [id2, 'Manual', 'GulingAnak']);
+    assert.equal(log.find(x => x[0] === id1)[1], 'Contains', 'the other copy is untouched');
+    assert.equal(await page.evaluate(id => JSON.parse(localStorage.getItem('adash_map_v3_default'))['id:' + id], id2), 'GulingAnak');
+    await page.locator('#btnSaveMap').click();
+    assert.equal(await page.evaluate(id => RESULT.matchLog.find(m => m.adId === id).method, id2), 'Manual', 'Simpan keeps the per-Ad-ID choice');
   });
 
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {

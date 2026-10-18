@@ -15,7 +15,8 @@ npm start
 ```
 
 Pustaka PapaParse, Chart.js, jsPDF, dan AutoTable tersedia di `vendor/`; halaman aplikasi tidak
-meminta skrip, font, atau data dari pihak ketiga. `index-daily.html` mengarah ke
+meminta skrip, font, atau data dari pihak ketiga, kecuali `graph.facebook.com` saat Anda
+sendiri menekan **Tarik dari Ads Manager**. `index-daily.html` mengarah ke
 halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai
 arsip pembanding dan tidak disertakan dalam build produksi. Pustaka dan font PDF
 baru dimuat saat membuat PDF agar pembukaan dashboard tetap ringan.
@@ -58,12 +59,95 @@ Rentang tanggal pilihan sendiri dipertahankan saat menambah file; pilihan
 semua tanggal mengikuti cakupan data terbaru. Pencarian tag dan filter keputusan
 membantu mempersempit tabel. Tombol metrik menampilkan kolom tambahan.
 
+## Koneksi Meta Ads Manager
+
+Di kotak **Meta Ads**, tombol **Tarik dari Ads Manager** mengambil laporan harian
+per iklan langsung dari Meta Marketing API (Graph API `v24.0`), tanpa ekspor CSV.
+Hasilnya diubah ke kolom yang sama dengan ekspor Ads Manager (breakdown
+Waktu → Hari) dan melewati pemeriksaan, pencocokan tag, serta alur **Simpan**
+yang sama dengan file unggahan. Kolom yang terisi: tanggal, nama iklan/ad set/
+kampanye, biaya, impresi, jangkauan, frekuensi, klik tautan, klik semua, CTR, CPM,
+landing page view, status penayangan iklan saat ini, dan tiga peringkat kualitas.
+
+Browser memanggil `graph.facebook.com` langsung. Tidak ada backend, jadi token
+hanya dikirim ke Meta. Token disimpan di memori tab; jika **Ingat token di browser
+ini** dicentang, token disimpan di localStorage perangkat itu per akun dashboard.
+Jangan mencentangnya di komputer bersama. **Hapus token** menghapusnya.
+
+### Yang perlu Anda siapkan sekali
+
+Disarankan token **System User** karena dapat dibuat tanpa kedaluwarsa:
+
+1. Di [developers.facebook.com](https://developers.facebook.com/apps), buat aplikasi
+   tipe Bisnis dan hubungkan ke portofolio bisnis yang memiliki akun iklan. Tambahkan
+   produk/kasus penggunaan Marketing API. Mode pengembangan sudah cukup untuk membaca
+   akun iklan milik bisnis sendiri; App Review tidak diperlukan untuk itu.
+2. Di Meta Business Suite → Pengaturan Bisnis → Pengguna → **Pengguna sistem**, buat
+   pengguna sistem, lalu **Tetapkan aset**: akun iklan (cukup akses melihat performa)
+   dan aplikasi tadi.
+3. Pada pengguna sistem itu, pilih **Buat token**, pilih aplikasi, masa berlaku
+   **Tidak pernah**, dan centang izin `ads_read` saja. Salin token, lalu tempel di
+   dialog dashboard dan tekan **Muat akun iklan**.
+
+Alternatif cepat untuk mencoba: token pengguna dari Graph API Explorer dengan izin
+`ads_read`. Token ini kedaluwarsa dalam hitungan jam (token jangka panjang sekitar
+60 hari), sehingga perlu ditempel ulang.
+
+### Perilaku dan batasan
+
+- Default rentang adalah 7 hari sampai kemarin menurut zona waktu akun iklan,
+  karena angka hari berjalan masih berubah. Satu tarikan maksimum 400 hari dan
+  dipecah per 14 hari.
+- Iklan yang dihapus atau diarsipkan ikut diminta. Setiap tarikan juga
+  membandingkan total biaya harian akun iklan dengan jumlah baris iklan. Bila
+  ada selisih, data tetap dimuat, dialog tetap terbuka dengan peringatan, dan
+  selisihnya masuk catatan kualitas ekspor, karena biaya yang hilang membuat
+  ROAS terlihat lebih baik dari kenyataan.
+- Menarik ulang dari akun iklan yang sama **mengganti** tanggal yang diminta saja.
+  Hari lain dari tarikan sebelumnya tetap dipakai dan tidak ditarik ulang. Akun
+  iklan lain pada tanggal yang sama ditambahkan, bukan ditolak.
+- CSV Meta yang diunggah dan tarikan untuk tanggal yang sama ditolak di kedua
+  arah agar biaya tidak terhitung dua kali, kecuali kolom `Ad ID` di CSV
+  menunjukkan akun iklan yang berbeda. Ad ID yang sudah dibulatkan spreadsheet
+  (notasi E+ atau berakhiran 000) tidak dipercaya; nama iklan yang menentukan.
+  Hapus salah satunya terlebih dahulu, atau tarik akun iklan lain itu juga.
+- Nama iklan, ad set dan kampanye, status penayangan, dan tiga peringkat adalah
+  kondisi iklan saat ini (Meta melaporkan nama dan status terkini untuk tanggal
+  lama juga), sama seperti kolom ekspor Ads Manager. Kolom-kolom itu tidak
+  dihitung sebagai isi baris; Ad ID yang membedakan baris. Hari yang ditarik ulang
+  dengan angka yang sama dikenali sebagai duplikat saat **Simpan**, walaupun
+  iklannya sudah diganti nama atau statusnya berubah.
+- Penggantian hanya berlaku untuk data di layar. Riwayat yang sudah **Disimpan**
+  menambahkan setiap baris yang angkanya berbeda, jadi hari yang angkanya
+  direvisi Meta sejak disimpan akan terhitung dua kali bila disimpan lagi.
+  Dialog menyebut hari di rentang yang sudah tersimpan, dan panel Simpan
+  menandai **Periode bertumpuk**. Untuk hari itu, analisis di layar saja, atau
+  hapus tanggalnya di Data Tersimpan lalu simpan ulang.
+- Menutup dialog (Esc, Tutup, atau klik di luar) membatalkan tarikan yang sedang
+  berjalan. Berganti atau membuat akun dashboard juga membuang hasil tarikan dan
+  token di memori.
+- **Hapus token** menghapus token yang diingat untuk semua akun dashboard di
+  browser itu.
+- Hanya akun iklan bermata uang IDR yang diterima.
+- Aplikasi dalam mode pengembangan memiliki batas permintaan yang lebih rendah.
+  Jika muncul pesan batas permintaan, tunggu beberapa menit atau persempit rentang.
+- Jika pengaturan aplikasi **Require App Secret** aktif, panggilan dari browser
+  ditolak karena app secret tidak boleh berada di browser. Biarkan nonaktif.
+- Nama iklan yang diawali `=`, `+`, `-`, atau `@` diberi awalan `'` oleh pengaman
+  formula CSV, sehingga mapping manual untuk nama tersebut perlu ditulis ulang.
+- Pengujian otomatis memakai respons Graph API tiruan. Bentuk datanya (format ID
+  akun, mata uang, status iklan, peringkat, format biaya, dan `link_click` sebagai
+  "Link clicks") sudah dicocokkan dengan akun iklan asli lewat konektor Meta
+  read-only. Panggilan langsung dari browser ke `graph.facebook.com` dengan token
+  asli, termasuk filter status iklan, belum diuji dari repositori ini.
+
 ## Ekspor analisis dan PDF
 
 Klik **Ekspor data**, lalu pilih format dan isi laporan:
 
 - **CSV:** keputusan tag, rincian iklan, kinerja harian, atau pencocokan nama.
   Untuk tag, pilih semua tag atau hasil pencarian/filter yang sedang terlihat.
+  Ad ID ditulis sebagai `="…"` agar spreadsheet tidak membulatkannya ke 15 digit.
   Setiap baris menyertakan akun dan periode; angka mempertahankan presisinya,
   dan teks sumber yang dapat menjadi formula spreadsheet dinetralkan.
 - **JSON:** seluruh hasil analisis, parameter, dan catatan kualitas data dalam
@@ -114,9 +198,31 @@ pada CSV/JSON. **Cetak lewat browser** tersedia sebagai alternatif.
   alasan keputusan menyebut dasar yang matang.
 - **Lag dan order:** distribusi lag dan penyelesaian menghitung order unik,
   bukan jumlah baris produk. Rekomendasi H+0 tetap dapat bernilai nol.
-- **Mapping:** mapping manual nama iklan yang dinormalisasi didahulukan.
-  Kecocokan lemah ditampilkan sebagai saran dan memerlukan mapping manual;
-  komisinya tidak otomatis digabung ke kandidat tersebut.
+- **Mapping:** urutannya mapping manual per Ad ID (baris `id:<Ad ID>`, untuk
+  iklan yang namanya kembar), mapping manual nama iklan, segmen pipa yang sama
+  persis dengan tag, nama iklan yang sama persis dengan sub_id di laporan
+  komisi **atau** laporan klik, nama lama iklan yang sama di data yang dimuat,
+  lalu tag yang pernah didapat Ad ID itu dari nama persisnya. "Sama persis"
+  memperhatikan huruf besar-kecil; spasi dan tanda baca diabaikan. Mapping
+  manual yang ditulis dengan huruf kapital hanya berlaku untuk ejaan itu; yang
+  huruf kecil semua (termasuk mapping lama) berlaku untuk ejaan lain, kecuali
+  ejaan yang punya sub_id sendiri. Nama yang hanya beda huruf, mirip, atau
+  mengandung tag lain hanya menjadi saran (keyakinan di bawah 50%): biayanya
+  tetap di nama iklan sampai sarannya diklik di tab Matching. Saran untuk iklan
+  bernama kembar disimpan per Ad ID.
+- **Unit iklan:** satu unit per Ad ID. Ekspor tanpa kolom Ad ID dikelompokkan
+  per nama; baris tanpa ID ikut ke satu-satunya Ad ID yang memakai nama itu.
+  Ad ID yang dibulatkan spreadsheet (notasi E+, atau lebih dari 15 digit dengan
+  ekor nol) hanya ikut ke Ad ID utuh dengan nama yang sama dan nilai yang cocok
+  dengan pembulatannya. Tag per Ad ID disimpan di browser per akun dashboard.
+- **Laporan klik:** tanda "-" memisahkan lima slot sub_id. Bila ada tepat lima
+  slot, slot pertama adalah tag. Bila lebih, tag itu sendiri memuat "-": bila
+  empat slot terakhir kosong, seluruh nilai sebelumnya adalah tag; bila tidak,
+  dipakai sub_id terpanjang dari laporan komisi yang menjadi awalannya.
+- **Klik masuk rendah:** pemetaan ditandai bila klik Shopee pada tag kurang dari
+  25% klik link Meta pada hari iklan berjalan dalam jendela laporan klik,
+  setelah minimal 7 hari dan 300 klik Meta. Hari tanpa satu klik pun di laporan
+  klik (file yang tidak dimuat) tidak dihitung.
 - **Klik:** perbandingan Meta dan Shopee menggunakan cakupan tanggal laporan
   klik. Data klik yang belum lengkap membatasi diagnosis kebocoran.
 - **Kandidat organik:** Maks Biaya/Order merupakan batas biaya per pesanan
@@ -197,6 +303,8 @@ format ekspor dan kondisi browser telah tercakup.
 | `engine.js` | Mesin hitung murni untuk browser dan Node |
 | `import-pipeline.js` | Deteksi format, normalisasi, dan diagnostik CSV |
 | `export-data.js` | CSV/JSON analisis dan sanitasi nama file |
+| `meta-api.js` | Klien Marketing API dan konversi ke format ekspor Meta |
+| `meta-connect.js` | Dialog Tarik dari Ads Manager |
 | `pdf-export.js` | Susunan laporan visual PDF dan tabel multi halaman |
 | `pdf-charts.js` | Grafik tren, perbandingan tag, dan peta keputusan vektor |
 | `app.js`, `index.html`, `styles.css` | Antarmuka, impor, snapshot, grafik, ekspor |

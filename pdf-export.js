@@ -315,8 +315,11 @@
       ]), [46, 34, 36, 36, 30]);
 
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
+      // Copies of one ad in other campaigns share its name; only then is the campaign printed.
+      const seenName = new Set(), twin = new Set();
+      units.forEach(u => (seenName.has(u.adName) ? twin.add(u.adName) : seenName.add(u.adName)));
       table(['Iklan / tag', 'Penayangan / keputusan', 'Biaya + PPN', 'Komisi efektif / laba', 'Klik / CPC Meta'], units.map(u => [
-        u.adName + '\nTag: ' + u.tag, (u.delivery || 'Status tidak tersedia') + '\n' + (u.label || u.status || '-'),
+        u.adName + (twin.has(u.adName) ? '\n' + ([u.campaign, u.adId ? 'Ad ID ' + u.adId : ''].filter(Boolean).join(' · ') || 'tanpa Ad ID') : '') + '\nTag: ' + u.tag, (u.delivery || 'Status tidak tersedia') + '\n' + (u.label || u.status || '-'),
         money(u.spend), money(u.commEff) + '\n' + money(u.netEff), integer(u.clicks) + '\n' + (amount(u.clicks) > 0 ? money(u.cpc) : '-'),
       ]), [51, 31, 31, 38, 31], { numeric: [2, 3, 4], empty: 'Tidak ada iklan pada hasil analisis periode ini.' });
 
