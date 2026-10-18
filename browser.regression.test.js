@@ -93,6 +93,14 @@ async function saveDaily(page) {
   await page.waitForFunction(() => !document.getElementById('savedNote').classList.contains('hidden'));
 }
 
+// PPN lives in Setelan only: adrian's Meta invoices carry none, so it is not a card-level switch.
+async function setPpn(page, value) {
+  await page.locator('#btnSet').click();
+  await page.selectOption('#ppn', value);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('setModal').classList.contains('show'));
+}
+
 async function storedRows(page, kind = 'affiliate', name = 'default') {
   return page.evaluate(async ({ kind, name }) => {
     const account = (await window.__dailyStore.listAccounts('shopee')).find(account => account.name === name);
@@ -675,78 +683,53 @@ async function main() {
     assert.doesNotMatch(await page.locator('#dailyStrip').innerText(), /reach/i, 'daily reach summed over days is not unique people');
   });
 
-  test('PPN switch re-analyses, persists per account and re-renders stored history', async page => {
+  test('PPN from Setelan re-analyses, persists per account and re-renders stored history', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1')] }, { name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
     await saveDaily(page);
-    const state = (scope = '#kpiBar') => page.evaluate(scope => {
-      const box = document.querySelector(scope + ' [data-ppn-switch]');
-      return { pressed: [...box.querySelectorAll('[data-ppn]')].filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.ppn),
-        unconfirmed: !!box.querySelector('.ppn-unconfirmed'), text: box.textContent };
-    }, scope);
-    let ui = await state();
-    assert.deepEqual(ui.pressed, ['0']);
-    assert.equal(ui.unconfirmed, true, 'a default nobody picked is marked');
-    assert.match(ui.text, /Fakta tagihan, bukan setelan: cocokkan dengan invoice Meta\./);
-    await page.locator('#kpiBar [data-ppn="11"]').click();
-    const after = await page.evaluate(() => ({ select: document.getElementById('ppn').value, ppn: RESULT.options.ppn,
-      spend: RESULT.kpi.spend, base: RESULT.kpi.spendBase, saved: JSON.parse(localStorage.getItem('adash_opts_v3_default')).ppn,
+    assert.equal(await page.locator('[data-ppn-switch], .ppn-alt, .ppn-unconfirmed').count(), 0, 'PPN is a Setelan value, not a switch on the cards');
+    assert.equal(await page.locator('#kpis .kpi:nth-child(2) .sub').textContent(), 'tanpa PPN');
+    await setPpn(page, '11');
+    const after = await page.evaluate(() => ({ ppn: RESULT.options.ppn, spend: RESULT.kpi.spend, base: RESULT.kpi.spendBase,
+      saved: JSON.parse(localStorage.getItem('adash_opts_v3_default')).ppn,
       sub: document.querySelector('#kpis .kpi:nth-child(2) .sub').textContent,
       drill: document.querySelector('#kpis .kpi:nth-child(2) .kdrill').textContent }));
-    assert.equal(after.select, '11');
     assert.equal(after.ppn, 11);
     assert.ok(Math.abs(after.spend - 111) < 1e-9, 'spend ' + after.spend);
     assert.equal(after.base, 100);
     assert.equal(after.saved, '11', 'saved per account through the existing change event');
     assert.equal(after.sub, 'termasuk PPN 11%');
     assert.match(after.drill, /Meta \(sebelum PPN\) \+ PPN 11%Rp100 \+ Rp11/);
-    ui = await state();
-    assert.deepEqual(ui.pressed, ['11']);
-    assert.equal(ui.unconfirmed, false);
     await page.evaluate(() => { window.print = () => window.dispatchEvent(new Event('afterprint')); });
     await page.evaluate(() => runPrint('ringkas'));
     assert.match(await page.locator('#phRange').textContent(), /· PPN biaya iklan 11%$/);
     page.once('dialog', dialog => dialog.accept('Akun PPN'));
     await page.locator('#btnNewAcct').click();
-    ui = await state();
-    assert.deepEqual(ui.pressed, ['0'], 'a new account starts at the default');
-    assert.equal(ui.unconfirmed, true);
-    // A change in Setelan counts as a pick too.
-    await page.locator('#btnSet').click();
-    await page.selectOption('#ppn', '12');
-    await page.keyboard.press('Escape');
-    ui = await state();
-    assert.deepEqual(ui.pressed, ['12']);
-    assert.equal(ui.unconfirmed, false);
+    assert.equal(await page.inputValue('#ppn'), '0', 'a new account starts without PPN');
     await page.selectOption('#account', 'default');
-    ui = await state();
-    assert.deepEqual(ui.pressed, ['11']);
-    assert.equal(ui.unconfirmed, false);
+    assert.equal(await page.inputValue('#ppn'), '11');
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => window.__dailyStore);
     await page.locator('#btnStored').click();
-    const stored = '[data-panel="tersimpan"]';
-    assert.equal(await page.locator(stored + ' [data-ppn-switch]').isVisible(), true, 'PPN can be changed without an analysis loaded');
     await page.waitForFunction(() => document.querySelector('#tblStored tbody tr td:nth-child(3)')?.textContent === 'Rp111');
-    assert.deepEqual((await state(stored)).pressed, ['11']);
-    await page.locator(stored + ' [data-ppn="0"]').click();
+    await setPpn(page, '0');
     await page.waitForFunction(() => document.querySelector('#tblStored tbody tr td:nth-child(3)').textContent === 'Rp100');
     assert.match(await page.locator('#storedStrip').textContent(), /Biaya \(PPN 0%\)Rp100/);
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('adash_opts_v3_default')).ppn), '0');
     assert.equal(await page.evaluate(() => RESULT), null);
   });
 
-  test('Laba Bersih shows the other PPN, commission names both totals, and Harian matches the cards', async page => {
+  test('Laba Bersih, commission names both totals, and Harian matches the cards', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const order = (id, comm, status = 'Selesai') => ({ ...aff(id), 'Total Komisi per Pesanan(Rp)': String(comm), 'Status Pesanan': status });
     await upload(page, [{ name: 'affiliate.csv', rows: [order('1', 70000), order('2', 36000, 'Tertunda'), order('3', 40000)] },
       { name: 'ads.csv', rows: [ad('Alpha', 140000)] }]);
     const read = () => page.evaluate(() => {
-      const card = n => document.querySelector(`#kpis .kpi:nth-child(${n})`), alt = card(3).querySelector('.ppn-alt');
+      const card = n => document.querySelector(`#kpis .kpi:nth-child(${n})`);
       const row = [...document.querySelectorAll('#tblDaily tbody tr.dayrow')][0].querySelectorAll('td');
       return { labels: [1, 2, 3, 4].map(n => card(n).querySelector('.lbl').firstChild.textContent),
         vals: [1, 3, 4].map(n => card(n).querySelector('.val').textContent),
         commSub: card(1).querySelector('.sub').textContent, commDrill: card(1).querySelector('.kdrill').textContent,
-        net: card(3).querySelector('.sub').textContent, alt: alt.textContent, flip: alt.classList.contains('flip'),
+        net: card(3).querySelector('.sub').textContent,
         netDrill: card(3).querySelector('.kdrill').textContent, synth: document.getElementById('synth').textContent,
         day: [3, 4, 5].map(i => row[i].textContent), dayTitle: row[3].title,
         dailyNet: RESULT.daily.reduce((sum, d) => sum + d.netEff, 0), kpiNet: RESULT.kpi.netEff };
@@ -757,21 +740,16 @@ async function main() {
     assert.match(ui.commDrill, /Komisi Total \(Selesai \+ Tertunda\)Rp146rb/);
     assert.match(ui.commDrill, /Produk terjual3/);
     assert.deepEqual(ui.vals, ['Rp144rb', 'Rp4rb', '1,03x']);
-    assert.match(ui.net, /^komisi efektif − biaya \(PPN 0%\)/);
-    assert.equal(ui.alt, 'bila PPN 11%: -Rp11rb');
-    assert.equal(ui.flip, true, 'PPN alone turns the profit into a loss');
-    assert.match(ui.netDrill, /Laba bila PPN 0% \(dipakai\)Rp4rb/);
-    assert.match(ui.netDrill, /Laba bila PPN 11%-Rp11rb/);
-    assert.match(ui.synth, /Dengan PPN 11% hasilnya rugi Rp11rb — pastikan PPN dari invoice Meta\./);
+    assert.equal(ui.net, 'komisi efektif − biaya (tanpa PPN)');
+    assert.doesNotMatch(ui.netDrill + ui.synth, /bila PPN|invoice Meta/, 'no PPN what-if: the invoices carry no PPN');
     assert.deepEqual(ui.day, ['Rp144rb', 'Rp4rb', '1,03'], 'the one-day table matches the cards');
     assert.equal(ui.dayTitle, 'Total Rp146.000');
     assert.ok(Math.abs(ui.dailyNet - ui.kpiNet) < 1e-6);
-    await page.locator('#kpiBar [data-ppn="11"]').click();
+    // An account that is billed PPN still gets it from Setelan.
+    await setPpn(page, '11');
     ui = await read();
     assert.deepEqual(ui.vals, ['Rp144rb', '-Rp11rb', '0,93x']);
-    assert.match(ui.net, /^komisi efektif − biaya termasuk PPN 11%/);
-    assert.equal(ui.alt, 'bila PPN 0%: Rp4rb');
-    assert.match(ui.synth, /Dengan PPN 0% hasilnya laba Rp4rb/);
+    assert.equal(ui.net, 'komisi efektif − biaya termasuk PPN 11%');
     assert.deepEqual(ui.day, ['Rp144rb', '-Rp11rb', '0,93']);
     // Day breakdown, Semua Tag breakdown and both daily charts use the same effective commission.
     await page.locator('[data-tab="harian"]').click();
@@ -793,7 +771,7 @@ async function main() {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff()] }, { name: 'ads.csv', rows: [
       { ...ad('Alpha', 100000), Placement: 'Feed', Platform: 'Facebook' },
       { ...ad('Alpha', 40000), Placement: 'Stories', Platform: 'Instagram' }] }]);
-    await page.locator('#kpiBar [data-ppn="11"]').click();
+    await setPpn(page, '11');
     const card = await page.evaluate(() => ({ val: document.querySelector('#kpis .kpi:nth-child(2) .val').textContent, total: rp(RESULT.kpi.spend),
       rows: [...document.querySelectorAll('#kpis .kpi:nth-child(2) .krow')].map(r => [...r.children].map(c => c.textContent)) }));
     assert.equal(card.val, 'Rp155rb');

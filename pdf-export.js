@@ -66,12 +66,10 @@
     }
     const M = 14, WIDTH = 182, TOP = 24, BOTTOM = 279;
     const r = result.range, k = result.kpi, o = result.options || {}, b = result.breakdown || {}, a = result.actions || {};
-    // PPN is a fact to check on the Meta invoice, so every page says which one
-    // produced the numbers. decimal(), not integer(): 11,5 must not print as 12.
+    // Every page says which PPN produced the numbers. decimal(), not
+    // integer(): 11,5 must not print as 12.
     const ppnPct = decimal(amount(o.ppn), Number.isInteger(amount(o.ppn)) ? 0 : 2) + '%';
-    const ppnText = amount(o.ppn) > 0 ? 'Termasuk PPN ' + ppnPct : 'Tanpa PPN (0%)';
-    const spendBase = finite(k.spendBase) ? k.spendBase : amount(k.spend) / (1 + amount(o.ppn) / 100);
-    const netAt = p => amount(k.commEff) - spendBase * (1 + p / 100);
+    const ppnText = amount(o.ppn) > 0 ? 'Termasuk PPN ' + ppnPct : 'Tanpa PPN';
     // Keep real commission even when a zero pending weight makes its effective
     // value zero. Only omit tags whose cost and both commission values are zero.
     const omittedTags = new Set(result.tags.filter(t => t.spend === 0 && t.comm === 0 && t.commEff === 0).map(t => t.tag));
@@ -217,8 +215,8 @@
     section('Dashboard utama');
     metricGrid([
       ['Komisi Efektif', money(k.commEff), 'Total ' + money(k.comm) + ' | ' + integer(k.orders) + ' pesanan'],
-      ['Spend Iklan', money(k.spend), ppnText + ' | cek di invoice Meta'],
-      ['Laba Bersih', money(k.netEff), 'Komisi efektif - (biaya + PPN ' + ppnPct + ')', amount(k.netEff) < 0],
+      ['Spend Iklan', money(k.spend), ppnText],
+      ['Laba Bersih', money(k.netEff), amount(o.ppn) > 0 ? 'Komisi efektif - (biaya + PPN ' + ppnPct + ')' : 'Komisi efektif - biaya iklan', amount(k.netEff) < 0],
       ['ROAS Gabungan', ratio(k.roasEff, amount(k.spend) > 0), 'Iklan berbayar ' + ratio(k.paidRoas, amount(k.paidSpend) > 0)],
     ], 2);
     // Use the same matched tag/window totals as the main dashboard, rather
@@ -247,7 +245,8 @@
     const unjudgedSpend = finite(a.evalSpend) ? a.evalSpend : unjudged.reduce((sum, t) => sum + amount(t.spend), 0);
     metricGrid([
       ['Hemat dari Turunkan Bid', money(a.bidSaving), integer(a.overbidCount) + ' tag di atas CPC ideal'],
-      ['Rugi di Tag STOP', money(a.stopLoss), integer(a.stopCount) + ' tag | biaya ' + money(a.stopSpend)],
+      // Gross STOP spend is in 'Prioritas tindakan'; here it would not fit a 4-column card.
+      ['Rugi di Tag STOP', money(a.stopLoss), integer(a.stopCount) + ' tag'],
       ['Potensi perbaikan laba', money(a.maxGain), 'Batas atas: bid + rugi STOP'],
       ['Tag belum cukup data', money(unjudgedNet), integer(unjudged.length) + ' tag | laba efektif', unjudgedNet < 0],
     ], 4);
@@ -299,9 +298,6 @@
       ['Komisi selesai', money(k.commDone), 'ROAS hanya selesai ' + ratio(k.roasDone, amount(k.spend) > 0)],
       ['Pesanan batal', percent(k.cancelRate), 'Menurut nilai ' + percent(k.cancelValueRate)],
     ], 4);
-    // Both candidate PPN rates side by side; the report does not know which one the invoice shows.
-    if (amount(k.spend) > 0) metricGrid([0, 11].map(p => ['Laba bila PPN ' + p + '%', money(netAt(p)),
-      p === amount(o.ppn) ? 'Dipakai di laporan ini' : 'Pembanding; PPN mengikuti invoice Meta', netAt(p) < 0]), 2);
 
     nextPage();
     const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);

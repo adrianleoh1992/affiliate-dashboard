@@ -253,6 +253,9 @@ edgeTag('Pantau190', 38000);
 edgeTag('Pantau150', 30000);
 edgeTag('Pantau110', 22000);
 edgeTag('Pantau105', 21000);
+// 1,105 and 1,795 print as 1,10x and 1,79x; the pill must follow the printed value.
+edgeTag('Pantau1105', 22100);
+edgeTag('Pantau1795', 35900);
 edgeTag('RoasStop095', [0, 0, 0, 0, 44333, 44333, 44334, 0, 0, 0]);
 edgeTag('StreakStop095', 19000);
 edgeTag('RoasStop089', [0, 0, 0, 0, 0, 62300, 62300, 0, 0, 0]);
@@ -269,6 +272,7 @@ for (const [tag, status, borderAt] of [
   ['Scale205', 'scale', 2], ['Pantau190', 'pantau', 2], ['Pantau150', 'pantau', null],
   ['Pantau110', 'pantau', 1], // exactly 1,10x: inside the band despite floating point
   ['Pantau105', 'pantau', 1], ['RoasStop095', 'stop', 1],
+  ['Pantau1105', 'pantau', 1], ['Pantau1795', 'pantau', null],
   ['StreakStop095', 'stop', null], // decided by the loss streak, not the threshold
   ['RoasStop089', 'stop', null], ['SmallPaid', 'evaluasi', null], ['NoSuchTag', 'evaluasi', null],
   ['IdleAd', 'evaluasi', null], ['ClickOnly', 'evaluasi', null],

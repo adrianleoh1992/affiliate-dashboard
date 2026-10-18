@@ -113,18 +113,9 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 /* One switch for all eight cards, so reading every number is one click and
    not eight. The choice is remembered — someone who wants it all open on
    every visit should not have to say so on every visit. */
-.kpibar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.kpibar{display:flex;justify-content:flex-end;margin-bottom:8px}
 .kpibar .btn{border:1px solid var(--border-strong)}
 .kpibar .btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
-/* PPN is a fact on the Meta invoice, not a strategy knob, so it sits next to
-   the profit it changes instead of inside Setelan. */
-.ppn-switch{display:flex;align-items:center;flex-wrap:wrap;gap:5px;min-width:0}
-.ppn-switch .pb-label{margin-right:3px}
-.ppn-switch .ptab{min-height:28px;padding:6px 11px;font-size:11.5px}
-.ppn-switch .ppn-note{font-size:11px;color:var(--text-dim);font-weight:500;min-width:0}
-.kpi .sub .ppn-alt{display:block;margin-top:2px}
-.kpi .sub .ppn-alt.flip{color:var(--bad);font-weight:700}
-@media(max-width:640px){.ppn-switch .ppn-note{flex-basis:100%}.ppn-switch .ptab{min-height:44px;min-width:52px}}
 
 /* Four main cards: the detail is one click down, not a ninth tile. */
 .kpis{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}

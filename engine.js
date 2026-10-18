@@ -758,9 +758,10 @@ function analyze(data, options) {
     let status = 'evaluasi', label = 'Belum cukup data', reason = '', borderAt = null;
     /* "di batas": the ROAS that decided the verdict sits within ±10% of the
        threshold it was compared with, so a few orders could flip it. Compared
-       on the 2-decimal value the reason prints; the epsilon keeps 1,10x and
-       2,20x inside the band despite binary floating point. */
-    const r2 = Math.round(roasEff * 100) / 100;
+       on the 2-decimal value the reason prints (toFixed, like ratioText; 1.105
+       prints 1,10 but Math.round gives 1,11); the epsilon keeps 1,10x and 2,20x
+       inside the band despite binary floating point. */
+    const r2 = Number(roasEff.toFixed(2));
     const nearest = ths => ths.filter(th => th > 0 && Math.abs(r2 - th) <= th * 0.1 + 1e-9)
       .sort((x, y) => Math.abs(r2 - x) - Math.abs(r2 - y))[0] || null;
     const qualified = spend > 0 && spend >= o.minSpend && daysProd > 0 && daysProd >= o.minDays;

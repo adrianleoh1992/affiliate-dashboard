@@ -256,7 +256,7 @@ function renderPeriod(){
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
 function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map()},o);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
-function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts();renderPpnSwitch()}
+function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -447,9 +447,7 @@ function renderKpi(){
   const share=k.commEff?org/k.commEff*100:0;
   const pl=placementSplit();
   const pct=v=>k.commEff?` · ${(v/k.commEff*100).toFixed(0)}%`:'';
-  // Profit at the other candidate PPN, from the same pre-PPN spend. Which one is
-  // true is on the Meta invoice, so both stay in view.
-  const base=spendBase(),alt=PPN_COMPARE.filter(p=>p!==o.ppn),flip=alt.some(p=>(netAtPpn(p)>=0)!==(k.netEff>=0));
+  const base=spendBase();
   $('kpis').innerHTML=[
     // The headline is effective, so Komisi − Spend = Laba holds across the row;
     // the total sits beside it. Selesai plus weighted Tertunda adds up to the
@@ -462,7 +460,7 @@ function renderKpi(){
       ['Komisi Iklan',rp(paidComm)+pct(paidComm)],
       ['Produk terjual',nf(k.qty)]]),
     // One PPN row, so the placement rows stay the only list that adds up to the headline.
-    kpiCard('','Spend Iklan',rp(k.spend),o.ppn?`termasuk PPN ${o.ppn}%`:'tanpa PPN (0%)',
+    kpiCard('','Spend Iklan',rp(k.spend),o.ppn?`termasuk PPN ${o.ppn}%`:'tanpa PPN',
       [k.spend&&o.ppn?[`Meta (sebelum PPN) + PPN ${o.ppn}%`,`${rp(base)} + ${rp(k.spend-base)}`]:null].concat(pl||(DATA.ads.length?[
         ['Klik Meta',nf(k.clicks)],
         ['CPM',rp(k.cpm)],
@@ -470,11 +468,9 @@ function renderKpi(){
         ['Rincian placement','ekspor tanpa breakdown',1]
       ]:[['Laporan Meta belum dimuat','—']]))),
     kpiCard(k.netEff>=0?'good':'bad','Laba Bersih',rp(k.netEff),
-      (o.ppn?`komisi efektif − biaya termasuk PPN ${o.ppn}%`:'komisi efektif − biaya (PPN 0%)')
-      +(k.spend?`<span class="ppn-alt${flip?' flip':''}">${alt.map(p=>`bila PPN ${p}%: ${rp(netAtPpn(p))}`).join(' · ')}</span>`:''),[
+      o.ppn?`komisi efektif − biaya termasuk PPN ${o.ppn}%`:'komisi efektif − biaya (tanpa PPN)',[
       ['Laba Organik',rp(org)],
-      ['Laba Iklan',rp(paidNet)],
-      ...(k.spend?PPN_COMPARE.concat(PPN_COMPARE.includes(o.ppn)?[]:[o.ppn]).map(p=>[`Laba bila PPN ${p}%`+(p===o.ppn?' (dipakai)':''),rp(netAtPpn(p))]):[])]),
+      ['Laba Iklan',rp(paidNet)]]),
     // ROAS Organik divides organic commission by the SAME total spend, so the
     // two parts add up to the total exactly. Dividing by organic spend would
     // be dividing by zero; this way the card is a decomposition, not a ratio
@@ -613,7 +609,6 @@ function renderSynth(){
   const k=RESULT.kpi,st=k.counts.stop||0,A=RESULT.actions;
   $('synth').innerHTML=k.spend?`Periode ini menghasilkan ${k.netEff>=0?'laba':'rugi'} <b>${rp(Math.abs(k.netEff))}</b>. `
     +(k.organicComm>0?`Komisi organik efektif <b>${rp(k.organicComm)}</b>. `:'')
-    +ppnFlipText()
     +`ROAS iklan berbayar <b>${rx(k.paidRoas)}</b>. `
     +(st?`${st} tag berstatus STOP berdasarkan data matang.`:'Belum ada tag berstatus STOP.')
     // Unjudged paid tags are not neutral; their combined net is real money.
@@ -1348,42 +1343,14 @@ async function downloadPdf(mode){
   }catch(e){$('pdfError').textContent=e.message;$('pdfError').classList.remove('hidden')}
   finally{PDF_BUSY=false;document.querySelectorAll('[data-pdf]').forEach(b=>b.disabled=false);$('pdfBusy').classList.add('hidden')}
 }
-/* PPN is a fact on the Meta invoice, not a strategy knob. The switch mirrors the
-   Setelan select and goes through its change event, so recalc, saveOpts and the
-   stored tab follow without new wiring. A pick is remembered per account; until
-   then the value is only the default, and the switch says so. */
-const PPN_COMPARE=[0,11],LS_PPN_OK='adash_ppnok_v3_';
+// Pre-PPN spend, for the Spend card's PPN row when an account is billed PPN.
 function spendBase(){const k=RESULT.kpi;return Number.isFinite(k.spendBase)?k.spendBase:k.spend/(1+RESULT.options.ppn/100)}
-function netAtPpn(p){return RESULT.kpi.commEff-spendBase()*(1+p/100)}
-function ppnConfirmed(){return readStorage(LS_PPN_OK+active())==='1'}
-function confirmPpn(){try{localStorage.setItem(LS_PPN_OK+active(),'1')}catch(e){}}
-// Said only when PPN alone turns a profit into a loss or back.
-function ppnFlipText(){const k=RESULT.kpi,o=RESULT.options;if(!k.spend)return'';const p=PPN_COMPARE.find(q=>q!==o.ppn&&(netAtPpn(q)>=0)!==(k.netEff>=0));if(p==null)return'';const v=netAtPpn(p);return `Dengan PPN ${p}% hasilnya ${v>=0?'laba':'rugi'} <b>${rp(Math.abs(v))}</b> — pastikan PPN dari invoice Meta. `}
-function renderPpnSwitch(){
-  const sel=$('ppn'),cur=Number(sel.value),ok=ppnConfirmed();
-  document.querySelectorAll('[data-ppn-switch]').forEach(box=>{
-    const compact=box.hasAttribute('data-compact'),focus=box.contains(document.activeElement)?document.activeElement.dataset.ppn:null;
-    box.setAttribute('role','group');box.setAttribute('aria-label','PPN biaya iklan');
-    box.innerHTML=(compact?'':'<span class="pb-label">PPN biaya iklan</span>')
-      +[...sel.options].map(x=>{const v=Number(x.value);return `<button type="button" class="ptab${v===cur?' active':''}" aria-pressed="${v===cur}" data-ppn="${v}">${v}%</button>`}).join('')
-      +(ok?'':'<span class="pill ppn-unconfirmed" title="PPN akun ini belum pernah dipilih. Cocokkan dengan invoice Meta.">belum dikonfirmasi</span>')
-      +(compact?'':'<span class="ppn-note">Fakta tagihan, bukan setelan: cocokkan dengan invoice Meta.</span>');
-    box.querySelectorAll('[data-ppn]').forEach(b=>b.onclick=()=>{
-      if(sel.value!==b.dataset.ppn){sel.value=b.dataset.ppn;sel.dispatchEvent(new Event('change'))}else{confirmPpn();renderPpnSwitch()}
-      toast('PPN '+b.dataset.ppn+'% dipakai untuk akun '+active());
-    });
-    // Redrawing replaces the buttons; keep keyboard focus on the one just pressed.
-    if(focus!=null){const b=box.querySelector(`[data-ppn="${focus}"]`);if(b)b.focus()}
-  });
-}
-// Any deliberate pick counts, from the switch or from Setelan.
-$('ppn').addEventListener('change',()=>{confirmPpn();renderPpnSwitch()});
 // Settings are per account: two Shopee accounts can bill different VAT and
 // tolerate different risk. The old global key was read but never written, so
 // nothing carries over from it.
 function loadOpts(){
   let saved={};try{const o=JSON.parse(readStorage(LS.opts+'_'+active()));if(o&&typeof o==='object'&&!Array.isArray(o))saved=o}catch(e){}
-  const o=E.normalizeOptions({...UI_DEFAULTS,...saved});if(![...$('ppn').options].some(x=>Number(x.value)===o.ppn))o.ppn=UI_DEFAULTS.ppn;O.forEach(k=>$(k).value=o[k]);renderPpnSwitch();
+  const o=E.normalizeOptions({...UI_DEFAULTS,...saved});if(![...$('ppn').options].some(x=>Number(x.value)===o.ppn))o.ppn=UI_DEFAULTS.ppn;O.forEach(k=>$(k).value=o[k]);
 }
 function saveOpts(){
   const o={};O.forEach(k=>{if($(k))o[k]=$(k).value});
