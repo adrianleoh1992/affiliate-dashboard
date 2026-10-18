@@ -649,6 +649,84 @@ async function main() {
     assert.match(ui.leakHead, /± Klik/);
   });
 
+  test('Potensi perbaikan laba adds the STOP loss, not the gross STOP spend', async page => {
+    const days = Array.from({ length: 8 }, (_, i) => '2026-08-0' + (i + 1));
+    const order = (tag, date, comm) => ({ ...aff(tag + date, tag, date), 'Total Komisi per Pesanan(Rp)': String(comm) });
+    await upload(page, [
+      // Loser: ROAS 0,1 every day, so STOP while still earning some commission.
+      // Overbid: ROAS 1,5 is PANTAU and pays above its ideal CPC, so bidSaving > 0.
+      { name: 'affiliate.csv', rows: days.flatMap(d => [order('Loser', d, 2000), order('Overbid', d, 30000)]) },
+      { name: 'ads.csv', rows: days.flatMap(d => [ad('Loser', 20000, d), ad('Overbid', 20000, d)]) }]);
+    const ui = await page.evaluate(() => ({
+      statuses: RESULT.tags.map(t => t.tag + ':' + t.status).sort(),
+      bidSaving: RESULT.actions.bidSaving,
+      maxGain: rp(RESULT.actions.maxGain), reclaimable: rp(RESULT.actions.reclaimable),
+      card: [...document.querySelectorAll('#actionGrid .action-card')]
+        .filter(card => card.querySelector('.a-label').textContent === 'Potensi perbaikan laba')
+        .map(card => card.querySelector('.a-val').textContent),
+    }));
+    assert.deepEqual(ui.statuses, ['Loser:stop', 'Overbid:pantau']);
+    assert.ok(ui.bidSaving > 0, 'fixture: an overbid tag feeds the bid half of the sum');
+    assert.notEqual(ui.maxGain, ui.reclaimable, 'fixture: STOP tags still earn, so loss and spend differ');
+    assert.deepEqual(ui.card, [ui.maxGain], 'the card quotes actions.maxGain, not the legacy reclaimable budget');
+  });
+
+  // One click-report day. Broken (300 paid clicks, exactly the floor) and Cheap
+  // (400) are judged; Tiny (299) and Extra (100, a surplus) are not. Only Broken
+  // is a broken link, but Cheap and Tiny lose clicks too and Extra's surplus
+  // makes the net loss smaller than the per-tag sum.
+  const leakFixture = () => {
+    const date = '2026-08-01';
+    const tags = [['Broken', 300, 30, 30000], ['Cheap', 400, 200, 40000], ['Tiny', 299, 15, 29900], ['Extra', 100, 250, 10000]];
+    // Identical rows are deduplicated on import, so each click gets its own second.
+    const at = i => `${date} 09:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+    return [
+      { name: 'affiliate.csv', rows: tags.map(([tag]) => aff(tag, tag, date)) },
+      { name: 'ads.csv', rows: tags.map(([tag, meta, , spend]) => ({ ...ad(tag, spend, date), 'Link clicks': String(meta) })) },
+      { name: 'clicks.csv', rows: tags.flatMap(([tag, , shopee]) =>
+        Array.from({ length: shopee }, (_, i) => ({ ...click(tag, date), 'Waktu Klik': at(i) }))) }];
+  };
+
+  test('the leak banner quotes only the broken links it counts and Klik Hilang names the net loss', async page => {
+    await upload(page, leakFixture());
+    const ui = await page.evaluate(() => {
+      const k = RESULT.kpi;
+      const card = [...document.querySelectorAll('#clickKpis .kpi')].find(el => el.querySelector('.lbl').textContent.startsWith('Klik Hilang'));
+      return {
+        leaks: RESULT.tags.map(t => `${t.tag}:${t.leak.shopeeClicks}/${t.leak.metaClicks}:${t.leak.severity}:${t.leak.reliable}`).sort(),
+        leakTags: k.leakTags, lostClicks: k.lostClicks, netLostClicks: k.netLostClicks,
+        leakWaste: rp(RESULT.actions.leakWaste), wasted: rp(k.wasted), wastedLow: rp(k.wastedLow),
+        banner: document.getElementById('banners').textContent,
+        hilang: card && { val: card.querySelector('.val').textContent, sub: card.querySelector('.sub').textContent },
+      };
+    });
+    assert.deepEqual(ui.leaks, ['Broken:30/300:bad:true', 'Cheap:200/400:warn:true',
+      'Extra:250/100:over:false', 'Tiny:15/299:bad:false']);
+    assert.equal(ui.leakTags, 1);
+    assert.equal(new Set([ui.leakWaste, ui.wastedLow, ui.wasted]).size, 3, 'fixture: the three money figures differ on screen');
+    assert.match(ui.banner, /1 tag: kurang dari 25% klik sampai Shopee\./);
+    assert.ok(ui.banner.includes(`maks. ${ui.leakWaste} — periksa link`), 'banner quotes actions.leakWaste: ' + ui.banner);
+    assert.ok(!ui.banner.includes(ui.wasted), 'banner must not quote kpi.wasted, which includes warn and unjudged tags');
+    // Per-tag sum 270 + 200 + 284 = 754; net 1.099 paid − 495 arrived = 604.
+    assert.deepEqual([ui.lostClicks, ui.netLostClicks], [754, 604]);
+    assert.deepEqual(ui.hilang, { val: '754', sub: `jumlah per tag · bersih 604 · biaya ${ui.wastedLow}–${ui.wasted}` });
+  });
+
+  test('the leak table leaves tags under 300 paid clicks unjudged and marks a judged broken link', async page => {
+    await upload(page, leakFixture());
+    // The Klik tab is hidden, so read textContent and class names, not innerText.
+    const rows = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#tblLeak tbody tr')].map(tr => {
+      const cells = tr.querySelectorAll('td');
+      return [cells[0].textContent, { pct: [...cells[4].classList], marked: tr.querySelectorAll('[class*="leak-"]').length,
+        note: cells[6].textContent }];
+    })));
+    // Tiny is under 25% like Broken; only the sample size keeps it unjudged.
+    assert.deepEqual(rows.Tiny, { pct: ['num'], marked: 0, note: 'Belum bisa dinilai: 299 klik iklan (perlu ±300)' });
+    assert.deepEqual(rows.Extra, { pct: ['num'], marked: 0, note: 'Belum bisa dinilai: 100 klik iklan (perlu ±300)' });
+    assert.deepEqual(rows.Broken, { pct: ['num', 'leak-bad'], marked: 1, note: 'Kurang dari 25% klik sampai — periksa link' });
+    assert.deepEqual(rows.Cheap.pct, ['num', 'leak-warn']);
+  });
+
   test('unjudged paid tags get their own net on the board, near-threshold verdicts say so, and reach is gone', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const days = Array.from({ length: 10 }, (_, i) => '2026-08-' + String(i + 1).padStart(2, '0'));
