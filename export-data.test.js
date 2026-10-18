@@ -52,10 +52,23 @@ test('daily CSV says which commission each column uses and appends the effective
   const data={...result,daily:[{...result.daily[0],commEff:950.5,netEff:-300.25,roasEff:0.76}]};
   const p=Papa.parse(X.csv(data,{dataset:'daily'}),{header:true,skipEmptyLines:true});
   assert.deepEqual(p.meta.fields.slice(3,8),['Tanggal','Komisi total','Biaya + PPN','Laba dari komisi total','ROAS dari komisi total'],'renamed in place');
-  assert.deepEqual(p.meta.fields.slice(-4),['Komisi efektif','Laba efektif','ROAS efektif','PPN biaya iklan (%)']);
+  // Later groups append after these; they stay right after the old order-date columns, and PPN stays last.
+  const effAt=p.meta.fields.indexOf('Data matang')+1;
+  assert.deepEqual(p.meta.fields.slice(effAt,effAt+3),['Komisi efektif','Laba efektif','ROAS efektif']);
+  assert.equal(p.meta.fields[p.meta.fields.length-1],'PPN biaya iklan (%)');
   assert.deepEqual([p.data[0]['Komisi efektif'],p.data[0]['Laba efektif'],p.data[0]['ROAS efektif']],['950.5','-300.25','0.76']);
   const tags=Papa.parse(X.csv(result,{}),{header:true,skipEmptyLines:true}).meta.fields;
   assert.equal(tags.indexOf('Komisi total'),tags.indexOf('Biaya + PPN')+1,'tags keep the total in its old place');
+});
+test('daily CSV appends the click-date series after the effective columns, blank when unknown',()=>{
+  const data={...result,daily:[{...result.daily[0],commEff:950.5,commEffByClick:400.25,netEffByClick:-850.5,roasEffByClick:0.32,matureByClick:false},
+    {...result.daily[0],date:'2026-08-02',commEffByClick:null,netEffByClick:null,roasEffByClick:null,matureByClick:null}]};
+  const p=Papa.parse(X.csv(data,{dataset:'daily'}),{header:true,skipEmptyLines:true}),f=p.meta.fields;
+  assert.deepEqual(f.slice(f.indexOf('ROAS efektif')+1,-1),['Komisi efektif (tgl klik)','Laba efektif (tgl klik)','ROAS efektif (tgl klik)','Data matang (tgl klik)'],'appended, PPN still last');
+  assert.deepEqual(f.slice(3,8),['Tanggal','Komisi total','Biaya + PPN','Laba dari komisi total','ROAS dari komisi total'],'existing columns keep their place');
+  assert.deepEqual(['Komisi efektif (tgl klik)','Laba efektif (tgl klik)','ROAS efektif (tgl klik)','Data matang (tgl klik)'].map(k=>p.data[0][k]),['400.25','-850.5','0.32','Tidak']);
+  // Without Waktu Klik (or after the commission report ends) the engine says null: a blank, not a 0.
+  assert.deepEqual(['Komisi efektif (tgl klik)','Laba efektif (tgl klik)','ROAS efektif (tgl klik)','Data matang (tgl klik)'].map(k=>p.data[1][k]),['','','','']);
 });
 test('every dataset ends with the PPN that produced its money columns',()=>{
   for(const dataset of Object.keys(X.DATASETS)){

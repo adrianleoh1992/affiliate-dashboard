@@ -429,4 +429,76 @@ assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01'), snapAt(11, '2026-08-02')
 assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01', { options: undefined }), snapAt(0, '2026-08-02', { options: { ppn: null } })],
   'default').series.map(s => s.ppn), [null, null]);
 
+// Harian charts put commission on its click day (Waktu Klik). By order date a
+// cheap day collects orders from earlier clicks: must 30 Sep read 4,14x.
+const clickAff = (id, order, clicked, comm, status = 'Selesai') => aff(id, comm, {
+  'Status Pesanan': status, 'Waktu Pemesanan': order + ' 10:00:00', 'Waktu Klik': clicked ? clicked + ' 09:00:00' : '' });
+const clickDays = n => Array.from({ length: n }, (_, i) => ad('2026-08-' + String(i + 1).padStart(2, '0'), 100));
+const clickData = {
+  affiliate: [
+    clickAff('late', '2026-08-05', '2026-08-02', 1000),
+    clickAff('before', '2026-08-01', '2026-07-30', 500),
+    clickAff('noclick', '2026-08-03', '', 300),
+    clickAff('d6', '2026-08-06', '2026-08-06', 200),
+    clickAff('d7', '2026-08-07', '2026-08-07', 100),
+    clickAff('p7', '2026-08-09', '2026-08-07', 300, 'Tertunda'),
+    clickAff('p8', '2026-08-08', '2026-08-08', 800, 'Tertunda'),
+    clickAff('p9', '2026-08-09', '2026-08-09', 700, 'Tertunda'),
+    clickAff('gone', '2026-08-04', '2026-08-04', 999, 'Dibatalkan'),
+  ],
+  ads: clickDays(9),
+};
+const byDay = res => Object.fromEntries(res.daily.map(day => [day.date, day]));
+const clicked = analyze(clickData, { dateStart: '2026-08-01', pendingFactor: 0.5 });
+const cd = byDay(clicked);
+near(cd['2026-08-02'].commEffByClick, 1000);
+near(cd['2026-08-05'].commEffByClick, 0);
+near(cd['2026-08-05'].commEff, 1000); // the order-date series is unchanged
+near(cd['2026-08-07'].commEffByClick, 100 + 300 * 0.5);
+near(cd['2026-08-07'].roasEffByClick, 250 / 100);
+near(cd['2026-08-07'].netEffByClick, 150);
+near(cd['2026-08-07'].pendingPctByClick, 75);
+assert.equal(clicked.byClick.available, true);
+near(clicked.byClick.before, 500); near(clicked.byClick.beforeEff, 500);
+near(clicked.byClick.missing, 300); near(clicked.byClick.missingEff, 300);
+assert.ok(clicked.daily.every(day => day.date >= '2026-08-01'), 'a click before the start opens no day of its own');
+assert.equal(cd['2026-08-04'].commByClick, 0, 'cancelled rows stay out of the click series');
+for (const factor of [0, 0.25, 1]) {
+  const res = analyze(clickData, { dateStart: '2026-08-01', pendingFactor: factor });
+  const placed = field => res.daily.reduce((sum, day) => sum + (day[field] == null ? 0 : day[field]), 0);
+  // Series plus the named remainders add up to the KPI: nothing is dropped silently.
+  near(placed('commEffByClick') + res.byClick.beforeEff + res.byClick.missingEff, res.kpi.commEff);
+  near(placed('commByClick') + res.byClick.before + res.byClick.missing, res.kpi.comm);
+}
+// Trailing click days with half or more still Tertunda are not mature, even inside the lag.
+assert.deepEqual(clicked.daily.slice(-4).map(day => [day.date, day.matureByClick]),
+  [['2026-08-06', true], ['2026-08-07', false], ['2026-08-08', false], ['2026-08-09', false]]);
+assert.equal(clicked.byClick.matureUntil, '2026-08-06');
+assert.ok(clicked.byClick.matureUntil <= clicked.range.matureUntil);
+assert.equal(clicked.range.matureUntil, '2026-08-09', 'the verdict cut-off keeps its order-date meaning');
+// The band date lives outside range, so saved snapshots keep their shape.
+assert.deepEqual(Object.keys(E.toSnapshot(clicked).range), ['start', 'end', 'matureUntil', 'clickStart', 'clickEnd']);
+assert.equal(E.toSnapshot(clicked).byClick, undefined);
+
+// A commission report that ends before the ads: later click days are unknown,
+// and the lag counts back from where the commission report ends.
+const shortAff = analyze({ affiliate: [clickAff('s1', '2026-08-03', '2026-08-02', 400), clickAff('s2', '2026-08-09', '2026-08-09', 600)],
+  ads: clickDays(12) }, { lagDays: 2 });
+const sd = byDay(shortAff);
+assert.equal(shortAff.byClick.dataEnd, '2026-08-09');
+assert.deepEqual(['2026-08-10', '2026-08-11', '2026-08-12'].map(d => [sd[d].commEffByClick, sd[d].netEffByClick, sd[d].roasEffByClick, sd[d].matureByClick]),
+  [[null, null, null, false], [null, null, null, false], [null, null, null, false]]);
+assert.ok(shortAff.byClick.matureUntil <= '2026-08-07', shortAff.byClick.matureUntil);
+assert.equal(sd['2026-08-09'].commEffByClick, 600);
+assert.equal(sd['2026-08-07'].matureByClick, true);
+assert.equal(sd['2026-08-08'].matureByClick, false);
+
+// Without Waktu Klik the click series is unknown everywhere, not a row of zeros.
+const noClick = analyze({ affiliate: [clickAff('n1', '2026-08-01', '', 100), clickAff('n2', '2026-08-02', '', 50)], ads: clickDays(2) });
+assert.equal(noClick.byClick.available, false);
+assert.equal(noClick.byClick.matureUntil, '');
+for (const field of ['commByClick', 'commEffByClick', 'netEffByClick', 'roasEffByClick', 'pendingPctByClick', 'matureByClick'])
+  assert.ok(noClick.daily.every(day => day[field] === null), field);
+near(noClick.byClick.missingEff, 150);
+
 console.log('engine regression tests: PASS');

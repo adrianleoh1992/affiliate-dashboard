@@ -103,6 +103,34 @@
     },
   };
 
+  // Shades the trailing dates from index `from` on: their commission is still
+  // arriving. Drawn before everything else so gridlines and data stay on top.
+  function recentBand(from, color, text) {
+    return {
+      id: 'recentBand',
+      beforeDraw(chart) {
+        const x = chart.scales && chart.scales.x, area = chart.chartArea, n = (chart.data.labels || []).length;
+        if (!x || !area || !(from >= 0) || from >= n) return;
+        const step = n > 1 ? Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) : area.right - area.left;
+        const left = Math.max(area.left, x.getPixelForValue(from) - step / 2), width = area.right - left;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.fillRect(left, area.top, width, area.bottom - area.top);
+        if (text) {
+          const family = (chart.options && chart.options.font && chart.options.font.family) || 'sans-serif';
+          ctx.font = '11px ' + family;
+          // Only where it fits: a label spilling over mature days would mislabel them.
+          if (ctx.measureText(text).width + 8 <= width) {
+            ctx.fillStyle = css('--text-mute'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            ctx.fillText(text, left + 4, area.top + 4);
+          }
+        }
+        ctx.restore();
+      },
+    };
+  }
+
   function baseOptions(type, labels) {
     const grid = css('--border'), text = css('--text-dim'), surface = css('--surface'), ink = css('--text');
     const radial = type === 'doughnut' || type === 'pie';
@@ -163,5 +191,5 @@
     return new Chart(canvas, cfg);
   }
 
-  return { merge, money, count, ratio, pct, axis, reference, create, css, singleReference };
+  return { merge, money, count, ratio, pct, axis, reference, create, css, singleReference, recentBand };
 }));

@@ -501,6 +501,10 @@ function analyze(data, options) {
   }
 
   const dailyAll = dict();
+  // The same commission re-bucketed on Waktu Klik, the day the ad money bought
+  // it. What cannot sit on an in-range click day is counted, never dropped.
+  const byClick = { placed: 0, placedEff: 0, before: 0, beforeEff: 0, missing: 0, missingEff: 0 };
+  let clickRows = 0; // a row count, not a sum: zero-commission clicks still mean the column exists
   const platform = dict(), category = dict(), category2 = dict(), product = dict(), shop = dict();
   const hourly = new Array(24).fill(0), hourlyOrders = Array.from({ length: 24 }, () => new Set());
   const offerType = dict(), contentType = dict();
@@ -530,6 +534,19 @@ function analyze(data, options) {
     dailyAll[d].comm += c; dailyAll[d].gmv += g;
     dailyAll[d].commEff = (dailyAll[d].commEff || 0) + (st === 'Tertunda' ? c * o.pendingFactor : c);
     if (id) dailyAll[d].orders.add(id);
+
+    const ck = dayOnly(pick(r, COL.aff.clickAt));
+    const eff = st === 'Tertunda' ? c * o.pendingFactor : c;
+    if (isDate(ck) && ck < ds) { byClick.before += c; byClick.beforeEff += eff; clickRows++; }
+    else if (inRange(ck) && ck <= d) {
+      clickRows++;
+      if (!dailyAll[ck]) dailyAll[ck] = { date: ck, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
+      const a = dailyAll[ck];
+      a.commByClick = (a.commByClick || 0) + c;
+      a.commEffByClick = (a.commEffByClick || 0) + eff;
+      if (st === 'Tertunda') a.pendingByClick = (a.pendingByClick || 0) + c;
+      byClick.placed += c; byClick.placedEff += eff;
+    } else { byClick.missing += c; byClick.missingEff += eff; }
 
     const h = hourOf(pick(r, COL.aff.orderAt));
     if (h != null) { hourly[h] += c; if (id) hourlyOrders[h].add(id); }
@@ -653,6 +670,27 @@ function analyze(data, options) {
   /* ── Attribution maturity ───────────────────────────────────────────── */
   const matureUntil = de ? addDays(de, -o.lagDays) : '';
   const isMature = d => !matureUntil || d <= matureUntil;
+  /* By click date the newest days are still filling in twice over: orders from
+     those clicks can still arrive after the export, and much of what arrived
+     is still Tertunda. The lag counts back from where the commission report
+     ends, not from the ads; click days after that end are unknown, not zero. */
+  const clickKnown = clickRows > 0;
+  const affEnd = Object.keys(statusDay).filter(isDate).sort().pop() || '';
+  const clickBase = affEnd && affEnd < de ? affEnd : de;
+  const clickLagUntil = clickBase ? addDays(clickBase, -o.lagDays) : '';
+  const PENDING_BAND = 0.5; // a click day with half or more of its commission Tertunda is not settled yet
+  let matureByClickUntil = clickLagUntil;
+  if (clickKnown && clickLagUntil) {
+    const dates = Object.keys(dailyAll).filter(isDate).sort();
+    for (let i = dates.length - 1; i >= 0; i--) {
+      const v = dailyAll[dates[i]], cc = v.commByClick || 0;
+      const heavy = cc > 0 && (v.pendingByClick || 0) / cc >= PENDING_BAND;
+      if (dates[i] > clickLagUntil || heavy) matureByClickUntil = addDays(dates[i], -1);
+      else break;
+    }
+    // A gap in the dates must not move the band's start past the lag cut-off.
+    if (matureByClickUntil > clickLagUntil) matureByClickUntil = clickLagUntil;
+  }
 
   const lagHist = dict(), lagOrders = new Set();
   let lagTotal = 0;
@@ -1010,6 +1048,9 @@ function analyze(data, options) {
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
     const commEff = v.commEff || 0;
+    // Null means unknown: no Waktu Klik at all, or a day after the commission report ends.
+    const known = clickKnown && !(affEnd && d > affEnd);
+    const ce = known ? (v.commEffByClick || 0) : null;
     return {
       date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
       commEff, netEff: commEff - v.spend,
@@ -1024,6 +1065,12 @@ function analyze(data, options) {
       cpc: v.clicks > 0 ? v.spend / v.clicks : 0,
       convRate: v.clicks > 0 ? v.orders.size / v.clicks * 100 : 0,
       mature: isMature(d),
+      commByClick: known ? (v.commByClick || 0) : null,
+      commEffByClick: ce,
+      netEffByClick: known ? ce - v.spend : null,
+      roasEffByClick: known ? (v.spend > 0 ? ce / v.spend : 0) : null,
+      pendingPctByClick: known && v.commByClick > 0 ? (v.pendingByClick || 0) / v.commByClick * 100 : null,
+      matureByClick: clickKnown ? (!matureByClickUntil || d <= matureByClickUntil) : null,
     };
   });
 
@@ -1069,13 +1116,35 @@ function analyze(data, options) {
   /* Concentration: one product carrying most of the budget is a risk even when
      its ROAS looks acceptable. */
   const paidSorted = paid.slice().sort((a, b) => b.spend - a.spend);
+  /* Pareto by spend: what the top N tags take of paid spend and earn of paid
+     effective commission (the ROAS Iklan base; organic stays out). The largest
+     tag alone rarely looks risky while a long tail quietly loses money. */
+  const paretoShare = top => {
+    const sp = top.reduce((s, t) => s + t.spend, 0), cm = top.reduce((s, t) => s + t.commEff, 0);
+    return { spend: sp, commEff: cm, spendShare: paidSpend > 0 ? sp / paidSpend * 100 : 0,
+      commShare: paidComm > 0 ? cm / paidComm * 100 : 0, roasEff: sp > 0 ? cm / sp : 0 };
+  };
+  // Paid ad names absent from the commission report count as commission 0;
+  // some are naming mismatches, so the tail ROAS is a lower bound.
+  const affSet = new Set(affiliateTags);
+  const noCommTags = paidSorted.filter(t => !affSet.has(t.tag));
+  const noCommSpend = noCommTags.reduce((s, t) => s + t.spend, 0);
   const concentration = paidSorted.length ? {
     topTag: paidSorted[0].tag,
     topShare: paidSpend > 0 ? paidSorted[0].spend / paidSpend * 100 : 0,
     topRoas: paidSorted[0].roasEff,
     top2Share: paidSpend > 0 ? paidSorted.slice(0, 2).reduce((s, t) => s + t.spend, 0) / paidSpend * 100 : 0,
     count: paidSorted.length,
+    paidComm,
+    groups: [1, 3, 5, 10].filter(n => n < paidSorted.length)
+      .map(n => ({ n, tags: paidSorted.slice(0, n).map(t => t.tag), ...paretoShare(paidSorted.slice(0, n)) })),
+    noComm: { n: noCommTags.length, spend: noCommSpend, spendShare: paidSpend > 0 ? noCommSpend / paidSpend * 100 : 0 },
   } : null;
+  // The complement of the last group, so nobody adds up the cumulative rows.
+  if (concentration && concentration.groups.length) {
+    const last = concentration.groups[concentration.groups.length - 1];
+    concentration.rest = { n: paidSorted.length - last.n, ...paretoShare(paidSorted.slice(last.n)) };
+  }
 
   const actions = {
     bidSaving, overbidCount: overbid.length,
@@ -1095,6 +1164,8 @@ function analyze(data, options) {
   return {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
+    // Outside range on purpose: toSnapshot copies range whole, and saved snapshots keep their shape.
+    byClick: { ...byClick, available: clickKnown, matureUntil: clickKnown ? matureByClickUntil : '', dataEnd: affEnd },
     kpi, tags, adUnits, daily, matchLog, lagProfile, lagCal, settlement, actions,
     statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
       const v = statusDay[d];

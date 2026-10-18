@@ -393,6 +393,13 @@ tbody tr:hover{background:var(--surface-2)}
 .calibration b{font-weight:800}
 .riskbox{padding:14px;border-radius:10px;background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);font-size:13px;line-height:1.55}
 .riskbox strong{font-weight:800}
+/* Concentration: headline, optional risk box, Pareto table, footnote. A long
+   top tag name wraps instead of widening the whole table on a phone. */
+.conc-risk{margin:0 0 12px}
+.conc-foot{margin:10px 0 0}
+.conc-tbl td:first-child{white-space:normal;min-width:150px;overflow-wrap:anywhere}
+/* On a phone the three shares and the ROAS matter more than the bars. */
+@media(max-width:640px){.conc-tbl .barcell{display:none}.conc-tbl th{white-space:normal}.conc-tbl td:first-child{min-width:110px}}
 .file-row{display:flex;align-items:center;gap:8px;min-width:0}
 .file-row .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .file-row .rmfile{border:0;background:transparent;color:currentColor;font-size:17px;cursor:pointer;padding:0 3px;line-height:1}
@@ -885,6 +892,8 @@ body.has-result .workspace-heading h2{font-size:22px;margin-bottom:0}
 
 /* Charts: a quiet frame so the lines carry the weight. */
 .chartbox{margin-top:4px}
+/* The date-basis note sits under its chart, not under a card head. */
+.hint.daily-basis{margin:10px 0 0}
 #gapCard.gap-clean{padding:0;border:0;background:none;box-shadow:none}
 #gapCard.gap-clean .card-head{display:none}
 #gapCard.gap-clean .gap-ok{padding:9px 13px}

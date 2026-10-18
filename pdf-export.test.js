@@ -190,8 +190,16 @@ async function main() {
         'Dashboard cards must remain within page bounds');
       const trend = report.charts[0].box.rows;
       assert.ok(trend.some(row => row.comm != null));
-      assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) - result.kpi.commEff) < 0.0001,
-        'Trend must use effective commission matching the summary');
+      // The trend is by click date; with what sits before the start or has no
+      // click date it adds up to the summary's effective commission.
+      assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) + result.byClick.beforeEff + result.byClick.missingEff
+        - result.kpi.commEff) < 0.0001, 'Trend must use effective commission matching the summary');
+      assert.ok(second.includes('Komisi efektif (tanggal klik)'), mode + ': the trend legend names its date basis');
+      // Concentration: a Pareto table of spend share vs paid effective commission share.
+      assert.ok(pageText.includes('Konsentrasi biaya vs komisi'), mode + ': concentration section');
+      assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Porsi komisi efektif'));
+      assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text === '90 tag di luar 10 teratas'), mode + ': the complement row');
+      assert.ok(!pageText.includes('Risiko konsentrasi anggaran'), mode + ': the old two-number grid is replaced');
       assert.equal(report.charts[1].box.items.reduce((sum, item) => sum + item.count, 0), result.tags.length);
       for (const cell of report.bounds) {
         assert.ok(cell.x >= 13.99 && cell.x + cell.width <= 196.01, 'Table cell must stay inside horizontal page bounds');
@@ -278,6 +286,43 @@ async function main() {
     assert.deepEqual(coverageRows[2].slice(1), ['-', 'Rp 100,00', '-', '-', '1'], 'Affiliate-only day must not imply zero ad spend');
     assert.deepEqual(coverageRows[3].slice(1), ['Rp 0,00', 'Rp 0,00', 'Rp 0,00', '-', '1'], 'Source rows containing zero must retain their real zero values');
     console.log('PASS PDF daily table distinguishes missing sources from real zero values');
+    // Click-date twin: the gap still means "no source row", and commission the
+    // trend cannot place is named instead of dropped.
+    const clickCoverage = Engine.analyze({
+      affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'click-' + day, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Waktu Klik': '2026-09-0' + day + ' 09:00:00', 'Tag_link1': 'Coverage',
+        'Total Komisi per Produk(Rp)': day === 4 ? '0' : '100' })).concat([{ 'ID Pemesanan': 'click-none', 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-03 11:00:00', 'Tag_link1': 'Coverage', 'Total Komisi per Produk(Rp)': '40' }]),
+      ads: [1, 2, 4].map(day => ({ 'Ad name': 'Coverage', 'Amount spent (IDR)': day === 4 ? '0' : '50',
+        'Reporting starts': '2026-09-0' + day, 'Reporting ends': '2026-09-0' + day })), clicks: [],
+    }, { ppn: 0, lagDays: 0 });
+    const clickTrend = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, originalCharts = DashboardPDFCharts.create, labels = [];
+      let trend;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 2) labels.push(String(value));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      DashboardPDFCharts.create = function (doc, options) {
+        return Object.fromEntries(Object.entries(originalCharts(doc, options)).map(([name, draw]) => [name, box => {
+          if (name === 'trend') trend = box; return draw(box);
+        }]));
+      };
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; DashboardPDFCharts.create = originalCharts; }
+      return { rows: trend.rows.map(row => [row.date, row.comm]), label: trend.commLabel, text: labels.join(' ') };
+    }, clickCoverage);
+    assert.deepEqual(clickTrend.rows, [['2026-09-01', 100], ['2026-09-02', null], ['2026-09-03', 100], ['2026-09-04', 0]],
+      'An ad-only day without click commission stays a gap; a real zero stays a point');
+    assert.equal(clickTrend.label, 'Komisi efektif (tanggal klik)');
+    assert.match(clickTrend.text, /tanggal klik/);
+    assert.match(clickTrend.text, /Rp 40,00 tanpa tanggal klik tidak tampil\./);
+    console.log('PASS PDF click-date trend keeps gaps for missing sources and names commission it cannot place');
     const activity = Engine.analyze({
       affiliate: [['Organik tetap', 100, 'Selesai'], ['Refund tetap', -10, 'Selesai'], ['Pending tetap', 50, 'Tertunda']]
         .map(([tag, commission, status], index) => ({ 'ID Pemesanan': 'activity-' + index,

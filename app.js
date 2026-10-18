@@ -309,6 +309,23 @@ function renderOpportunity(){
       <td>${esc(c.topPlatform||'—')}</td></tr>`).join('')
     : `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:22px">Belum ada tag organik dengan komisi.</td></tr>`;
   if(!C){$('concentration').innerHTML='<p class="hint">Belum ada tag berbayar.</p>';return}
+  const G=C.groups||[];
+  if(G.length&&C.rest){
+    // Pareto by spend: the head that earns and the tail that burns. The top-3
+    // rule needs enough tags, or any account with four or five tags trips it.
+    const pc=v=>dec(v,1)+'%',cs=g=>C.paidComm>0?pc(g.commShare):'—',last=G[G.length-1],g3=G.find(g=>g.n===3);
+    const risky=C.topShare>=35||!!(g3&&C.count>=6&&g3.spendShare>=60),head=C.topShare>=35?G[0]:g3;
+    const bar=(v,c)=>`<span class="minibar" style="width:${Math.max(0,Math.min(100,v)).toFixed(1)}%;background:var(${c})"></span>`;
+    const row=(label,g,title)=>`<tr><td${title?` title="${esc(title)}"`:''}>${label}</td><td class="num">${pc(g.spendShare)}</td><td class="barcell">${bar(g.spendShare,'--accent')}</td>
+      <td class="num">${cs(g)}</td><td class="barcell">${bar(g.commShare,'--ok')}</td><td class="num">${g.spend>0?rx(g.roasEff):'—'}</td></tr>`;
+    $('concentration').innerHTML=`<p class="hint conc-head"><b>${last.n} tag dengan biaya terbesar</b> memakan ${pc(last.spendShare)} biaya iklan dan menghasilkan ${cs(last)} komisi efektif iklan; ${nf(C.rest.n)} tag lainnya memakan ${pc(C.rest.spendShare)} biaya dengan ROAS ${rx(C.rest.roasEff)}.</p>
+      ${risky?`<div class="riskbox conc-risk"><strong>${head.n===1?esc(C.topTag):head.n+' tag'} menyerap ${pc(head.spendShare)} biaya iklan</strong> dan menghasilkan ${cs(head)} komisi efektif iklan. Kalau produknya bermasalah, sebagian besar anggaran ikut terdampak.</div>`:''}
+      <div class="tscroll"><table class="conc-tbl"><thead><tr><th>Kelompok (urut biaya)</th><th class="num">Porsi biaya</th><th class="barcell"></th><th class="num">Porsi komisi efektif</th><th class="barcell"></th><th class="num">ROAS</th></tr></thead><tbody>${
+      G.map(g=>row(g.n===1?`1 tag teratas (${esc(C.topTag)})`:`${g.n} tag teratas`,g,g.n>1?g.tags.join(', '):'')).join('')
+      }${row(`${nf(C.rest.n)} tag di luar ${last.n} teratas`,C.rest,'')}</tbody></table></div>
+      <p class="hint conc-foot">Porsi komisi dihitung dari komisi efektif tag berbayar (dasar ROAS Iklan); komisi organik tidak dihitung.${C.noComm&&C.noComm.n?` ${nf(C.noComm.n)} nama iklan berbiaya (${pc(C.noComm.spendShare)} biaya) tidak ada di laporan komisi dan dihitung berkomisi 0 — sebagian bisa salah sambung; periksa di Kelola Tag.`:''}</p>`;
+    return;
+  }
   const risky=C.topShare>=35;
   $('concentration').innerHTML=risky
     ? `<div class="riskbox"><strong>${esc(C.topTag)} menyerap ${C.topShare.toFixed(0)}% biaya iklan</strong>
@@ -916,15 +933,20 @@ document.querySelectorAll('[data-prod]').forEach(b=>b.onclick=()=>{
 // The daily table below answers "how much"; this answers "which days".
 let CALVIEW='net';
 const CALDEF={
-  net:{label:'Laba',val:d=>d.netEff,signed:true},
-  roas:{label:'ROAS',val:d=>d.spend?d.roasEff-1:null,signed:true},
-  comm:{label:'Komisi',val:d=>d.commEff,signed:false},
+  net:{label:'Laba',val:(d,B)=>B.net(d),signed:true},
+  roas:{label:'ROAS',val:(d,B)=>B.roas(d)==null?null:B.roas(d)-1,signed:true},
+  comm:{label:'Komisi',val:(d,B)=>B.comm(d),signed:false},
   spend:{label:'Biaya',val:d=>d.spend,signed:false},
 };
+/* Calendar and charts put commission on its click day (Waktu Klik): by order
+   date a day with little spend collects orders from earlier clicks and looks
+   profitable (must 30 Sep read 4,14x; by click 0,84x). Null = unknown, never 0.
+   The Rincian Harian table stays on the order date and says so. */
+function dayBasis(){const R=RESULT,on=!!(R&&R.byClick&&R.byClick.available);return{on,label:on?'tanggal klik':'tanggal pesanan',comm:x=>on?x.commEffByClick:x.commEff,net:x=>on?x.netEffByClick:x.netEff,roas:x=>x.spend>0?(on?x.roasEffByClick:x.roasEff):null,ripe:x=>on?x.matureByClick:x.mature}}
 function renderCalendar(){
   const el=$('calendar'),days=RESULT.daily;
   if(!days.length){el.innerHTML='';$('calNote').textContent='';return}
-  const C=CALDEF[CALVIEW],vals=days.map(C.val).filter(v=>v!=null&&isFinite(v));
+  const B=dayBasis(),C=CALDEF[CALVIEW],vals=days.map(d=>C.val(d,B)).filter(v=>v!=null&&isFinite(v));
   const mag=Math.max(...vals.map(Math.abs),1);
   const byMonth={};
   days.forEach(d=>{(byMonth[d.date.slice(0,7)]=byMonth[d.date.slice(0,7)]||{})[d.date]=d});
@@ -938,7 +960,7 @@ function renderCalendar(){
     for(let i=1;i<=last;i++){
       const key=`${mk}-${String(i).padStart(2,'0')}`,d=byMonth[mk][key];
       if(!d){cells.push(`<span class="cday none"><b>${i}</b></span>`);continue}
-      const v=C.val(d);
+      const v=C.val(d,B),net=B.net(d),cm=B.comm(d),ro=B.roas(d),ripe=B.ripe(d);
       let cls='zero',op=0;
       if(v!=null&&isFinite(v)){op=Math.min(Math.abs(v)/mag,1);cls=C.signed?(v>=0?'pos':'neg'):'pos'}
       // All four numbers live in the square. The switcher above now only picks
@@ -946,22 +968,23 @@ function renderCalendar(){
       // have to click through four views to read one day.
       // The lead number sits on its own line at full size; the three below drop
       // the "Rp" so "Komisi 1,1jt" fits a 90px square without being cut off.
+      // rp(null) prints Rp0; an unknown click day shows a dash instead.
       const lines=[
-        ['Laba',rp(d.netEff),d.netEff>=0?'up':'down',rpShort(d.netEff)],
-        ['Komisi',rp(d.commEff),'',rpShort(d.commEff)],
+        ['Laba',net==null?'—':rp(net),net==null?'':net>=0?'up':'down',rpShort(net)],
+        ['Komisi',cm==null?'—':rp(cm),'',rpShort(cm)],
         ['Biaya',rp(d.spend),'',rpShort(d.spend)],
-        ['ROAS',d.spend?dec(d.roasEff,2)+'x':'—',''],
+        ['ROAS',ro==null?'—':dec(ro,2)+'x',''],
       ];
       const lead=lines.splice({net:0,comm:1,spend:2,roas:3}[CALVIEW],1)[0];
-      cells.push(`<span class="cday ${cls}${d.mature?'':' raw'}" style="--i:${op.toFixed(3)}"
-        title="${key} · ${nf(d.orders)} order · ${nf(d.clicks)} klik Meta${d.shopeeClicks?' · '+nf(d.shopeeClicks)+' klik Shopee':''}${d.mature?'':' · data belum matang'}">
+      cells.push(`<span class="cday ${cls}${ripe?'':' raw'}" style="--i:${op.toFixed(3)}"
+        title="${key} · ${nf(d.orders)} order (tgl pesanan) · ${nf(d.clicks)} klik Meta${d.shopeeClicks?' · '+nf(d.shopeeClicks)+' klik Shopee':''}${ripe?'':' · data belum matang'}">
         <b>${i}</b><i class="${lead[2]}"><em>${lead[0]}</em>${lead[1]}</i>
         <u>${lines.map(l=>`<span><em>${l[0]}</em>${l[3]||l[1]}</span>`).join('')}</u></span>`);
     }
     return `<div class="calmonth"><h4>${NM[m-1]} ${y}</h4>
       <div class="cgrid">${DOW.map(x=>`<span class="cdow">${x}</span>`).join('')}${cells.join('')}</div></div>`;
   }).join('');
-  $('calNote').textContent=`${days.length} hari · warna mengikuti ${C.label} · kotak bergaris belum matang`;
+  $('calNote').textContent=`${days.length} hari · warna mengikuti ${C.label} · ${B.label} · kotak bergaris belum matang`;
 }
 document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
   CALVIEW=b.dataset.cal;
@@ -1012,24 +1035,39 @@ function renderCharts(){
   if(!RESULT)return;
   const R=RESULT,d=R.daily,lbl=d.map(x=>x.date.slice(5)),b=R.breakdown;
   const acc=cv('--accent'),ok=cv('--ok'),info=cv('--info'),warn=cv('--warn'),bad=cv('--bad'),org=cv('--organic'),mute=cv('--text-mute');
-  // Days still inside the attribution lag are drawn dashed and faded: their
-  // commission is still arriving, so the dip at the end is not a real drop.
-  const raw=i=>d[i]&&!d[i].mature,anyRaw=d.some(x=>!x.mature);
+  // Days still inside the attribution lag are drawn dashed and faded on a
+  // shaded background: their commission is still arriving, so the dip at the
+  // end is not a real drop. By click date the band also covers click days whose
+  // commission is still mostly Tertunda. The unripe days are always a suffix.
+  const B=dayBasis(),bc=R.byClick||{};
+  const raw=i=>d[i]&&!B.ripe(d[i]),anyRaw=d.some(x=>!B.ripe(x));
   const fresh=(color)=>({segment:{borderDash:c=>raw(c.p1DataIndex)?[5,4]:undefined},
-    pointBackgroundColor:d.map(x=>x.mature?color:color+'55'),pointBorderColor:d.map(x=>x.mature?color:color+'55')});
-  $('matureNote').textContent='Area hijau = laba, merah = rugi'+(anyRaw?' · garis putus-putus = belum matang':'');
+    pointBackgroundColor:d.map(x=>B.ripe(x)?color:color+'55'),pointBorderColor:d.map(x=>B.ripe(x)?color:color+'55')});
+  const band=[CT.recentBand(d.findIndex(x=>!B.ripe(x)),cv('--surface-2'),'belum matang')];
+  // Headroom above the data keeps the band's label off the top line.
+  const shade=anyRaw?' · latar berwarna = belum matang':'',room=anyRaw?{grace:'10%'}:{};
+  $('matureNote').textContent='Komisi efektif menurut '+B.label+' · area hijau = laba, merah = rugi'+shade;
+  $('roasNote').textContent='Komisi efektif tgl '+(B.on?'klik':'pesanan')+' ÷ biaya hari itu · iklan + organik'+shade;
+  // Every rupiah the chart cannot place is named, so the series and this note add up to the KPI.
+  $('dailyBasis').textContent=(B.on?['Komisi dicatat pada tanggal klik, jadi tiap hari membandingkan biaya hari itu dengan komisi dari klik hari itu.',
+    bc.beforeEff?`${rp(bc.beforeEff)} komisi dari klik sebelum ${R.range.start} tidak masuk grafik.`:'',
+    bc.missingEff?`${rp(bc.missingEff)} komisi tanpa tanggal klik yang terbaca juga tidak masuk.`:'',
+    bc.dataEnd&&bc.dataEnd<R.range.end?`Laporan komisi berakhir ${bc.dataEnd}; komisi klik sesudahnya belum diketahui.`:'',
+    anyRaw?'Hari belum matang: pesanan dari klik itu masih bisa masuk setelah laporan diunduh, atau separuh lebih komisinya masih Tertunda, jadi angkanya masih bisa naik.':'']
+    :['Laporan komisi tanpa kolom Waktu Klik: komisi dicatat pada tanggal pesanan, jadi hari berbiaya kecil bisa tampak untung karena menampung pesanan dari klik hari sebelumnya.']).filter(Boolean).join(' ');
 
-  mk('chDaily',{type:'line',data:{labels:lbl,datasets:[
+  mk('chDaily',{type:'line',plugins:band,data:{labels:lbl,datasets:[
     // The band between the two lines is the day's profit: green above, red below.
-    {label:'Komisi Efektif',data:d.map(x=>x.commEff),borderColor:ok,backgroundColor:ok,fill:{target:1,above:ok+'2e',below:bad+'2e'},fmt:'money',...fresh(ok)},
+    {label:'Komisi Efektif',data:d.map(B.comm),borderColor:ok,backgroundColor:ok,fill:{target:1,above:ok+'2e',below:bad+'2e'},fmt:'money',...fresh(ok)},
     {label:'Biaya Iklan',data:d.map(x=>x.spend),borderColor:acc,backgroundColor:acc,fill:false,fmt:'money',...fresh(acc)}]},
-    options:{scales:{y:CT.axis('money',{beginAtZero:true})}}});
+    options:{scales:{y:CT.axis('money',{beginAtZero:true,...room})}}});
   const thScale=R.options&&Number.isFinite(R.options.thScale)?R.options.thScale:2;
-  mk('chRoas',{type:'bar',data:{labels:lbl,datasets:[{label:'ROAS',data:d.map(x=>x.roasEff),fmt:'ratio',order:1,
-    backgroundColor:d.map(x=>{const c=x.roasEff>=thScale?ok:x.roasEff>=1?warn:bad;return x.mature?c:c+'55'})},
+  // A day without spend has no ROAS; null leaves its bar out instead of a red 0x.
+  mk('chRoas',{type:'bar',plugins:band,data:{labels:lbl,datasets:[{label:B.on?'ROAS efektif (tgl klik)':'ROAS efektif',data:d.map(B.roas),fmt:'ratio',order:1,
+    backgroundColor:d.map(x=>{const v=B.roas(x),c=v==null?mute:v>=thScale?ok:v>=1?warn:bad;return B.ripe(x)?c:c+'55'})},
     CT.reference('Impas 1x',1,d.length,mute),
     CT.reference('Target scale '+CT.ratio(thScale),thScale,d.length,ok)]},
-    options:{scales:{y:CT.axis('ratio',{beginAtZero:true})}}});
+    options:{scales:{y:CT.axis('ratio',{beginAtZero:true,...room})}}});
   mk('chClicks',{type:'line',data:{labels:lbl,datasets:[
     {label:'Klik Meta',data:d.map(x=>x.clicks),borderColor:info,backgroundColor:info,fmt:'count'},
     {label:'Klik Shopee',data:d.map(x=>x.shopeeClicks),borderColor:warn,backgroundColor:warn,fmt:'count'},

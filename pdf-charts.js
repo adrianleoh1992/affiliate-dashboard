@@ -166,7 +166,7 @@
       const model = prepareTrend(options.rows);
       const third = width / 3;
       legend('Biaya + PPN', x, y + 4, colors.cost, third);
-      legend('Komisi efektif', x + third, y + 4, colors.accent, third);
+      legend(options.commLabel || 'Komisi efektif', x + third, y + 4, colors.accent, third);
       const mature = dateDay(options.matureUntil);
       const hasRecent = mature !== null && model.points.some(point => point.day > mature);
       if (hasRecent) {

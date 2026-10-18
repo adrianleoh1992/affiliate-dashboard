@@ -460,6 +460,92 @@ async function main() {
     assert.equal(await page.locator('#panel-produk').isVisible(), true);
   });
 
+  test('Harian charts and calendar follow the click date, shade unripe days and name what they leave out', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const clickedOn = (row, day) => ({ ...row, 'Waktu Klik': day + ' 09:00:00' });
+    // Order 2 lands on 08-02 from a click on 08-01; order 3 was clicked before the period starts.
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha', '2026-08-01'), clickedOn(aff('2', 'Alpha', '2026-08-02'), '2026-08-01'),
+      clickedOn(aff('3', 'Alpha', '2026-08-01'), '2026-07-30')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100, '2026-08-01'), ad('Alpha', 100, '2026-08-02'), ad('Alpha', 100, '2026-08-03')] }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chRoas'))));
+    const ui = await page.evaluate(() => {
+      const daily = Chart.getChart(document.getElementById('chDaily')), roas = Chart.getChart(document.getElementById('chRoas'));
+      const day3 = [...document.querySelectorAll('#calendar .cday')].find(cell => cell.querySelector('b') && cell.querySelector('b').textContent === '3');
+      return { daily: daily.data.datasets[0].data, roas: roas.data.datasets[0].data, roasLabel: roas.data.datasets[0].label,
+        expectDaily: RESULT.daily.map(d => d.commEffByClick), expectRoas: RESULT.daily.map(d => d.spend > 0 ? d.roasEffByClick : null),
+        plugins: [daily, roas].map(chart => chart.config.plugins.map(plugin => plugin.id)),
+        mature: document.getElementById('matureNote').textContent, roasNote: document.getElementById('roasNote').textContent,
+        basis: document.getElementById('dailyBasis').textContent, cal: document.getElementById('calNote').textContent,
+        day3: day3 ? day3.textContent.replace(/\s+/g, '') : '', day3Title: day3 ? day3.title : '',
+        tableComm: [...document.querySelectorAll('#tblDaily tbody tr.dayrow')].map(tr => tr.querySelectorAll('td')[3].textContent),
+        stored: document.getElementById('panel-tersimpan').textContent };
+    });
+    assert.deepEqual(ui.daily, ui.expectDaily);
+    // Orders 1 and 2 were both clicked on 08-01; 08-03 comes after the commission report ends.
+    assert.deepEqual(ui.daily, [400, 0, null], 'click-date commission; an unknown day is null, not zero');
+    assert.deepEqual(ui.roas, ui.expectRoas);
+    assert.equal(ui.roasLabel, 'ROAS efektif (tgl klik)');
+    for (const ids of ui.plugins) for (const id of ['recentBand', 'singleReference']) assert.ok(ids.includes(id), id);
+    assert.match(ui.mature, /^Komisi efektif menurut tanggal klik · area hijau = laba, merah = rugi · latar berwarna = belum matang$/);
+    assert.match(ui.roasNote, /Komisi efektif tgl klik ÷ biaya hari itu · iklan \+ organik/);
+    assert.match(ui.basis, /Rp200 komisi dari klik sebelum 2026-08-01 tidak masuk grafik\./);
+    assert.match(ui.basis, /Laporan komisi berakhir 2026-08-02; komisi klik sesudahnya belum diketahui\./);
+    assert.match(ui.cal, /tanggal klik/);
+    assert.match(ui.day3, /^3Laba—Komisi—Biaya100ROAS—$/, 'unknown days print a dash, never Rp0');
+    assert.match(ui.day3Title, /order \(tgl pesanan\)/);
+    assert.deepEqual(ui.tableComm, ['Rp0', 'Rp200', 'Rp400'], 'the table stays on the order date');
+    assert.match(ui.stored, /ROAS per Hari \(tanggal pesanan\)/);
+    assert.match(ui.stored, /Grafik di tab Harian memakai tanggal klik/);
+  });
+
+  test('without Waktu Klik the Harian charts say they use the order date', async page => {
+    const noClick = row => { const copy = { ...row }; delete copy['Waktu Klik']; return copy; };
+    await upload(page, [{ name: 'affiliate.csv', rows: [noClick(aff('1')), noClick(aff('2', 'Alpha', '2026-08-02'))] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Alpha', 100, '2026-08-02')] }]);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chDaily'))));
+    const ui = await page.evaluate(() => ({ available: RESULT.byClick.available,
+      daily: Chart.getChart(document.getElementById('chDaily')).data.datasets[0].data, expect: RESULT.daily.map(d => d.commEff),
+      roasLabel: Chart.getChart(document.getElementById('chRoas')).data.datasets[0].label,
+      mature: document.getElementById('matureNote').textContent, roasNote: document.getElementById('roasNote').textContent,
+      basis: document.getElementById('dailyBasis').textContent, cal: document.getElementById('calNote').textContent }));
+    assert.equal(ui.available, false);
+    assert.deepEqual(ui.daily, ui.expect, 'order-date effective commission, never a row of click-date zeros');
+    assert.equal(ui.roasLabel, 'ROAS efektif');
+    assert.match(ui.mature, /^Komisi efektif menurut tanggal pesanan/);
+    assert.match(ui.roasNote, /tgl pesanan/);
+    assert.match(ui.basis, /tanpa kolom Waktu Klik: komisi dicatat pada tanggal pesanan/);
+    assert.match(ui.cal, /tanggal pesanan/);
+  });
+
+  test('concentration shows spend share against commission share and warns on a top-3 dependency', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const spends = [['Alpha', 300], ['Bravo', 250], ['Charlie', 200], ['Delta', 50], ['Echo', 50], ['Foxtrot', 50]];
+    await upload(page, [{ name: 'affiliate.csv', rows: spends.map(([tag], i) => aff(String(i + 1), tag)) },
+      { name: 'ads.csv', rows: spends.map(([tag, spend]) => ad(tag, spend)).concat([ad('Zulu Kilo', 40)]) }]);
+    const card = await page.evaluate(() => ({ text: document.getElementById('concentration').textContent.replace(/\s+/g, ' '),
+      risk: !!document.querySelector('#concentration .riskbox'), rows: document.querySelectorAll('#concentration tbody tr').length,
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth }));
+    assert.match(card.text, /1 tag teratas \(Alpha\)/);
+    assert.match(card.text, /2 tag di luar 5 teratas/);
+    assert.match(card.text, /5 tag dengan biaya terbesar memakan 90,4% biaya iklan dan menghasilkan 83,3% komisi efektif iklan; 2 tag lainnya memakan 9,6% biaya dengan ROAS 2,22x\./);
+    assert.equal(card.rows, 4, 'top 1, 3 and 5 plus the remainder');
+    assert.equal(card.risk, true, 'top 3 hold 79,8% of spend across 7 paid tags');
+    assert.match(card.text, /3 tag menyerap 79,8% biaya iklan/);
+    assert.match(card.text, /1 nama iklan berbiaya \(4,3% biaya\) tidak ada di laporan komisi/);
+    assert.equal(card.overflow, false);
+  });
+
+  test('four evenly spread paid tags are not flagged as a concentration risk', async page => {
+    // The top 3 hold 75% here, but with four tags that is arithmetic, not a dependency.
+    const even = ['Alpha', 'Bravo', 'Charlie', 'Delta'];
+    await upload(page, [{ name: 'affiliate.csv', rows: even.map((tag, i) => aff('e' + i, tag)) },
+      { name: 'ads.csv', rows: even.map(tag => ad(tag, 100)) }]);
+    assert.match(await page.locator('#concentration').textContent(), /1 tag teratas \(\w+\)[\s\S]*1 tag di luar 3 teratas/);
+    assert.equal(await page.locator('#concentration .riskbox').count(), 0);
+  });
+
   test('horizontal bars answer for the row under the pointer and count axes step in whole numbers', async page => {
     const cat = (id, name, comm) => ({ ...aff(id), 'L1 Kategori Global': name, 'Total Komisi per Pesanan(Rp)': String(comm) });
     await upload(page, [{ name: 'affiliate.csv', rows: [cat('1', 'Elektronik', 100000), cat('2', 'Fashion', 60000),

@@ -267,11 +267,22 @@
     nextPage();
     section('Tren biaya dan komisi');
     ensure(76);
-    charts.trend({ x: M, y, width: WIDTH, height: 76, matureUntil: r.matureUntil,
+    // Commission on its click day, as on screen. A day without commission rows
+    // and without click commission stays a gap, so the gap sentence holds.
+    const bc = result.byClick || {}, byClick = !!bc.available;
+    charts.trend({ x: M, y, width: WIDTH, height: 76, matureUntil: byClick ? bc.matureUntil : r.matureUntil,
+      commLabel: byClick ? 'Komisi efektif (tanggal klik)' : 'Komisi efektif',
       rows: daily.map(d => ({ date: d.date, spend: d.hasAds === false ? null : d.spend,
-        comm: d.hasAffiliate === false || !finite(d.commEff) ? null : d.commEff })) });
+        comm: byClick
+          ? (!finite(d.commEffByClick) || (d.hasAffiliate === false && !amount(d.commByClick)) ? null : d.commEffByClick)
+          : (d.hasAffiliate === false || !finite(d.commEff) ? null : d.commEff) })) });
     y += 78;
-    paragraph('Komisi memakai bobot efektif. Garis terputus berarti tidak ada baris sumber; bukan bukti nilai nol.', { size: 7, gap: 1 });
+    paragraph((byClick ? 'Komisi efektif dicatat pada tanggal klik, jadi setiap hari membandingkan biaya hari itu dengan komisi dari klik hari itu. '
+      + (amount(bc.beforeEff) ? money(bc.beforeEff) + ' dari klik sebelum ' + (r.start || '-') + ' tidak tampil. ' : '')
+      + (amount(bc.missingEff) ? money(bc.missingEff) + ' tanpa tanggal klik tidak tampil. ' : '')
+      + (daily.some(d => d.matureByClick === false) ? 'Area berwarna: belum matang, angkanya masih bisa naik. ' : '')
+      : 'Komisi efektif dicatat pada tanggal pesanan. ')
+      + 'Garis terputus berarti tidak ada baris sumber; bukan bukti nilai nol.', { size: 7, gap: 1 });
     section('Peta keputusan', integer(tags.length) + ' tag pada periode ini. Keputusan memakai hari matang sampai ' + (r.matureUntil || '-') + '.');
     ensure(35);
     charts.decisions({ x: M, y, width: WIDTH, height: 35,
@@ -320,7 +331,19 @@
     table(['Tag', 'Komisi laporan', 'Pesanan', 'Maks biaya / pesanan', 'Kanal utama'], array(a.organicCandidates).filter(c => !omittedTags.has(c.tag)).map(c => [
       c.tag, money(c.comm), integer(c.orders), amount(c.orders) > 0 ? money(c.maxCpa) : '-', c.topPlatform || '-',
     ]), [46, 36, 20, 40, 40], { numeric: [1, 2, 3], empty: 'Belum ada kandidat organik dengan komisi.' });
-    if (a.concentration) {
+    const c = a.concentration, pareto = c ? array(c.groups) : [];
+    if (pareto.length && c.rest) {
+      const last = pareto[pareto.length - 1], commKnown = amount(c.paidComm) > 0;
+      section('Konsentrasi biaya vs komisi', 'Tag diurutkan dari biaya terbesar. Porsi komisi dari komisi efektif tag berbayar; komisi organik tidak dihitung.');
+      table(['Kelompok', 'Porsi biaya', 'Porsi komisi efektif', 'ROAS efektif'], pareto.map(g => [
+        g.n === 1 ? '1 tag teratas: ' + c.topTag : integer(g.n) + ' tag teratas', percent(g.spendShare),
+        percent(g.commShare, commKnown), ratio(g.roasEff, amount(g.spend) > 0),
+      ]).concat([[integer(c.rest.n) + ' tag di luar ' + integer(last.n) + ' teratas', percent(c.rest.spendShare),
+        percent(c.rest.commShare, commKnown), ratio(c.rest.roasEff, amount(c.rest.spend) > 0)]]),
+      [80, 34, 40, 28], { numeric: [1, 2, 3] });
+      if (c.noComm && c.noComm.n) paragraph(integer(c.noComm.n) + ' nama iklan berbiaya (' + percent(c.noComm.spendShare)
+        + ' biaya) tidak ada di laporan komisi dan dihitung berkomisi 0.', { size: 7 });
+    } else if (a.concentration) {
       section('Risiko konsentrasi anggaran');
       metricGrid([
         ['Porsi tag terbesar', percent(a.concentration.topShare), a.concentration.topTag],
@@ -345,7 +368,7 @@
         money(u.spend), money(u.commEff) + '\n' + money(u.netEff), integer(u.clicks) + '\n' + (amount(u.clicks) > 0 ? money(u.cpc) : '-'),
       ]), [51, 31, 31, 38, 31], { numeric: [2, 3, 4], empty: 'Tidak ada iklan pada hasil analisis periode ini.' });
 
-      section('Kinerja harian', 'Angka memakai bobot efektif seperti ringkasan. Tanda "-" berarti tidak ada baris sumber atau pembagi; bukan bukti nilai nol. Laba dan ROAS harian memerlukan baris iklan serta affiliate.');
+      section('Kinerja harian', 'Tanggal = tanggal pesanan. Angka memakai bobot efektif seperti ringkasan. Tanda "-" berarti tidak ada baris sumber atau pembagi; bukan bukti nilai nol. Laba dan ROAS harian memerlukan baris iklan serta affiliate.');
       table(['Tanggal / kematangan', 'Biaya + PPN', 'Komisi efektif', 'Laba efektif', 'ROAS efektif', 'Pesanan'], daily.map(d => {
         const hasAds = d.hasAds !== false, hasAffiliate = d.hasAffiliate !== false;
         return [d.date + '\n' + (d.mature ? 'Matang' : 'Belum matang'), hasAds ? money(d.spend) : '-',

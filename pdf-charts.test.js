@@ -133,6 +133,17 @@ test('trend draws consecutive segments only and shows the recent-date region', (
   assert.ok(doc.ops.some(op => op.kind === 'text' && op.value === 'Rp ribu'));
 });
 
+test('trend legend names the commission basis it is given', () => {
+  const box = { x: 14, y: 20, width: 182, height: 76 }, rows = [{ date: '2026-09-01', spend: 1000, comm: 800 }];
+  const labelled = new RecordingDocument();
+  Charts.create(labelled).trend({ ...box, commLabel: 'Komisi efektif (tanggal klik)', rows });
+  within(labelled, box);
+  assert.ok(labelled.ops.some(op => op.kind === 'text' && op.value === 'Komisi efektif (tanggal klik)'), 'full label, not clipped');
+  const plain = new RecordingDocument();
+  Charts.create(plain).trend({ ...box, rows });
+  assert.ok(plain.ops.some(op => op.kind === 'text' && op.value === 'Komisi efektif'), 'default stays as before');
+});
+
 test('one-day, empty, all-zero and negative trends never create invalid geometry', () => {
   for (const rows of [[], [{ date: '2026-09-01', spend: null, comm: null }],
     [{ date: '2026-09-01', spend: 0, comm: 0 }], [{ date: '2026-09-01', spend: 10, comm: -20 }],

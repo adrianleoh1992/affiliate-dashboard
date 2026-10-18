@@ -181,7 +181,7 @@
         <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-print="peluang">
-        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
+        <div class="card-head"><h2>Konsentrasi Biaya vs Komisi</h2></div>
         <div id="concentration"></div>
       </div>
     </div>
@@ -224,10 +224,11 @@
       <div class="card">
         <div class="card-head"><h2>Komisi vs Biaya Iklan</h2><span class="sub" id="matureNote"></span></div>
         <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
+        <p class="hint daily-basis" id="dailyBasis"></p>
       </div>
       <div class="grid2">
         <div class="card">
-          <div class="card-head"><h2>ROAS Harian</h2></div>
+          <div class="card-head"><h2>ROAS Harian</h2><span class="sub" id="roasNote"></span></div>
           <div class="chartbox"><canvas id="chRoas"></canvas></div>
         </div>
         <div class="card">
@@ -236,7 +237,7 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Rincian Harian</h2></div>
+        <div class="card-head"><h2>Rincian Harian</h2><span class="sub">menurut tanggal pesanan · komisi efektif</span></div>
         <div class="tscroll"><table id="tblDaily"><thead></thead><tbody></tbody></table></div>
       </div>
       <h3 class="sec-split">Perkembangan antar snapshot</h3>
@@ -329,13 +330,14 @@
           <div class="field field-ppn"><label>PPN biaya iklan</label><div class="ppn-switch" data-ppn-switch data-compact></div></div>
         </div>
         <div class="strip" id="storedStrip"></div>
+        <p class="hint">Riwayat menyimpan komisi per tanggal pesanan, jadi ROAS hari-hari terakhir bisa terlalu tinggi atau terlalu rendah. Grafik di tab Harian memakai tanggal klik.</p>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2><span class="sub">Area hijau = laba, merah = rugi</span></div>
+        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2><span class="sub">Komisi menurut tanggal pesanan · area hijau = laba, merah = rugi</span></div>
         <div class="chartbox tall"><canvas id="chStored"></canvas></div>
       </div>
       <div class="grid2">
-        <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
+        <div class="card"><div class="card-head"><h2>ROAS per Hari (tanggal pesanan)</h2></div>
           <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
         <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
           <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>

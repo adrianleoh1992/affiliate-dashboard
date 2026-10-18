@@ -59,4 +59,29 @@ assert.deepEqual(one.filter(Array.isArray).filter(c => c[0] !== 'dash'), [['move
 assert.equal(drawn([T.reference('Impas 1x', 1, 2, '#999')]).length, 0, 'longer lines are drawn by Chart.js itself');
 assert.equal(drawn([T.reference('Impas 1x', 1, 1, '#999')], () => false).length, 0, 'a hidden reference stays hidden');
 
+// The not-yet-mature band starts half a step before its first day and runs to
+// the right edge; it is drawn before the grid so gridlines stay visible.
+function band(from, n, text, textWidth = 60) {
+  const calls = [];
+  const ctx = { save() {}, restore() {}, fillRect(...a) { calls.push(['rect', ...a]); }, fillText(t, x, y) { calls.push(['text', t, x, y]); },
+    measureText: () => ({ width: textWidth }) };
+  const plugin = T.recentBand(from, '#eee', text);
+  plugin.beforeDraw({ ctx, chartArea: { left: 40, right: 340, top: 10, bottom: 210 }, data: { labels: Array(n).fill('x') },
+    scales: { x: { getPixelForValue: i => 55 + i * 30 } }, options: { font: { family: 'Test' } } });
+  return { plugin, calls };
+}
+global.document = { documentElement: {} };
+global.getComputedStyle = () => ({ getPropertyValue: () => '#999' });
+const b = band(7, 10);
+assert.equal(b.plugin.id, 'recentBand');
+assert.equal(typeof b.plugin.beforeDraw, 'function', 'drawn under the grid, not over the data');
+assert.deepEqual(b.calls, [['rect', 55 + 7 * 30 - 15, 10, 340 - (55 + 7 * 30 - 15), 200]]);
+assert.deepEqual(band(0, 10).calls[0].slice(0, 2), ['rect', 40], 'clamped to the plot area');
+assert.deepEqual(band(-1, 10).calls, [], 'every day mature: nothing drawn');
+assert.deepEqual(band(10, 10).calls, [], 'an index past the last day draws nothing');
+assert.deepEqual(band(undefined, 10).calls, []);
+const labelled = band(5, 10, 'belum matang');
+assert.deepEqual(labelled.calls[1], ['text', 'belum matang', 55 + 5 * 30 - 15 + 4, 14]);
+assert.equal(band(9, 10, 'belum matang').calls.length, 1, 'a label wider than the band is left out');
+
 console.log('chart theme checks passed');
