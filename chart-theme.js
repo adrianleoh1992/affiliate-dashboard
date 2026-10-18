@@ -57,13 +57,25 @@
     Chart.defaults.elements.bar.borderRadius = 3;
   }
 
-  // Axis ticks drop trailing zeros: 0,5x and 2x, not 0,50x and 2,00x.
+  // Axis ticks drop trailing zeros: 0,5x and 2x, not 0,50x and 2,00x. Money
+  // ticks keep the fraction too: a Rp500 step otherwise labels 1.500 and
+  // 2.000 both "Rp2rb".
   const trim = value => String(Math.round(value * 100) / 100).replace('.', ',');
-  const TICK = { ratio: value => trim(value) + 'x', pct: value => trim(value) + '%' };
+  function moneyTick(value) {
+    const a = Math.abs(value), s = value < 0 ? '-' : '';
+    if (a >= 1e9) return s + 'Rp' + trim(a / 1e9) + ' M';
+    if (a >= 1e6) return s + 'Rp' + trim(a / 1e6) + ' jt';
+    if (a >= 1e3) return s + 'Rp' + trim(a / 1e3) + 'rb';
+    return s + 'Rp' + trim(a);
+  }
+  const TICK = { money: moneyTick, ratio: value => trim(value) + 'x', pct: value => trim(value) + '%' };
 
-  // An axis that knows how to write its own numbers.
+  // An axis that knows how to write its own numbers. Counts get whole steps
+  // only; rounding 0,5 order to "1" put two gridlines under the same label.
   function axis(format, extra) {
-    return merge({ ticks: { callback: value => (TICK[format] || fmt(format))(value) } }, extra || {});
+    const ticks = { callback: value => (TICK[format] || fmt(format))(value) };
+    if (format === 'count') ticks.precision = 0;
+    return merge({ ticks }, extra || {});
   }
 
   // A flat dashed line across a chart: break-even, the scale target.
@@ -72,6 +84,24 @@
       borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 0, fill: false,
       fmt: 'ratio', order: 0, isReference: true };
   }
+
+  // A one-day chart gives each reference line a single point, and a line of
+  // one point draws nothing while the legend still lists it. Draw it across.
+  const singleReference = {
+    id: 'singleReference',
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      chart.data.datasets.forEach((ds, i) => {
+        if (!ds.isReference || ds.data.length > 1 || !chart.isDatasetVisible(i)) return;
+        const scale = scales[ds.yAxisID || 'y'], y = scale && scale.getPixelForValue(ds.data[0]);
+        if (!Number.isFinite(y)) return;
+        ctx.save();
+        ctx.strokeStyle = ds.borderColor; ctx.lineWidth = ds.borderWidth; ctx.setLineDash(ds.borderDash || []);
+        ctx.beginPath(); ctx.moveTo(chartArea.left, y); ctx.lineTo(chartArea.right, y); ctx.stroke();
+        ctx.restore();
+      });
+    },
+  };
 
   function baseOptions(type, labels) {
     const grid = css('--border'), text = css('--text-dim'), surface = css('--surface'), ink = css('--text');
@@ -126,8 +156,12 @@
     applyDefaults(Chart);
     sizePoints(cfg);
     cfg.options = merge(baseOptions(cfg.type, cfg.data.labels), cfg.options || {});
+    // Index mode reads along x unless told otherwise, so a horizontal bar
+    // chart showed whichever bar ended nearest the pointer, not its own row.
+    if (cfg.options.indexAxis === 'y' && cfg.options.interaction && !cfg.options.interaction.axis) cfg.options.interaction.axis = 'y';
+    cfg.plugins = (cfg.plugins || []).concat(singleReference);
     return new Chart(canvas, cfg);
   }
 
-  return { merge, money, count, ratio, pct, axis, reference, create, css };
+  return { merge, money, count, ratio, pct, axis, reference, create, css, singleReference };
 }));

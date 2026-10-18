@@ -39,6 +39,11 @@ function validSnapshot(x){
 function snaps(){try{const a=JSON.parse(readStorage(LS.snaps+'_'+active()));return Array.isArray(a)?a.filter(validSnapshot).filter(s=>!s.account||s.account===active()).slice(0,120):[]}catch(e){return[]}}
 function saveSnaps(a){localStorage.setItem(LS.snaps+'_'+active(),JSON.stringify(a.slice(0,120)))}
 function renderAccounts(){let a=accounts(),s=$('account');s.innerHTML=a.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');s.value=active();if($('flowAccount'))$('flowAccount').textContent=active()}
+// The sticky header is one to three rows tall depending on width (and not
+// sticky on phones). Keyboard focus scrolls items to just below it, not under it.
+(function(){const hdr=document.querySelector('header');if(!hdr)return;
+  const fit=()=>{document.documentElement.style.scrollPaddingTop=(getComputedStyle(hdr).position==='sticky'?hdr.offsetHeight+8:16)+'px'};
+  if(window.ResizeObserver)new ResizeObserver(fit).observe(hdr);addEventListener('resize',fit);fit()})();
 function applyTheme(t){t=t==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);$('btnTheme').setAttribute('aria-pressed',String(t==='dark'));try{localStorage.setItem(LS.theme,t)}catch(e){}if(RESULT)render()}
 applyTheme(readStorage(LS.theme)||'light');renderAccounts();
 $('btnTheme').onclick=()=>applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
@@ -78,7 +83,9 @@ function updateImportUI(){
   $('flowImport').classList.toggle('done',FILES.length>0&&!PENDING_IMPORTS);
   $('flowAnalyze').classList.toggle('done',!!RESULT&&!PENDING_IMPORTS);
   // Once the numbers are on screen the three-step guide has done its job.
-  document.body.classList.toggle('has-result',!!RESULT&&!PENDING_IMPORTS);
+  // A second report being read keeps the current numbers on screen, so the
+  // guide stays hidden instead of pushing the drop area down and back.
+  document.body.classList.toggle('has-result',!!RESULT);
   $('flowImportNote').textContent=PENDING_IMPORTS?'Memeriksa file…':FILES.length?FILES.length+' file dimuat':'Unggah laporan CSV';
   $('flowAnalyzeNote').textContent=RESULT?(RESULT.tags.length+' tag · '+RESULT.range.start+' — '+RESULT.range.end):'Menunggu laporan komisi';
   $('btnExport').disabled=!RESULT||PENDING_IMPORTS>0;$('btnPdf').disabled=!RESULT||PENDING_IMPORTS>0;
@@ -336,7 +343,7 @@ function renderGaps(){
   });
   if(!min){card.classList.add('hidden');return}
   const all=[],span=E.diffDays(min,max)+1;
-  if(span>3660){card.classList.remove('hidden');$('gapNote').textContent=min+' — '+max;$('gapBody').textContent='Rentang laporan melebihi 10 tahun. Periksa tanggal sumber; rincian tanggal kosong tidak ditampilkan.';return}
+  if(span>3660){card.classList.remove('hidden','gap-clean');$('gapNote').textContent=min+' — '+max;$('gapBody').textContent='Rentang laporan melebihi 10 tahun. Periksa tanggal sumber; rincian tanggal kosong tidak ditampilkan.';return}
   for(let d=min;d<=max;d=shiftDay(d,1))all.push(d);
   const rows=[],adsDays=have.ads;
   let clickGapWithSpend=0;
@@ -567,7 +574,7 @@ function renderSynth(){
     +`ROAS iklan berbayar <b>${rx(k.paidRoas)}</b>. `
     +(st?`${st} tag berstatus STOP berdasarkan data matang.`:'Belum ada tag berstatus STOP.'):'';
 }
-function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}" role="button" tabindex="0" aria-pressed="${FILTER===key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${RESULT.options.thScale}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()});$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
+function renderDecisions(){let g={scale:[],pantau:[],stop:[],organik:[]};RESULT.tags.forEach(t=>{if(g[t.status])g[t.status].push(t)});g.stop.sort((a,b)=>a.roasEff-b.roasEff);g.pantau.sort((a,b)=>a.roasEff-b.roasEff);g.organik.sort((a,b)=>b.comm-a.comm);let box=(key,title,unit,fn,empty)=>{let a=g[key],it=a.length?a.slice(0,5).map(t=>`<div class="ditem"><span class="n">${esc(t.tag)}</span><span class="v">${fn(t)}</span></div>`).join('')+(a.length>5?`<div class="ditem"><span class="n">+${a.length-5} lainnya</span></div>`:''):`<div class="empty">${empty}</div>`;return`<div class="dcard ${key}${FILTER&&FILTER!==key?' dim':''}" data-filter="${key}" role="button" tabindex="0" aria-pressed="${FILTER===key}"><h4>${title} (${a.length}) <span class="unit">${unit}</span></h4>${it}</div>`};$('dgrid').innerHTML=box('scale','Scale','roas',t=>rx(t.roasEff),`Belum ada tag mencapai ${String(RESULT.options.thScale).replace('.',',')}x`)+box('pantau','Pantau','roas',t=>rx(t.roasEff),'Tidak ada')+box('stop','Stop','roas',t=>rx(t.roasEff),'Tidak ada')+box('organik','Organik','komisi',t=>rp(t.comm),'Tidak ada');$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onclick=()=>{FILTER=FILTER===e.dataset.filter?null:e.dataset.filter;renderDecisions();renderMain()});$('dgrid').querySelectorAll('[data-filter]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
 
 /* Rows in Semua Tag and Per Ad Unit open into their own day-by-day history.
    The totals answer "is this working"; the days answer "since when". */

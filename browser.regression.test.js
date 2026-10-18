@@ -439,6 +439,77 @@ async function main() {
     assert.equal(await page.locator('#panel-produk').isVisible(), true);
   });
 
+  test('horizontal bars answer for the row under the pointer and count axes step in whole numbers', async page => {
+    const cat = (id, name, comm) => ({ ...aff(id), 'L1 Kategori Global': name, 'Total Komisi per Pesanan(Rp)': String(comm) });
+    await upload(page, [{ name: 'affiliate.csv', rows: [cat('1', 'Elektronik', 100000), cat('2', 'Fashion', 60000),
+      cat('3', 'Rumah', 20000), cat('4', 'Lainnya', 9000)] }, { name: 'ads.csv', rows: [ad()] }, { name: 'clicks.csv', rows: [click()] }]);
+    await page.locator('[data-tab="produk"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chCat'))));
+    // Point at the shortest bar's row, level with the end of the longest bar:
+    // index mode along x picked the bar whose end lies nearest, not the row.
+    await page.locator('#chCat').scrollIntoViewIfNeeded();
+    const target = await page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('chCat')), box = chart.canvas.getBoundingClientRect();
+      const bars = chart.getDatasetMeta(0).data, last = bars.length - 1;
+      return { x: box.left + bars[0].x - 2, y: box.top + bars[last].y, label: chart.data.labels[last] };
+    });
+    await page.mouse.move(target.x, target.y);
+    await page.waitForFunction(() => Chart.getChart(document.getElementById('chCat')).tooltip.dataPoints?.length);
+    assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('chCat')).tooltip.dataPoints[0].label), target.label);
+    await page.locator('[data-tab="harian"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chClicks'))));
+    const ticks = await page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('chClicks'));
+      return { orders: chart.scales.y1.ticks.map(tick => tick.value),
+        singleDayRef: Chart.getChart(document.getElementById('chRoas')).config.plugins.some(plugin => plugin.id === 'singleReference') };
+    });
+    assert.ok(ticks.orders.every(Number.isInteger), 'order ticks: ' + ticks.orders.join(', '));
+    assert.equal(ticks.singleDayRef, true, 'a one-day ROAS chart still draws its reference lines');
+  });
+
+  test('results stay in place while another report is read, and the decade warning keeps its card', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff()] }, { name: 'ads.csv', rows: [ad()] }, { name: 'clicks.csv', rows: [click()] }]);
+    assert.equal(await page.locator('#gapCard').getAttribute('class').then(c => /gap-clean/.test(c)), true);
+    await page.evaluate(() => {
+      window.__resultStates = [];
+      new MutationObserver(() => window.__resultStates.push(document.body.classList.contains('has-result')))
+        .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    });
+    await upload(page, [{ name: 'old.csv', rows: [aff('9', 'Alpha', '2014-01-05')] }]);
+    assert.equal(await page.evaluate(() => window.__resultStates.includes(false)), false, 'the guide must not flash back');
+    assert.match(await page.locator('#gapBody').innerText(), /melebihi 10 tahun/);
+    assert.equal(await page.locator('#gapCard').getAttribute('class').then(c => /gap-clean/.test(c)), false);
+    assert.equal(await page.locator('#gapCard .card-head').isVisible(), true);
+  });
+
+  test('a fractional ROAS Scale reads with a comma and redraws the stored chart', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff(), aff('2', 'Alpha', '2026-08-02')] },
+      { name: 'ads.csv', rows: [ad(), ad('Alpha', 100, '2026-08-02')] }]);
+    await saveDaily(page);
+    await page.locator('[data-tab="tersimpan"]').click();
+    await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chStoredRoas'))));
+    const target = () => page.evaluate(() => Chart.getChart(document.getElementById('chStoredRoas'))
+      .data.datasets.filter(ds => ds.isReference).map(ds => ds.data[0]));
+    assert.deepEqual(await target(), [1, 2]);
+    await page.evaluate(() => { const input = document.getElementById('thScale'); input.value = '3'; input.dispatchEvent(new Event('change')); });
+    await page.waitForFunction(() => Chart.getChart(document.getElementById('chStoredRoas')).data.datasets.some(ds => ds.isReference && ds.data[0] === 3));
+    await page.evaluate(() => document.querySelector('[data-preset="konservatif"]').click());
+    await page.waitForFunction(() => Chart.getChart(document.getElementById('chStoredRoas')).data.datasets.some(ds => ds.isReference && ds.data[0] === 2.5));
+    await page.locator('[data-tab="iklan"]').click();
+    assert.match(await page.locator('#dgrid .dcard.scale').innerText(), /mencapai 2,5x/);
+  });
+
+  test('keyboard focus scrolls below the sticky header at every header height', async page => {
+    for (const [width, sticky] of [[768, true], [1024, true], [1440, true], [390, false]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const { header, padding } = await page.evaluate(() => ({ header: document.querySelector('header').offsetHeight,
+        padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) }));
+      if (sticky) assert.ok(padding >= header, `${width}px: header ${header}px, scroll padding ${padding}px`);
+      else assert.ok(padding < header, `${width}px: the header scrolls away, so no full-height padding`);
+    }
+  });
+
   for (const width of [320, 390]) {
     test(`dashboard stays within a ${width}px mobile viewport`, async page => {
       await page.setViewportSize({ width, height: 844 });

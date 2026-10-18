@@ -797,23 +797,31 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .zone.filled .zn{background:var(--accent-deep);color:var(--on-accent)}
 #btnTheme[aria-pressed="true"]{color:var(--text);background:var(--surface-2)}
 
-/* The smallest labels were 9.5–10px. One step up keeps them small but legible. */
-th{font-size:10.5px}
-.kpi .lbl,.stat-cell .sl,.pb-label,.field label{font-size:10.5px}
-.strip .s .l{font-size:10.5px}
-.badge{font-size:10px}
-.tagcell .rs{font-size:11px}
-.action-card .a-copy{font-size:11px}
-.dcard h4 .unit{font-size:10px}
+/* The smallest labels were 9.5–10px. One step up keeps them small but legible.
+   Screen only: the print sheet sets its own sizes and must keep them. */
+@media screen{
+  th{font-size:10.5px}
+  .kpi .lbl,.stat-cell .sl,.pb-label,.field label{font-size:10.5px}
+  .strip .s .l{font-size:10.5px}
+  .badge{font-size:10px}
+  .tagcell .rs{font-size:11px}
+  .action-card .a-copy{font-size:11px}
+  .dcard h4 .unit{font-size:10px}
+}
 
 /* Header: account tools on the left of a divider, outputs on the right. Nine
    buttons of three different weights read as one undifferentiated row. */
 .hdr-nav,.hdr-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .hdr-actions{gap:8px;padding-left:12px;border-left:1px solid var(--border)}
+/* Below one row the outputs can wrap to the start of a line, where the
+   divider would only be a stray rule. */
+@media(max-width:1279px){.hdr-actions{padding-left:0;border-left:0}}
 @media(max-width:640px){
   /* One swipeable row of tools and one row of outputs, instead of five rows
      of wrapped buttons before the page even starts. */
-  .hdr-nav{width:100%;flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-bottom:2px;
+  /* The scroller clips whatever leaves its box, focus rings included; the
+     padding gives the 3px ring and its offset room inside it. */
+  .hdr-nav{width:calc(100% + 12px);margin:-6px;padding:6px;flex-wrap:nowrap;overflow-x:auto;gap:6px;
     scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .hdr-nav::-webkit-scrollbar{display:none}
   .hdr-nav .btn{flex:0 0 auto}
@@ -846,11 +854,13 @@ body.has-result .workspace-heading h2{font-size:22px;margin-bottom:0}
 
 /* Calendar: the lead number gets its own line, so "Rp1,1 jt" is not cut to
    "Rp1,1" by the label beside it. */
-.cday i{flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:0;font-size:14.5px;
-  text-overflow:ellipsis}
-.cday i em{font-size:10px;line-height:1.3}
-.cday u span{font-size:10.5px}
-@media(max-width:640px){.cday i em{display:none}.cday i{font-size:10.5px}}
+@media screen{
+  .cday i{flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:0;font-size:14.5px;
+    text-overflow:ellipsis}
+  .cday i em{font-size:10px;line-height:1.3}
+  .cday u span{font-size:10.5px}
+}
+@media screen and (max-width:640px){.cday i em{display:none}.cday i{font-size:10.5px}}
 
 /* Charts: a quiet frame so the lines carry the weight. */
 .chartbox{margin-top:4px}

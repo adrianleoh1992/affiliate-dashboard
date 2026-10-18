@@ -418,7 +418,10 @@
   };
 
   $('btnRange').onclick = () => run(renderStored);
-  ['ppn', 'pendingFactor'].forEach(id => $(id).addEventListener('change', () => run(renderStored)));
+  // thScale colours the stored ROAS bars and draws their target line.
+  ['ppn', 'pendingFactor', 'thScale'].forEach(id => $(id).addEventListener('change', () => run(renderStored)));
+  // Presets write the same fields without a change event.
+  document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => run(renderStored)));
 
   // app.js assigns .onchange directly; addEventListener stacks after it, so its
   // reset() runs first and this re-syncs against the account it switched to.
