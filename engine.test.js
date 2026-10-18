@@ -213,8 +213,9 @@ const TAGS = ['TelesinGripvideo2', 'OlymplastLemari', 'HelmRsixSolid',
   'Spinningreelokuma', 'minilayarportable', 'seeouokacamatapolarized'];
 
 const v2 = E.matchAdToTag('Telesin video 2', TAGS, {});
-assert.equal(v2.tag, 'TelesinGripvideo2', 'matching number still connects');
-assert.ok(v2.confidence < 1, 'a forgiving match is shown as such, never as certain');
+assert.equal(v2.candidateTag, 'TelesinGripvideo2', 'matching number is still suggested');
+assert.equal(v2.tag, 'Telesin video 2', 'a near name only suggests; the spend stays on the ad');
+assert.ok(v2.confidence < 0.5, 'a suggestion is counted as needing review');
 for (const n of ['Telesin Video 1', 'Telesin Video 3']) {
   const m = E.matchAdToTag(n, TAGS, {});
   assert.notEqual(m.tag, 'TelesinGripvideo2', n + ' must not land on video 2');
@@ -222,7 +223,11 @@ for (const n of ['Telesin Video 1', 'Telesin Video 3']) {
   assert.equal(m.confidence, 0, n + ' has no tag here, and must say so');
 }
 // A number on one side only carries no information, so it must not block.
-assert.equal(E.matchAdToTag('Mini Layar portable', TAGS, {}).tag, 'minilayarportable');
+// Spaces never count; letter case does, so this one is a suggestion.
+const mini = E.matchAdToTag('Mini Layar portable', TAGS, {});
+assert.equal(mini.candidateTag, 'minilayarportable');
+assert.equal(mini.method, 'Beda huruf');
+assert.equal(E.matchAdToTag('minilayar portable', TAGS, {}).tag, 'minilayarportable', 'same letters, spaces aside');
 assert.equal(E.matchAdToTag('HelmRsixSolid', TAGS, {}).confidence, 1);
 
 // A manual mapping is authoritative on an exact key, and only on that key:
@@ -240,8 +245,9 @@ assert.equal(p1.tag, 'OlymplastLemari');
 assert.equal(p1.confidence, 1, 'segment naming a real tag is certain');
 
 const p2 = E.matchAdToTag('1604 | Mentok | Telesin Grip', TAGS, {});
-assert.equal(p2.tag, 'TelesinGripvideo2', 'segment resolves through fuzzy matching');
-assert.ok(p2.confidence < 1, 'two steps removed is never a certainty');
+assert.equal(p2.candidateTag, 'TelesinGripvideo2', 'segment is suggested through fuzzy matching');
+assert.equal(p2.tag, 'Telesin Grip', 'but not assigned');
+assert.ok(p2.confidence < 0.5, 'two steps removed is never a certainty');
 
 const p3 = E.matchAdToTag('1604 | Mentok | Barang Yang Tak Ada', TAGS, {});
 assert.ok(p3.confidence <= 0.5, 'a segment matching nothing must read as a guess');
@@ -257,18 +263,24 @@ assert.ok(!E.variantClash('Mini Layar portable', 'minilayarportable'));
    on a tag the commission report had never heard of: the real tag showed 0
    clicks and 0% arriving — a STOP verdict on a healthy ad — while a phantom
    tag held every click and no spend. */
-const known = new Map([['telesingripvideo2', 'TelesinGripvideo2'], ['dydlabel', 'DYDlabel']]);
+const known = E.tagLookup(['TelesinGripvideo2', 'DYDlabel']);
 const rct = raw => E.resolveClickTag(raw, known);
 
 assert.equal(rct('TelesinGripvideo2----'), 'TelesinGripvideo2', 'satu tag, empat slot kosong');
 assert.equal(rct('TelesinGripvideo2-promo---'), 'TelesinGripvideo2', 'slot kedua terisi');
 assert.equal(rct('TelesinGripvideo2-promo-agustus--'), 'TelesinGripvideo2', 'slot kedua dan ketiga');
-// Different capitalisation between the two reports must still join, and join
-// under the spelling the commission report uses.
-assert.equal(rct('TELESINGRIPVIDEO2-promo---'), 'TelesinGripvideo2', 'beda huruf tetap menyatu');
-assert.equal(rct('telesingripvideo2----'), 'TelesinGripvideo2', 'ejaan kanonis dari laporan komisi');
-// A tag nobody knows stays whole rather than being chopped at its first dash.
-assert.equal(rct('kampanyelain-promo---'), 'kampanyelain-promo', 'tag asing tidak dipotong');
+// Both reports come from one tracking system and Shopee keeps sub_ids that
+// differ only in case apart (MaskerDuckbill the ad, Maskerduckbill organic),
+// so a click spelled differently is a different sub_id.
+assert.equal(rct('TELESINGRIPVIDEO2-promo---'), 'TELESINGRIPVIDEO2', 'beda huruf adalah sub_id lain');
+assert.equal(rct('telesingripvideo2----'), 'telesingripvideo2', 'beda huruf tidak dipaksa menyatu');
+// Five slots and four dashes: no slot holds a dash, so slot one is certain
+// even for a tag the commission report does not know (a test ad with clicks
+// but no orders). With more dashes, slot one is cut only where a known tag ends.
+assert.equal(rct('kampanyelain-promo---'), 'kampanyelain', 'lima slot: slot pertama pasti');
+assert.equal(rct('Bantal-Tidur----'), 'Bantal-Tidur', 'tanda - di dalam slot pertama');
+assert.equal(E.resolveClickTag('Bantal-Tidur-ad01---', E.tagLookup(['Bantal', 'Bantal-Tidur'])), 'Bantal-Tidur', 'tag terpanjang yang dikenal');
+assert.equal(rct('kampanye-lain'), 'kampanye-lain', 'bentuk lain tidak dipotong tanpa tag yang dikenal');
 assert.equal(rct('----'), '', 'semua slot kosong');
 assert.equal(rct('-promo---'), '-promo', 'slot pertama kosong bukan tag kita');
 
@@ -298,9 +310,10 @@ assert.ok(!rTwo.tags.some(t => /^TAGA-/.test(t.tag)), 'tidak ada tag hantu');
    Skipping setup is the point of the matcher, so near names must land without
    a manual mapping — while one shared fragment still never takes a tag. */
 const near = (n, tags) => E.matchAdToTag(n, tags || TAGS, {});
-assert.equal(near('Lemari Olympic').tag, 'OlymplastLemari', 'words reordered and shortened');
-assert.equal(near('Telesin vidio 2').tag, 'TelesinGripvideo2', 'a typo in one word');
+assert.equal(near('Lemari Olympic').candidateTag, 'OlymplastLemari', 'words reordered and shortened');
+assert.equal(near('Telesin vidio 2').candidateTag, 'TelesinGripvideo2', 'a typo in one word');
 assert.equal(near('Lemari Olympic').method, 'Mirip');
+assert.equal(near('Lemari Olympic').tag, 'Lemari Olympic', 'suggested, never assigned');
 for (const n of ['solid', 'video', 'Blender video']) {
   assert.notEqual(near(n).tag, 'HelmRsixSolid', n + ' must not take HelmRsixSolid');
   assert.notEqual(near(n).tag, 'TelesinGripvideo2', n + ' must not take TelesinGripvideo2');
@@ -311,7 +324,7 @@ assert.equal(tie.method, 'Ambigu');
 assert.deepEqual(tie.candidates.slice().sort(), ['OuterKaffaA', 'OuterKaffaB'], 'a tie offers every tied tag');
 // Each creative number goes to its own tag.
 const trio = ['TelesinGripvideo1', 'TelesinGripvideo2', 'TelesinGripvideo3'];
-for (const k of ['1', '2', '3']) assert.equal(near('Telesin Video ' + k, trio).tag, 'TelesinGripvideo' + k);
+for (const k of ['1', '2', '3']) assert.equal(near('Telesin Video ' + k, trio).candidateTag, 'TelesinGripvideo' + k);
 
 /* ── A name that fits several tags is a question, not a pick ─────────────
    "Atasan" said nothing about which Atasan; the first tag in the list took
@@ -325,8 +338,8 @@ assert.equal(atasan.tag, 'Atasan', 'spend stays on the ad name until the user pi
 assert.deepEqual(atasan.candidates.slice().sort(), ['AtasanFadfad', 'AtasanGreyKorea', 'AtasanRebecca', 'AtasanViolet']);
 assert.ok(atasan.confidence < 0.5, 'ambiguous names are counted as needing review');
 assert.deepEqual(E.matchAdToTag('JogMotor', FAMILY, {}).candidates, ['JogMotorAnak', 'JogMotorAnakTest']);
-assert.equal(E.matchAdToTag('Atasan Violett', FAMILY, {}).tag, 'AtasanViolet', 'a specific name still connects');
-assert.equal(E.matchAdToTag('Jog Motor Anak', FAMILY, {}).tag, 'JogMotorAnak');
+assert.equal(E.matchAdToTag('Atasan Violett', FAMILY, {}).candidateTag, 'AtasanViolet', 'a specific near name is suggested');
+assert.equal(E.matchAdToTag('Jog Motor Anak', FAMILY, {}).tag, 'JogMotorAnak', 'the exact name connects');
 // Picking one is a manual mapping, and that wins outright.
 assert.equal(E.matchAdToTag('Atasan', FAMILY, { Atasan: 'AtasanRebecca' }).tag, 'AtasanRebecca');
 // The match log hands the choices to the UI and exports.

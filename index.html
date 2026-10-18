@@ -70,7 +70,7 @@
           <div><b>Meta Ads</b><small>Ads Manager → Export, breakdown per hari</small></div>
           <button class="btn ghost sm zone-del hidden" data-zdel="ads">Hapus</button></div>
         <div class="zone-body"><div class="chips" data-zchips="ads"></div>
-          <button class="btn sm zone-pick" data-zpick="ads" type="button">+ Pilih file</button></div>
+          <div class="button-row"><button class="btn sm zone-pick" data-zpick="ads" type="button">+ Pilih file</button><button class="btn sm" id="btnMeta" type="button">Tarik dari Ads Manager</button></div></div>
       </div>
       <div class="zone" data-zone="clicks">
         <div class="zone-head"><span class="zn">3</span>
@@ -391,13 +391,20 @@
   <div class="modal-box">
     <div class="card-head"><h2>Mapping Nama Iklan ke Tag</h2>
       <button class="btn ghost" data-close>Tutup</button></div>
-    <p class="hint">Nama iklan di Meta jarang sama persis dengan tag affiliate —
-      <b>Telesin video 2</b> di Meta adalah <b>TelesinGripvideo2</b> di Shopee. Mapping di sini selalu menang
-      atas pencocokan otomatis, dan disimpan terpisah per akun. Satu link bisa membawa sampai lima tag;
-      yang pertama dipakai sebagai tag induk.</p>
+    <p class="hint">Iklan tersambung otomatis kalau namanya sama persis dengan sub_id di laporan komisi
+      atau laporan klik, termasuk huruf besar-kecil (spasi diabaikan). Iklan yang diganti namanya tetap
+      memakai tag dari nama lamanya (metode <b>nama lama</b>) atau tag yang pernah didapat Ad ID-nya
+      (metode <b>Ad ID</b>). Nama yang mirip, misalnya
+      <b>Telesin video 2</b> untuk <b>TelesinGripvideo2</b>, hanya disarankan. Mapping di sini selalu menang
+      atas pencocokan otomatis, dan disimpan terpisah per akun. Mapping berlaku untuk ejaan nama yang
+      ditulis; yang ditulis huruf kecil semua juga berlaku untuk ejaan lain, kecuali ejaan yang punya
+      sub_id persis sendiri. Pilihan untuk iklan yang namanya dipakai beberapa iklan disimpan per Ad ID
+      (baris <b>id:…</b>).
+      Satu link bisa membawa sampai lima tag; yang pertama dipakai sebagai tag induk.</p>
     <h3 class="sec-split">Hasil pencocokan saat ini</h3>
-    <p class="hint">Metode bertanda <b>Lemah</b>, <b>Ambigu</b> atau <b>Tidak cocok</b> perlu diperiksa —
-      klik tag yang disarankan untuk langsung menyambungkannya.</p>
+    <p class="hint">Baris dengan keyakinan di bawah 50% belum tersambung ke tag mana pun: klik tag yang
+      disarankan untuk menyambungkannya. Baris bertanda <b>klik masuk rendah</b> sudah tersambung, tapi
+      sebagian besar kliknya tercatat di sub_id lain, jadi cek link iklannya.</p>
     <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
     <h3 class="sec-split">Perbaiki manual</h3>
     <div id="mapRows"></div>
@@ -433,6 +440,34 @@
     <p class="hint">Jumlah halaman menyesuaikan banyaknya data. Baris tidak dipotong untuk mengejar jumlah halaman tertentu.</p>
     <p class="pdf-busy hidden" id="pdfBusy" role="status">Menyiapkan PDF…</p><p class="inline-error hidden" id="pdfError" role="alert"></p>
     <button class="btn ghost sm" id="btnBrowserPrint">Alternatif: cetak tampilan ringkas</button>
+  </div>
+</div>
+
+<div class="modal" id="metaModal">
+  <div class="modal-box narrow">
+    <div class="card-head"><h2>Tarik dari Meta Ads Manager</h2><button class="btn ghost" data-close>Tutup</button></div>
+    <p class="export-context" id="metaContext"></p>
+    <p class="hint">Data iklan harian per iklan ditarik langsung dari Marketing API, lalu diperiksa seperti file ekspor. Token hanya dikirim ke Meta, tidak ke server lain.</p>
+    <details class="meta-help"><summary tabindex="0">Cara membuat token yang tidak kedaluwarsa</summary>
+      <ol>
+        <li>Di developers.facebook.com, buat aplikasi tipe Bisnis yang terhubung ke portofolio bisnis pemilik akun iklan, lalu tambahkan Marketing API. Mode pengembangan sudah cukup.</li>
+        <li>Di Pengaturan Bisnis → Pengguna → Pengguna sistem, buat pengguna sistem, lalu tetapkan akun iklan (lihat performa) dan aplikasi tadi.</li>
+        <li>Pilih Buat token, pilih aplikasi, masa berlaku Tidak pernah, centang <code>ads_read</code> saja, lalu salin dan tempel di bawah.</li>
+      </ol>
+      <p><a href="https://github.com/adrianleoh1992/affiliate-dashboard#koneksi-meta-ads-manager" target="_blank" rel="noopener">Panduan lengkap dan batasannya</a></p>
+    </details>
+    <!-- type=text with masking: a formless password field that disappears after a fetch makes browsers offer to save the token. -->
+    <div class="field"><label for="metaToken">Token akses (izin ads_read)</label><input id="metaToken" class="masked" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="EAAB…"></div>
+    <label class="check-row"><input type="checkbox" id="metaRemember"> Ingat token di browser ini</label>
+    <p class="hint">Tanpa centang, token hilang saat halaman dimuat ulang. Dengan centang, token tersimpan di localStorage perangkat ini; jangan centang di komputer bersama.</p>
+    <div class="button-row"><button class="btn sm" id="btnMetaAccounts" type="button">Muat akun iklan</button><button class="btn ghost sm" id="btnMetaForget" type="button">Hapus token</button></div>
+    <div class="field"><label for="metaAccount">Akun iklan</label><select id="metaAccount"><option value="">Muat akun iklan dulu</option></select></div>
+    <div class="ctrls"><div class="field"><label for="metaSince">Dari</label><input type="date" id="metaSince" autocomplete="off"></div><div class="field"><label for="metaUntil">Sampai</label><input type="date" id="metaUntil" autocomplete="off"></div></div>
+    <p class="hint">Default 7 hari sampai kemarin menurut zona waktu akun iklan, karena angka hari berjalan masih berubah. Menarik ulang mengganti tanggal yang sama dari akun iklan yang sama di layar. Tanggal yang sudah <b>Disimpan</b> tidak ikut diganti: hapus dulu tanggal itu di Data Tersimpan sebelum menyimpan tarikan ulang.</p>
+    <p class="meta-saved hidden" id="metaSaved" role="status"></p>
+    <p class="inline-error hidden" id="metaError" role="alert"></p>
+    <p class="hint" id="metaStatus" role="status" aria-live="polite"></p>
+    <div class="button-row"><button class="btn primary" id="btnMetaPull" type="button" disabled>Tarik data</button><button class="btn ghost hidden" id="btnMetaCancel" type="button">Batalkan</button></div>
   </div>
 </div>
 
@@ -497,6 +532,8 @@
 <script src="import-pipeline.js"></script>
 <script src="export-data.js"></script>
 <script src="app.js"></script>
+<script src="meta-api.js"></script>
+<script src="meta-connect.js"></script>
 <script src="daily-layer.js"></script>
 </body>
 </html>

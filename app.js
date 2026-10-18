@@ -28,6 +28,12 @@ function active(){const a=accounts(),saved=readStorage(LS.active);return a.inclu
 function setActive(a){localStorage.setItem(LS.active,a)}
 function map(){try{const m=JSON.parse(readStorage(LS.map+'_'+active()));return m&&typeof m==='object'&&!Array.isArray(m)?Object.fromEntries(Object.entries(m).filter(([k,v])=>k&&typeof v==='string')):{...DEFAULT_MAP}}catch(e){return{...DEFAULT_MAP}}}
 function saveMap(m){localStorage.setItem(LS.map+'_'+active(),JSON.stringify(m))}
+/* Ad ID → tag, learned from exact names (the engine's learnedIds), so an ad
+   renamed later keeps its tag. Separate from the manual map: nothing in it is
+   typed, and a manual mapping or the current exact name always beats it. */
+const ADMAP='adash_admap_v1';
+function adIdMap(){try{const m=JSON.parse(readStorage(ADMAP+'_'+active()));return m&&typeof m==='object'&&!Array.isArray(m)?Object.fromEntries(Object.entries(m).filter(([k,v])=>/^\d+$/.test(k)&&typeof v==='string'&&v)):{}}catch(e){return{}}}
+function rememberAdIds(learned,forget){const m=adIdMap();let changed=false;Object.entries(learned||{}).forEach(([k,v])=>{if(m[k]!==v){m[k]=v;changed=true}});(forget||[]).forEach(k=>{if(k in m){delete m[k];changed=true}});if(changed)try{localStorage.setItem(ADMAP+'_'+active(),JSON.stringify(m))}catch(e){}}
 const SNAP_STATUSES=new Set(['scale','pantau','stop','organik','evaluasi']);
 function validSnapshot(x){
   if(!x||typeof x!=='object'||!Number.isSafeInteger(x.id)||x.id<0||typeof x.saved!=='string'||!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/.test(x.saved)||!Number.isFinite(Date.parse(x.saved.replace(' ','T'))))return false;
@@ -255,7 +261,7 @@ function renderPeriod(){
 }
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
-function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map()},o);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
+function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map(),adIdMap:adIdMap()},o);rememberAdIds(RESULT.learnedIds,RESULT.forgetIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
 function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
@@ -287,7 +293,7 @@ function renderCalibration(){
   // Lag is the single most decision-changing setting, so show whether the
   // current value actually matches this account's observed behaviour.
   let unstable=0;
-  try{if(!STAB)STAB=E.stability({...DATA,tagMap:map()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
+  try{if(!STAB)STAB=E.stability({...DATA,tagMap:map(),adIdMap:adIdMap()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
   const warn=!L.matches||unstable>0;
   el.className='calibration'+(warn?' warn':'');
   const parts=[];
@@ -654,7 +660,7 @@ function bindBreakdown(tableId,lookup,cols){
       const it=lookup(tr.dataset.bd); if(!it)return;
       const det=document.createElement('tr');
       det.className='daydetail';
-      det.innerHTML=`<td colspan="${cols}">${breakdownHTML('Per hari · '+tr.dataset.bd,it.byDate,it.note)}</td>`;
+      det.innerHTML=`<td colspan="${cols}">${breakdownHTML('Per hari · '+(it.title||tr.dataset.bd),it.byDate,it.note)}</td>`;
       tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');
     };
     tr.onclick=open;
@@ -683,6 +689,10 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
   $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
 const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
+/* One name can belong to several ads (copies in other campaigns). Only then
+   does the row say which one it is. */
+function repeatedNames(list){const seen=new Set(),twin=new Set();list.forEach(x=>{seen.has(x.adName)?twin.add(x.adName):seen.add(x.adName)});return twin}
+function whichAd(x){return [x.campaign,x.adId?'Ad ID '+x.adId:''].filter(Boolean).join(' · ')||'tanpa Ad ID'}
 function renderUnit(){
   const u=RESULT.adUnits;
   const r=RESULT.range;
@@ -696,9 +706,10 @@ function renderUnit(){
     $('tblUnit').querySelector('tbody').innerHTML=`<tr><td colspan="${UC.length}" class="tbl-empty">${emptyUnit}</td></tr>`;
     return;
   }
-  $('tblUnit').querySelector('tbody').innerHTML=u.map(x=>`<tr class="dayrow" data-bd="${esc(x.adName)}" tabindex="0" role="button" aria-expanded="false">
+  const twin=repeatedNames(u);
+  $('tblUnit').querySelector('tbody').innerHTML=u.map(x=>`<tr class="dayrow" data-bd="${esc(x.key)}" tabindex="0" role="button" aria-expanded="false">
     <td><div class="tagcell"><span class="nm">${esc(x.adName)} <span class="badge ${x.status}">${x.label}</span></span>
-    <span class="rs">Tag: <span class="pill">${esc(x.tag)}</span>${x.estimated?' · komisi proporsional':''}</span></div></td>
+    <span class="rs">Tag: <span class="pill">${esc(x.tag)}</span>${x.estimated?' · komisi proporsional':''}${twin.has(x.adName)?' · '+esc(whichAd(x)):''}</span></div></td>
     <td><span class="dot ${x.active?'on':'off'}"></span>${x.active?'Nyala':'Mati'}</td>
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.cpm)}</td>
     <td class="num">${nf(x.impr)}</td><td class="num">${nf(x.clicks)}</td>
@@ -711,8 +722,8 @@ function renderUnit(){
     <td class="num ${x.netEff>=0?'pos':'neg'}">${rp(x.netEff)}</td>
     <td class="num ${x.roi>=0?'pos':'neg'}">${x.spend?x.roi.toFixed(0)+'%':'—'}</td>
     <td class="num">${x.orders?rp(x.costPerOrder):'—'}</td></tr>`).join('');
-  bindBreakdown('tblUnit',name=>{const a=RESULT.adUnits.find(x=>x.adName===name);
-    return a?{byDate:a.byDate,note:a.estimated?'komisi & klik Shopee proporsional dari tag':''}:null},UC.length);
+  bindBreakdown('tblUnit',key=>{const a=RESULT.adUnits.find(x=>x.key===key);
+    return a?{title:a.adName+(twin.has(a.adName)?' · '+whichAd(a):''),byDate:a.byDate,note:a.estimated?'komisi & klik Shopee proporsional dari tag':''}:null},UC.length);
 }
 function renderLeak(){
   const r=RESULT.range;
@@ -989,28 +1000,35 @@ document.querySelectorAll('[data-cal]').forEach(b=>b.onclick=()=>{
 /* A suggestion used to mean opening Kelola Tag and typing the mapping by hand
    — the setup people choose this tool to avoid. Each suggested tag is now a
    button that saves that one mapping and recalculates. */
-function suggestHtml(m){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
+function suggestHtml(m,twin){const list=(m.candidates&&m.candidates.length)?m.candidates:(m.candidateTag?[m.candidateTag]:[]);if(!list.length)return'';
+  // Several ads share this name: the choice is stored for this Ad ID only.
+  const key=twin&&m.adId?'id:'+m.adId:m.adName.trim();
   const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
-  return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
-$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[E.normalize(b.dataset.acceptAd)]=b.dataset.acceptTag;
+  return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-key="${esc(key)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptKey||b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
   try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
   // Keep the rows below in step: Simpan rebuilds the map from them, and would
   // otherwise drop the mapping just accepted.
   $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()});
+/* A mapping whose tag catches under ~25% of the ad's Meta link clicks sends
+   most of its traffic to another sub_id, even when the name matches exactly. */
+const lowCapture=m=>m.confidence>=.5&&!!(m.capture&&m.capture.low);
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
-  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>a.confidence-b.confidence).map(m=>{
+  const twin=repeatedNames(RESULT.matchLog),rank=m=>lowCapture(m)?Math.min(m.confidence,.49):m.confidence;
+  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>rank(a)-rank(b)).map(m=>{
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
-    return `<tr><td><b>${esc(m.adName)}</b></td><td><span class="pill">${esc(m.tag)}</span></td>
-      <td>${esc(m.method)}${suggestHtml(m)}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+    const cap=lowCapture(m)?`<br><small class="leak-bad">Klik masuk rendah: klik Shopee di tag ini hanya ${Math.round(m.capture.pct)}% dari klik Meta selama iklan jalan. Cek link iklan.</small>`:'';
+    return `<tr><td><b>${esc(m.adName)}</b>${twin.has(m.adName)?`<br><small>${esc(whichAd(m))}</small>`:''}</td><td><span class="pill">${esc(m.tag)}</span>${cap}</td>
+      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
   // The mapping table now lives behind one button, so that button has to say
   // when something inside needs looking at.
-  const weak=RESULT.matchLog.filter(m=>m.confidence<.5).length;
+  const weak=RESULT.matchLog.filter(m=>m.confidence<.5||lowCapture(m)).length;
   const dot=$('mapAlert');
   dot.textContent=weak||'';
-  dot.title=weak?`${weak} pencocokan lemah perlu diperiksa`:'';
+  dot.title=weak?`${weak} pencocokan perlu diperiksa`:'';
   dot.classList.toggle('hidden',!weak);
 }
 /* ── Part 3: charts, tabs, modals, snapshots, export ── */
@@ -1227,7 +1245,7 @@ document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{
 });
 $('btnAddMap').onclick=()=>{$('mapRows').insertAdjacentHTML('beforeend',mapRow('',''));bindDel()};
 $('btnSaveMap').onclick=()=>{const m=Object.create(null);$('mapRows').querySelectorAll('.maprow').forEach(r=>{
-  const k=E.normalize(r.querySelector('[data-k]').value),v=r.querySelector('[data-v]').value.trim();
+  const k=r.querySelector('[data-k]').value.trim(),v=r.querySelector('[data-v]').value.trim();
   if(k&&v)m[k]=v});try{saveMap(m)}catch(e){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')} closeModal($('mapModal'));toast('Mapping disimpan');recalc()};
 const MODAL_OPENERS=new WeakMap();
 function openModal(id){const m=$(id),previous=document.querySelector('.modal.show'),opener=previous?(MODAL_OPENERS.get(previous)||document.activeElement):document.activeElement;document.querySelectorAll('.modal.show').forEach(x=>closeModal(x,false));MODAL_OPENERS.set(m,opener);m.classList.add('show');m.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');requestAnimationFrame(()=>m.querySelector('.modal-box').focus())}
