@@ -635,17 +635,29 @@ function adsRows(){
   if(DATA.ads.length||!DATA.placement.length)return DATA.ads;
   return DATA.placement.filter(r=>E.dayOnly(r['Reporting starts'])===E.dayOnly(r['Reporting ends']||r['Reporting starts']));
 }
-let PLC_ALL=false,PLC_TAGS_ALL=false;const PLC_OPEN=new Set();
-// One tag's placements. Spend and clicks are Meta's; commission is the tag's
-// platform commission split by click share, so it is marked as an estimate.
+let PLC_ALL=false,PLC_TAGS_ALL=false;const PLC_OPEN=new Set(),PLC_OTHER_OPEN=new Set();
 /* Shopee clicks and orders whose referrer is not Facebook or Instagram
    (Others, Websites, …). They have no Meta placement, so they sit under the
    placements as their own row with real, not estimated, commission. */
-function plcOtherRow(o,cols,names){
+function plcOtherRow(o,cols,names,key){
   if(!o||!(o.shopeeClicks||o.comm))return'';
   const what=`${nf(o.shopeeClicks)} klik Shopee · ${nf(o.orders)} pesanan`+(names?' · '+names:'');
-  return`<tr class="plc-other"><td>Other</td><td colspan="${cols-3}">Bukan placement Meta <small class="src-other">${esc(what)}</small></td><td class="num" title="Komisi nyata dari pesanan dengan perujuk selain Facebook/Instagram">${o.comm?full(o.comm):'—'}</td><td class="num">—</td></tr>`;
+  const open=key&&PLC_OTHER_OPEN.has(key);
+  const label=key?`<button class="attr-open${open?' open':''}" data-other="${key}" aria-expanded="${open}" title="Lihat tag asal klik Other">Other<span class="exp" aria-hidden="true">▸</span></button>`:'Other';
+  return`<tr class="plc-other"><td>${label}</td><td colspan="${cols-3}">Bukan placement Meta <small class="src-other">${esc(what)}</small></td><td class="num" title="Komisi nyata dari pesanan dengan perujuk selain Facebook/Instagram">${o.comm?full(o.comm):'—'}</td><td class="num">—</td></tr>`
+    +(open?`<tr class="daydetail"><td colspan="${cols}">${plcOtherTags()}</td></tr>`:'');
 }
+/* Which tags the Other clicks and orders landed on, with their sources. */
+function plcOtherTags(){
+  const list=(RESULT.placement.otherTags||[]);
+  if(!list.length)return'<p class="hint">Tidak ada klik atau pesanan Other.</p>';
+  const src=t=>t.sources.slice(0,3).map(x=>`${esc(x.source)} ${nf(x.shopeeClicks)}`).join(' · ')+(t.sources.length>3?` · +${t.sources.length-3} lain`:'');
+  return`<div class="daybox attr-box plc-other-box"><table><thead><tr><th>Tag</th><th class="num">Klik Shopee</th><th class="num">Pesanan</th><th class="num">Komisi</th><th>Sumber</th></tr></thead><tbody>`
+    +list.map(t=>`<tr><td>${esc(t.tag)}</td><td class="num">${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num">${t.orders?nf(t.orders):'—'}</td><td class="num">${t.comm?full(t.comm):'—'}</td><td>${src(t)}</td></tr>`).join('')
+    +`</tbody></table><p class="hint">${nf(list.length)} tag. Hanya tag yang punya iklan di file placement.</p></div>`;
+}
+// One tag's placements. Spend and clicks are Meta's; commission is the tag's
+// platform commission split by click share, so it is marked as an estimate.
 function plcTagDetail(t){
   const rows=(t.placements||[]).filter(p=>p.spend>0||p.clicks>0);
   if(!rows.length)return'<p class="hint">Tidak ada biaya per placement untuk tag ini.</p>';
@@ -665,7 +677,8 @@ function renderPlacement(){
   const spendAll=P.total.spend;
   const srcNames=(P.otherSources||[]).slice(0,4).map(o=>`${o.source} ${nf(o.shopeeClicks)}`).join(' · ')+((P.otherSources||[]).length>4?` · +${P.otherSources.length-4} lain`:'');
   head('tblPlcPlat',['Platform','Biaya','% biaya','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee','Klik hilang','Pesanan','Komisi','ROAS','Laba']);
-  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`;
+  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${p.platform===Placement.OTHER?`<button class="attr-open${PLC_OTHER_OPEN.has('plat')?' open':''}" data-other="plat" aria-expanded="${PLC_OTHER_OPEN.has('plat')}" title="Lihat tag asal klik Other">${esc(p.platform)}<span class="exp" aria-hidden="true">▸</span></button>`:esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`
+    +(p.platform===Placement.OTHER&&PLC_OTHER_OPEN.has('plat')?`<tr class="daydetail"><td colspan="12">${plcOtherTags()}</td></tr>`:'');
   $('tblPlcPlat').querySelector('tbody').innerHTML=P.platforms.map(platRow).join('');
   $('tblPlcPlat').querySelector('tfoot').innerHTML=platRow(P.total);
   head('tblPlcPlace',['Platform','Placement','Biaya','% biaya','Impresi','Klik Meta','CTR','CPC Meta','CPC vs rata-rata','Estimasi komisi','Estimasi ROAS']);
@@ -673,7 +686,9 @@ function renderPlacement(){
   // Placements under 0.5% of spend are noise until asked for.
   const big=P.placements.filter(p=>p.share>=0.5),list=PLC_ALL?P.placements:big;
   $('tblPlcPlace').querySelector('tbody').innerHTML=list.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td>${money(p.spend)}${pct(p.share)}${count(p.impr)}${count(p.clicks)}${pct(p.ctr,2)}${money(p.cpc)}${vs(p.cpcVsAvg)}<td class="num est">${p.estComm?full(p.estComm):'—'}</td>${roasCell(p.estRoas)}</tr>`).join('')
-    +plcOtherRow(P.platforms.find(p=>p.platform===Placement.OTHER),11,srcNames);
+    +plcOtherRow(P.platforms.find(p=>p.platform===Placement.OTHER),11,srcNames,'place');
+  $('plcCard').querySelectorAll('button[data-other]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.other;PLC_OTHER_OPEN.has(k)?PLC_OTHER_OPEN.delete(k):PLC_OTHER_OPEN.add(k);renderPlacement()});
   const more=$('btnPlcAll');more.classList.toggle('hidden',big.length===P.placements.length);
   more.textContent=PLC_ALL?'Sembunyikan placement kecil':`Tampilkan ${P.placements.length-big.length} placement kecil (<0,5% biaya)`;
   more.onclick=()=>{PLC_ALL=!PLC_ALL;renderPlacement()};
