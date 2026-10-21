@@ -28,7 +28,8 @@ test('platform totals join Meta spend with Shopee clicks and commission', () => 
   assert.equal(fb.roas, 1.2);
   assert.equal(fb.shopeeClicks, 1);
   assert.equal(ig.roas, 0.5);
-  assert.equal(r.platforms.find(p => p.platform === 'Tidak diketahui').comm, 99);
+  assert.equal(r.platforms.find(p => p.platform === P.OTHER).comm, 99);
+  assert.deepEqual(r.otherSources, [{ source: 'Others', shopeeClicks: 0, orders: 1, comm: 99 }]);
   assert.equal(r.total.orders, 3);
   // Facebook commission splits 3:1 by link clicks between Feed and Reels.
   const feed = r.placements.find(p => p.placement === 'Feed'), reels = r.placements.find(p => p.placement === 'Facebook Reels');
