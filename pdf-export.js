@@ -388,7 +388,8 @@
        account owner reads tag by tag. */
     section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang (Rp) dibulatkan ke rupiah terdekat. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee, tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. Langsung/tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
     // One value per cell, money as whole rupiah with Rp and counts plain, so every row stays on one line.
-    const lost = v => (v == null || !finite(v) ? '-' : v < 0 ? '+' + Math.abs(v).toFixed(0) + '%' : v.toFixed(0) + '%');
+    // Rounded from the arriving share itself, like the link note, so the two add up to 100.
+    const lost = leak => { if (!leak || !finite(leak.pct)) return '-'; const r = 100 - Math.round(leak.pct); return r < 0 ? '+' + integer(-r) + '%' : integer(r) + '%'; };
     const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? 'Rp ' + integer(Math.round(amount(v))) : '-');
     const split = attribution.column;
     table(['Tag', 'Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang',
@@ -396,7 +397,7 @@
       t.tag, integer(t.clicks), rupiah(t.cpc, amount(t.clicks) > 0 && amount(t.spend) > 0),
       amount(t.lpv) > 0 ? integer(t.lpv) : '-', rupiah(t.cpLpv),
       r.clickStart ? integer(t.shopeeClicks) : '-', rupiah(t.cpcShopee, amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0),
-      lost(t.lostTotal),
+      lost(t.leak),
       split && t.attr ? integer(t.attr.direct.orders) : '-', split && t.attr ? rupiah(t.attr.direct.comm) : '-',
       split && t.attr ? integer(t.attr.indirect.orders) : '-', split && t.attr ? rupiah(t.attr.indirect.comm) : '-',
     ]), [31, 12, 13, 10, 14, 13, 14, 12, 15, 16, 15, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7 });

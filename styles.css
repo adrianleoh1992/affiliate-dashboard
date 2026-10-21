@@ -648,6 +648,17 @@ tbody tr:hover{background:var(--surface-2)}
   table{font-size:8.5px}th,td{padding:4px 6px!important}
   .tscroll{overflow:visible!important}
   .daydetail{display:none!important}     /* opened rows are screen-only */
+  /* With every click column the tag and ad tables are half again as wide as
+     A4: headers wrap and cells tighten so the last columns stay on paper. */
+  #tblMain th,#tblUnit th{white-space:normal;letter-spacing:0;font-size:7px;vertical-align:bottom}
+  #tblMain td,#tblUnit td{font-size:7px}
+  #tblMain th,#tblMain td,#tblUnit th,#tblUnit td{padding:3px 2px!important}
+  #tblMain .tagcell,#tblUnit .tagcell{min-width:0}#tblMain .tagcell .nm,#tblUnit .tagcell .nm{font-size:8.5px;white-space:normal;overflow-wrap:anywhere}
+  #tblMain .tagcell .rs,#tblUnit .tagcell .rs{font-size:7px;max-width:none}#tblUnit .tagcell .pill{white-space:normal;overflow-wrap:anywhere}
+  #tblMain>tbody>tr.dayrow>td:first-child,#tblMain>thead>tr>th:first-child{min-width:110px!important}
+  /* The direct/indirect table prints in the same section; unwrapped, its headers
+     and empty-state line widen the page and Chrome shrinks everything to fit. */
+  #tblAttr th,.tbl-empty{white-space:normal}
   .chartbox{height:190px!important;break-inside:avoid}
   .chartbox.tall{height:230px!important}
   .cday{min-height:56px}.cday i{font-size:10px}.cday u span{font-size:7.5px}
@@ -755,10 +766,12 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .table-tools .hint{margin:0 0 0 auto;font-variant-numeric:tabular-nums}
 #tblMain>tbody>tr.dayrow>td:first-child,#tblMain>thead>tr>th:first-child{position:sticky;left:0;background:var(--surface);z-index:2;max-width:300px;min-width:210px}
 #tblMain>thead>tr>th:first-child{background:var(--surface-2);z-index:3}
-#tblMain.compact-columns th:nth-child(6),#tblMain.compact-columns td:nth-child(6),
-#tblMain.compact-columns th:nth-child(7),#tblMain.compact-columns td:nth-child(7),
-#tblMain.compact-columns th:nth-child(17),#tblMain.compact-columns td:nth-child(17),
-#tblMain.compact-columns th:nth-child(18),#tblMain.compact-columns td:nth-child(18){display:none}
+/* Child combinators: the per-date breakdown opened inside a row is a table of
+   its own, with other columns at these positions. */
+#tblMain.compact-columns>thead>tr>th:nth-child(6),#tblMain.compact-columns>tbody>tr>td:nth-child(6),
+#tblMain.compact-columns>thead>tr>th:nth-child(7),#tblMain.compact-columns>tbody>tr>td:nth-child(7),
+#tblMain.compact-columns>thead>tr>th:nth-child(17),#tblMain.compact-columns>tbody>tr>td:nth-child(17),
+#tblMain.compact-columns>thead>tr>th:nth-child(18),#tblMain.compact-columns>tbody>tr>td:nth-child(18){display:none}
 .export-context{background:var(--surface-2);border-radius:7px;padding:11px 13px;color:var(--text-dim);font-size:12px;margin-bottom:18px;overflow-wrap:anywhere}
 .export-preview{margin:18px 0 12px;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:13px;font-weight:600}
 .button-row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}
@@ -911,7 +924,7 @@ body.has-result .workspace-heading h2{font-size:22px;margin-bottom:0}
 .attr-prod .rs{font-size:11px;color:var(--text-dim)}
 .attr-prod .hint{margin:6px 0 0}
 @media (max-width:600px){
-  .attr-prod th.num{width:56px}.attr-prod th:last-child{width:62px}
+  .attr-prod th.num{width:62px}.attr-prod th:last-child{width:62px}
   .attr-prod th:nth-child(3),.attr-prod td:nth-child(3){display:none}
 }
 /* Order counts that open their kind's products under the row. */

@@ -714,7 +714,8 @@ function renderAttr(){
     return`<th class="${i?'num':''} sortable" data-sort="${k}" tabindex="0" aria-sort="${on?(S.dir<0?'descending':'ascending'):'none'}">${h}${on?(S.dir<0?' ▾':' ▴'):''}</th>`}).join('')+'</tr>';
   tb.querySelectorAll('th[data-sort]').forEach(th=>{
     const go=()=>{const k=th.dataset.sort;ATTR_SORT=S&&S.key===k?{key:k,dir:-S.dir}:{key:k,dir:k==='tag'?1:-1};renderAttr()};
-    th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};
+    // The header is rebuilt, so a keyboard sort puts focus back on its replacement.
+    th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();const k=th.dataset.sort;go();tb.querySelector(`th[data-sort="${k}"]`).focus()}};
   });
   const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
     .sort((a,b)=>{
@@ -739,7 +740,8 @@ function renderAttr(){
     det.innerHTML=`<td colspan="${head.length}">${attrProductsHTML(t,kind,all)}</td>`;
     tr.after(det);
     const more=det.querySelector('.attr-more');
-    if(more)more.onclick=()=>show(tr,kind,more.dataset.more==='all');
+    // The list is redrawn with its button; focus follows to the new one.
+    if(more)more.onclick=()=>{show(tr,kind,more.dataset.more==='all');const next=tr.nextElementSibling&&tr.nextElementSibling.querySelector('.attr-more');if(next)next.focus({preventScroll:true})};
   };
   tb.querySelectorAll('tbody tr[data-attr]').forEach(tr=>{
     tr.querySelectorAll('.attr-open').forEach(b=>b.onclick=()=>{
@@ -760,22 +762,29 @@ function renderAttr(){
   $('attrNote').textContent=`Kolom "${A.column}"`+(tot.mixed?` · ${nf(tot.mixed)} pesanan campuran dihitung di kedua sisi`:'')+(odd?` · nilai tak dikenali: ${odd}`:'');
 }
 /* Share of Meta link clicks that never reached Shopee. Negative means Shopee
-   counted more clicks than Meta sent (organic or shared links). */
-function lostCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
+   counted more clicks than Meta sent (organic or shared links). The colour is
+   the link verdict the Klik tab and the "cek link" note use, judged from 300
+   clicks. Beside a "klik masuk rendah" note (days the ad ran) a healthy period
+   total stays uncoloured rather than green. Rounded from the arriving share
+   itself, as the note is, so "hanya 8%" sits next to 92%, not 93%. */
+function lostCell(t,tip){const v=t.lostTotal,L=t.leak;if(v==null||!isFinite(v))return'<td class="num">—</td>';
+  const sev=L&&L.reliable?L.severity:'',cls=sev==='bad'||sev==='warn'?'leak-'+sev:t.capture&&t.capture.low?'':sev?'leak-'+sev:'';
+  const r=L&&isFinite(L.pct)?100-Math.round(L.pct):Math.round(v),wait=L&&!L.reliable?` · belum dinilai: ${nf(L.metaClicks)} klik iklan (perlu ±300)`:'';
+  return`<td class="num ${cls}" title="${tip}${wait}">${r<0?'+'+nf(-r)+'% lebih':nf(r)+'%'}</td>`}
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=x!=null&&isFinite(x)?x:-1e15;y=y!=null&&isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
   // A ROAS a few orders away from the threshold that decided the verdict.
   const edge=t.borderAt!=null?` <span class="pill edge" title="ROAS matang ${rx(t.matureRoasEff)} berada dalam ±10% dari ambang ${t.borderAt===RESULT.options.thScale?'Scale':'Pantau'} ${rx(t.borderAt)}. Beberapa pesanan saja bisa membalik vonis.">di batas</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+filterName(FILTER)+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+filterName(FILTER)+' · '+rows.length+' tag':'';
   const rg=RESULT.range;
   $('tagNote').textContent=(rg.clickStart?`Kolom Shopee dari laporan klik ${rg.clickStart} — ${rg.clickEnd} · `:'')
     +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};bindBreakdown('tblMain',tag=>{const t=RESULT.tags.find(x=>x.tag===tag);return t?{byDate:t.byDate}:null},MC.length);
-  $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
+  $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();const k=e.dataset.sort;e.click();$('tblMain').querySelector(`th[data-sort="${k}"]`).focus()}})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
 const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 /* One name can belong to several ads (copies in other campaigns). Only then

@@ -154,6 +154,8 @@ async function main() {
     assert.deepEqual(await order(), ['Bravo', 'Alpha']);
     await page.locator('#tblAttr th[data-sort="share"]').press('Enter');
     assert.deepEqual(await order(), ['Bravo', 'Alpha'], 'Bravo is 100% indirect, Alpha 67%');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('#tblAttr thead') && document.activeElement.dataset.sort), 'share',
+      'a keyboard sort leaves focus on the header it sorted, not on the page');
     assert.match(await page.locator('#tblAttr tfoot').innerText(), /Total akun/);
   });
 
@@ -169,6 +171,10 @@ async function main() {
     assert.match(await page.locator('#tblAttr .attr-more').innerText(), /5 teratas/);
     await page.locator('#tblAttr .attr-more').click();
     assert.equal(await products(), 5);
+    await page.locator('#tblAttr .attr-more').press('Enter');
+    assert.equal(await products(), 8);
+    assert.match(await page.evaluate(() => document.activeElement.className + ' ' + document.activeElement.textContent), /attr-more .*5 teratas/,
+      'focus follows to the redrawn button');
   });
 
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
@@ -219,6 +225,115 @@ async function main() {
     assert.equal(cells[await col('lostTotal')], '60%'); // 10 Meta clicks, 4 reached Shopee
     await page.locator('#tblMain th[data-sort="lostTotal"]').click();
     assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');
+    await page.locator('#tblMain th[data-sort="lostTotal"]').press('Enter');
+    assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'ascending');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('#tblMain thead') && document.activeElement.dataset.sort), 'lostTotal',
+      'a keyboard sort leaves focus on the header it sorted');
+  });
+
+  test('Klik Hilang is coloured by the same link verdict as the Klik tab and rounds like the "cek link" note', async page => {
+    const date = '2026-08-01';
+    // Meta link clicks / Shopee clicks: 7,5% arrive (judged broken), 50% (warn), 5% on 299 clicks (unjudged),
+    // 133% (Shopee counted more: ROAS is an upper bound), 95% (healthy), and 58/400, which is 14,499…% in floating point.
+    const tags = [['Broken', 400, 30], ['Warn', 400, 200], ['Tiny', 299, 15], ['Over', 300, 400], ['Fine', 400, 380], ['Half', 400, 58]];
+    const at = i => `${date} 09:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+    await upload(page, [
+      { name: 'affiliate.csv', rows: tags.map(([tag]) => aff(tag, tag, date)) },
+      { name: 'ads.csv', rows: tags.map(([tag, meta]) => ({ ...ad(tag, 40000, date), 'Link clicks': String(meta) })) },
+      { name: 'clicks.csv', rows: tags.flatMap(([tag, , shopee]) => Array.from({ length: shopee }, (_, i) => ({ ...click(tag, date), 'Waktu Klik': at(i) }))) }]);
+    const rows = await page.evaluate(() => {
+      const col = MC.findIndex(c => c[0] === 'lostTotal');
+      return Object.fromEntries([...document.querySelectorAll('#tblMain tbody tr.dayrow')].map(tr => {
+        const cell = tr.querySelectorAll(':scope>td')[col];
+        return [tr.dataset.bd, { text: cell.textContent, cls: [...cell.classList].filter(c => c !== 'num'), title: cell.title,
+          note: tr.querySelector('.rs b') ? tr.querySelector('.rs b').textContent : '' }];
+      }));
+    });
+    assert.deepEqual([rows.Broken.text, rows.Broken.cls], ['92%', ['leak-bad']]);
+    assert.match(rows.Broken.note, /^hanya 8% klik sampai Shopee/, 'the note and the cell add up to 100%');
+    assert.deepEqual([rows.Warn.text, rows.Warn.cls], ['50%', ['leak-warn']]);
+    assert.deepEqual([rows.Tiny.text, rows.Tiny.cls], ['95%', []], 'under 300 clicks the share is shown but not judged');
+    assert.match(rows.Tiny.title, /belum dinilai: 299 klik iklan \(perlu ±300\)/);
+    assert.deepEqual([rows.Over.text, rows.Over.cls], ['+33% lebih', ['leak-over']], 'surplus clicks are not a green light');
+    assert.match(rows.Over.note, /ROAS memuat trafik lain/);
+    assert.deepEqual([rows.Fine.text, rows.Fine.cls], ['5%', ['leak-ok']]);
+    assert.equal(Number(rows.Half.note.match(/hanya (\d+)%/)[1]) + Number(rows.Half.text.replace('%', '')), 100, rows.Half.note + ' beside ' + rows.Half.text);
+    // The Klik tab marks the same tags the same way.
+    const leakTab = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#tblLeak tbody tr')].map(tr =>
+      [tr.querySelector('td').textContent, [...tr.querySelectorAll('td')[4].classList].filter(c => c !== 'num')])));
+    for (const tag of ['Broken', 'Warn', 'Tiny', 'Over', 'Fine', 'Half']) assert.deepEqual(leakTab[tag], rows[tag].cls, tag + ' matches the Klik tab');
+    // A healthy period total beside a "klik masuk rendah" note (days the ad ran) is not painted green.
+    assert.doesNotMatch(await page.evaluate(() => lostCell({ lostTotal: 5, leak: { reliable: true, severity: 'ok', metaClicks: 900 },
+      capture: { low: true } }, '')), /leak-ok|pos/);
+  });
+
+  test('the per-date breakdown inside the compact tag table keeps its own click columns', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }, { name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
+    assert.equal(await page.locator('#tblMain').getAttribute('class'), 'compact-columns');
+    await page.locator('#tblMain tbody tr.dayrow').first().click();
+    const shown = await page.locator('#tblMain .daydetail th').evaluateAll(ths => ths.filter(th => getComputedStyle(th).display !== 'none').map(th => th.textContent));
+    for (const h of ['Klik Meta', 'CPC Meta', 'Klik Shopee']) assert.ok(shown.some(x => x.includes(h)), h + ' is hidden in the breakdown: ' + shown.join(' | '));
+    const cells = await page.locator('#tblMain .daydetail tbody tr').first().locator('td').evaluateAll(tds => tds.filter(td => getComputedStyle(td).display !== 'none').length);
+    assert.equal(cells, shown.length, 'every header has its cell');
+    // The tag table itself still drops ROI, CPM, CR and Biaya/Order in this view.
+    const main = await page.locator('#tblMain>thead>tr>th').evaluateAll(ths => ths.filter(th => getComputedStyle(th).display === 'none').map(th => th.dataset.sort));
+    assert.deepEqual(main, ['roi', 'cpm', 'convRate', 'costPerOrder']);
+  });
+
+  test('the products header reads in full on a phone', async page => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    const T = 'Tipe Pesanan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+    await upload(page, [{ name: 'affiliate.csv', rows: [{ ...aff('1'), [T]: indirect }] }]);
+    await page.locator('#tblAttr tbody tr[data-attr="Alpha"] button[data-kind="indirect"]').click();
+    const fit = await page.locator('#tblAttr .attr-prod th').evaluateAll(ths => ths.filter(th => getComputedStyle(th).display !== 'none').map(th => {
+      const range = document.createRange(); range.selectNodeContents(th);
+      return { h: th.textContent, over: Math.round((range.getBoundingClientRect().right - th.getBoundingClientRect().right) * 10) / 10 };
+    }));
+    for (const { h, over } of fit) assert.ok(over <= 0, `${h} runs ${over}px past its cell`);
+  });
+
+  test('browser print keeps every column of the tag and ad tables on an A4 page', async page => {
+    const T = 'Tipe Pesanan', tag = 'A_long_campaign_tag_name_for_print';
+    for (const split of [false, true]) {
+      if (split) {
+        await page.emulateMedia({ media: null });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.reload({ waitUntil: 'load' });
+        await page.waitForFunction(() => window.Engine && window.Papa && window.DailyStore && window.__dailyStore);
+      }
+      const order = (id, t) => split ? { ...aff(id, t), [T]: 'Pesanan dari Toko yang tidak Dipromosikan' } : aff(id, t);
+      await upload(page, [{ name: 'affiliate.csv', rows: [order('1', tag), order('2', 'Bravo')] },
+        { name: 'ads.csv', rows: [ad(tag, 1500000), ad('Bravo', 250000)] }, { name: 'clicks.csv', rows: [click(tag)] }]);
+      // What runPrint('ringkas') sets, without opening the print dialog.
+      await page.evaluate(() => document.body.classList.add('printing', 'pr-ringkas', 'pp-tags', 'pp-units', 'pp-peluang'));
+      await page.emulateMedia({ media: 'print' });
+      await page.setViewportSize({ width: 718, height: 1000 }); // A4 at 10 mm side margins
+      for (const compact of [true, false]) {
+        await page.evaluate(on => document.getElementById('tblMain').classList.toggle('compact-columns', on), compact);
+        const fit = await page.evaluate(() => ['tblMain', 'tblUnit'].map(id => {
+          const table = document.getElementById(id), card = table.closest('.card'), style = getComputedStyle(card);
+          const inner = card.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+          return { id, over: Math.round(table.getBoundingClientRect().right - inner) };
+        }));
+        const label = (split ? 'with' : 'without') + ' Tipe Pesanan, ' + (compact ? 'compact' : 'all metrics');
+        for (const { id, over } of fit) assert.ok(over <= 0, `${id} (${label}) runs ${over}px off the page`);
+        // Anything wider makes Chrome shrink the whole page, small print included.
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 718, `the page (${label}) is wider than A4`);
+      }
+    }
+  });
+
+  test('showing every product keeps the page where it was and focus on the button', async page => {
+    await page.setViewportSize({ width: 1440, height: 700 });
+    const T = 'Tipe Pesanan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+    await upload(page, [{ name: 'affiliate.csv', rows: Array.from({ length: 40 }, (_, i) => ({ ...aff(String(i + 1)), [T]: indirect })) }]);
+    await page.locator('#tblAttr tbody tr[data-attr="Alpha"] button[data-kind="indirect"]').click();
+    await page.locator('#tblAttr .attr-more').scrollIntoViewIfNeeded();
+    const before = await page.evaluate(() => scrollY);
+    await page.locator('#tblAttr .attr-more').press('Enter');
+    assert.equal(await page.locator('#tblAttr tr.daydetail tbody tr').count(), 40);
+    assert.ok(Math.abs(await page.evaluate(() => scrollY) - before) <= 2, 'product 6 onward stays in view instead of scrolling to the list end');
+    assert.match(await page.evaluate(() => document.activeElement.className), /attr-more/);
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {

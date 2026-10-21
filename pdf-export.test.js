@@ -269,6 +269,26 @@ async function main() {
     assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-', 'Jumlah per tag'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
     assert.deepEqual(clickReports[2], ['-', '-', '-', '-', 'Jumlah per tag'], 'Without ads, a click comparison must remain unavailable');
     console.log('PASS PDF dashboard click scope, per-tag losses and unavailable comparisons');
+    // 3 of 40 clicks arrive (7,5%): the dashboard note says "hanya 8%", so the lost share prints 92%, not 93%.
+    // 58 of 400 is 14,499…% in floating point: "hanya 14%", so 86%, not 85%.
+    const lostLabels = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, labels = [];
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { labels.push(String(value)); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); return labels; }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+    }, Engine.analyze({
+      affiliate: ['A', 'B'].map(tag => ({ 'ID Pemesanan': tag, 'Status Pesanan': 'Selesai', 'Waktu Pemesanan': '2026-09-01 10:00:00', 'Tag_link1': tag, 'Total Komisi per Produk(Rp)': '100' })),
+      ads: [['A', 40], ['B', 400]].map(([tag, clicks]) => ({ 'Ad name': tag, 'Amount spent (IDR)': '50', 'Reporting starts': '2026-09-01', 'Reporting ends': '2026-09-01', 'Link clicks': String(clicks) })),
+      clicks: [['A', 3], ['B', 58]].flatMap(([tag, n]) => Array.from({ length: n }, (_, i) => ({ 'Waktu Klik': '2026-09-01 09:00:' + String(i).padStart(2, '0'), 'Tag_link': tag }))), tagMap: { A: 'A', B: 'B' },
+    }, { ppn: 0, lagDays: 0 }));
+    assert.ok(lostLabels.includes('92%') && lostLabels.includes('86%'), 'per-tag Klik hilang rounds from the arriving share');
+    assert.ok(!lostLabels.includes('93%') && !lostLabels.includes('85%'));
+    console.log('PASS PDF per-tag lost clicks round like the dashboard link note');
     const partialSources = Engine.analyze({
       affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',
         'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Tag_link1': 'Coverage',
