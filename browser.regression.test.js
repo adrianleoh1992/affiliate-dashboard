@@ -180,6 +180,24 @@ async function main() {
     assert.equal((await tags()).length, 3);
   });
 
+  test('a placement export feeds the platform card without doubling spend', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const placements = [plc('Facebook', 'Feed', 60, 6), plc('Facebook', 'Facebook Reels', 20, 2), plc('Instagram', 'Instagram Reels', 20, 2)];
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), { ...aff('2', 'Alpha'), Platform: 'Instagram' }] },
+      { name: 'placement.csv', rows: placements }]);
+    assert.equal(await page.locator('#plcCard').isVisible(), true);
+    // Daily placement rows stand in for the missing plain ads export.
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100);
+    const plat = await page.locator('#tblPlcPlat tbody').innerText();
+    assert.match(plat, /Facebook\tRp80\t80%[\s\S]*2\.50x/);
+    assert.match(plat, /Instagram\tRp20\t20%[\s\S]*10\.00x/);
+    assert.ok(!/100%/.test(plat.split('\n')[0].split('\t')[7]), 'no click report means no lost-click figure');
+    await upload(page, [{ name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100, 'plain ads and placement rows are never added together');
+    assert.match(await page.locator('#uploadStatus').innerText(), /Placement 3/);
+  });
+
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
     assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);
