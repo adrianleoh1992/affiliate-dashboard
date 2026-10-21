@@ -29,11 +29,12 @@
   }
   // Shopee's "Others", "Websites", "Google Search", … cannot be tied to a Meta
   // platform; they stay visible but are never split onto placements.
+  const OTHER = 'Other (bukan FB/IG)';
   const SHOPEE_META = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Lainnya', whatsapp: 'Lainnya', messenger: 'Lainnya' };
   function shopeePlatform(v) {
-    return SHOPEE_META[String(v || '').trim().toLowerCase()] || 'Tidak diketahui';
+    return SHOPEE_META[String(v || '').trim().toLowerCase()] || OTHER;
   }
-  const ORDER = ['Facebook', 'Instagram', 'Lainnya', 'Tidak diketahui'];
+  const ORDER = ['Facebook', 'Instagram', 'Lainnya', OTHER];
   const UNMATCHED = '(iklan belum cocok)';
 
   function isPlacementExport(fields) {
@@ -95,11 +96,20 @@
     for (const r of input.affiliate || []) { const t = E.cleanTag(E.pick(r, E.COL.aff.tag)); if (t) affTags.add(t); }
     const known = E.tagLookup([...affTags]);
     const shopee = new Map();
+    // Each source behind the Other row, by the name Shopee gave it.
+    const others = new Map();
+    const otherOf = name => {
+      const k = String(name || '').trim() || '(tanpa sumber)';
+      if (!others.has(k)) others.set(k, { source: k, shopeeClicks: 0, orders: new Set(), comm: 0 });
+      return others.get(k);
+    };
     for (const r of input.clicks || []) {
       if (!inRange(E.dayOnly(E.pick(r, E.COL.clk.time)))) continue;
       const tag = E.resolveClickTag(E.pick(r, E.COL.clk.tag), known);
       if (!adTags.has(tag)) continue;
-      cell(shopee, tag + '\u0000' + shopeePlatform(E.pick(r, E.COL.clk.src))).shopeeClicks++;
+      const src = E.pick(r, E.COL.clk.src), plat = shopeePlatform(src);
+      cell(shopee, tag + '\u0000' + plat).shopeeClicks++;
+      if (plat === OTHER) otherOf(src).shopeeClicks++;
     }
     let hasOrderPlatform = false;
     for (const r of input.affiliate || []) {
@@ -110,10 +120,12 @@
       if (!adTags.has(tag)) continue;
       const pf = E.pick(r, E.COL.aff.platform);
       if (pf) hasOrderPlatform = true;
-      const c = cell(shopee, tag + '\u0000' + shopeePlatform(pf));
-      c.comm += E.num(E.pick(r, E.COL.aff.comm));
+      const plat = shopeePlatform(pf), comm = E.num(E.pick(r, E.COL.aff.comm));
       const id = String(E.pick(r, E.COL.aff.orderId) || '').trim();
+      const c = cell(shopee, tag + '\u0000' + plat);
+      c.comm += comm;
       if (id) c.orders.add(id);
+      if (plat === OTHER) { const o = otherOf(pf); o.comm += comm; if (id) o.orders.add(tag + '\u0000' + id); }
     }
 
     const finish = (o, extra) => {
@@ -196,13 +208,16 @@
       return s;
     }, blank()), { platform: 'Total' });
 
+    const otherSources = [...others.values()].map(o => ({ source: o.source, shopeeClicks: o.shopeeClicks, orders: o.orders.size, comm: o.comm }))
+      .sort((a, b) => b.shopeeClicks - a.shopeeClicks || b.comm - a.comm);
+
     return {
-      range: { start, end }, platforms, total, placements, tags, avgCpc,
+      range: { start, end }, platforms, total, placements, tags, avgCpc, otherSources,
       unmatchedSpend: tags.filter(t => t.tag === UNMATCHED).reduce((s, t) => s + t.spend, 0),
       daily: rows.every(r => E.dayOnly(r['Reporting starts']) === E.dayOnly(r['Reporting ends'] || r['Reporting starts'])),
       hasClicks: (input.clicks || []).length > 0, hasOrderPlatform,
     };
   }
 
-  return { analyze, isPlacementExport, metaPlatform, shopeePlatform, UNMATCHED };
+  return { analyze, isPlacementExport, metaPlatform, shopeePlatform, UNMATCHED, OTHER };
 });

@@ -253,7 +253,7 @@ async function main() {
       { name: 'ads.csv', rows: [ad('Alpha', 100)] },
       { name: 'clicks.csv', rows: [1, 2, 3, 4].map(i => ({ ...click(), 'Klik ID': 'k' + i })) }]);
     const head = await page.locator('#tblMain thead').innerText();
-    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
+    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Masuk Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
     const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
     const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
     assert.equal(cells[await col('lpv')], '8');
@@ -261,6 +261,37 @@ async function main() {
     assert.equal(cells[await col('lostTotal')], '60%'); // 10 Meta clicks, 4 reached Shopee
     await page.locator('#tblMain th[data-sort="lostTotal"]').click();
     assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');
+  });
+
+  test('arrived clicks show every source; Klik Hilang counts Facebook and Instagram', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] },
+      { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Instagram'), from(3, 'Others'), from(4, 'WhatsApp')] }]);
+    const head = await page.locator('#tblMain thead').innerText();
+    assert.match(head, /Klik Masuk Shopee/i);
+    assert.doesNotMatch(head, /FB\+IG/i);
+    const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
+    const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
+    assert.equal(cells[await col('shopeeClicks')], '4');
+    assert.equal(cells[await col('clicks')], '10');
+    assert.equal(cells[await col('lostTotal')], '80%'); // 10 Meta clicks, 2 from Facebook/Instagram
+  });
+
+  test('the platform card lists Other sources under Facebook and Instagram', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), { ...aff('2', 'Alpha'), Platform: 'Others' }] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 80, 8), plc('Instagram', 'Instagram Reels', 20, 2)] },
+      { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Others'), from(3, 'Others'), from(4, 'Websites')] }]);
+    const plat = await page.locator('#tblPlcPlat tbody').innerText();
+    assert.match(plat, /Other \(bukan FB\/IG\)\s*Others 2 · Websites 1/);
+    const place = await page.locator('#tblPlcPlace tbody tr.plc-other').innerText();
+    assert.match(place, /^Other\tBukan placement Meta\s*3 klik Shopee · 1 pesanan · Others 2 · Websites 1\s*Rp200\s*—$/);
+    await page.locator('#tblPlcTag tr[data-plc-tag="Alpha"] .attr-open').click();
+    assert.match(await page.locator('#tblPlcTag tr.daydetail tr.plc-other').innerText(), /3 klik Shopee · 1 pesanan/);
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {

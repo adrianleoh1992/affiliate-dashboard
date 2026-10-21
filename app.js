@@ -538,7 +538,8 @@ function renderClickKpi(){
       ['Impresi','—',1],['CPM','—',1],['CPC',per(sp,sC)],
       ['CTR',pc(sC,im)],['CR',pc(od,sC)],
       ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
-      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
+      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1],
+      ...(RESULT.tags.some(t=>t.shopeeSrc)?[['Hanya perujuk Facebook/Instagram','dipakai untuk klik hilang',1]]:[])]),
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
       lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
       lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
@@ -606,7 +607,7 @@ function bindBreakdown(tableId,lookup,cols){
     tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
 }
-const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
+const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['shopeeClicks','Klik Masuk Shopee',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
 $('attrSearch').oninput=()=>{ATTR_QUERY=$('attrSearch').value.trim().toLocaleLowerCase();if(RESULT)renderAttr()};
@@ -637,12 +638,21 @@ function adsRows(){
 let PLC_ALL=false,PLC_TAGS_ALL=false;const PLC_OPEN=new Set();
 // One tag's placements. Spend and clicks are Meta's; commission is the tag's
 // platform commission split by click share, so it is marked as an estimate.
+/* Shopee clicks and orders whose referrer is not Facebook or Instagram
+   (Others, Websites, …). They have no Meta placement, so they sit under the
+   placements as their own row with real, not estimated, commission. */
+function plcOtherRow(o,cols,names){
+  if(!o||!(o.shopeeClicks||o.comm))return'';
+  const what=`${nf(o.shopeeClicks)} klik Shopee · ${nf(o.orders)} pesanan`+(names?' · '+names:'');
+  return`<tr class="plc-other"><td>Other</td><td colspan="${cols-3}">Bukan placement Meta <small class="src-other">${esc(what)}</small></td><td class="num" title="Komisi nyata dari pesanan dengan perujuk selain Facebook/Instagram">${o.comm?full(o.comm):'—'}</td><td class="num">—</td></tr>`;
+}
 function plcTagDetail(t){
   const rows=(t.placements||[]).filter(p=>p.spend>0||p.clicks>0);
   if(!rows.length)return'<p class="hint">Tidak ada biaya per placement untuk tag ini.</p>';
   const roas=v=>v==null||!isFinite(v)?'—':`<span class="${v>=1?'pos':'neg'}">${rx(v)}</span>`;
   return`<div class="daybox attr-box"><table><thead><tr><th>Platform</th><th>Placement</th><th class="num">Biaya</th><th class="num">Klik Meta</th><th class="num">CTR</th><th class="num">CPC</th><th class="num">Estimasi komisi</th><th class="num">Estimasi ROAS</th></tr></thead><tbody>`
     +rows.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td><td class="num">${full(p.spend)}</td><td class="num">${nf(p.clicks)}</td><td class="num">${p.ctr==null?'—':p.ctr.toFixed(2).replace('.',',')+'%'}</td><td class="num">${p.cpc==null?'—':full(p.cpc)}</td><td class="num est">${p.estComm?full(p.estComm):'—'}</td><td class="num">${roas(p.estRoas)}</td></tr>`).join('')
+    +plcOtherRow(t.platforms[Placement.OTHER],8)
     +'</tbody></table><p class="hint">Komisi per placement adalah estimasi: komisi tag di platform itu dibagi menurut porsi klik Meta tiap placement.</p></div>';
 }
 function renderPlacement(){
@@ -653,23 +663,25 @@ function renderPlacement(){
   const pct=(v,d)=>`<td class="num">${v==null||!isFinite(v)?'—':v.toFixed(d==null?1:d).replace('.',',')+'%'}</td>`;
   const head=(id,cols)=>$(id).querySelector('thead').innerHTML='<tr>'+cols.map((c,i)=>`<th class="${i>=(id==='tblPlcPlace'?2:1)?'num':''}">${c}</th>`).join('')+'</tr>';
   const spendAll=P.total.spend;
+  const srcNames=(P.otherSources||[]).slice(0,4).map(o=>`${o.source} ${nf(o.shopeeClicks)}`).join(' · ')+((P.otherSources||[]).length>4?` · +${P.otherSources.length-4} lain`:'');
   head('tblPlcPlat',['Platform','Biaya','% biaya','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee','Klik hilang','Pesanan','Komisi','ROAS','Laba']);
-  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${esc(p.platform)}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform==='Tidak diketahui'||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`;
+  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`;
   $('tblPlcPlat').querySelector('tbody').innerHTML=P.platforms.map(platRow).join('');
   $('tblPlcPlat').querySelector('tfoot').innerHTML=platRow(P.total);
   head('tblPlcPlace',['Platform','Placement','Biaya','% biaya','Impresi','Klik Meta','CTR','CPC Meta','CPC vs rata-rata','Estimasi komisi','Estimasi ROAS']);
   const vs=v=>v==null||!isFinite(v)?'<td class="num">—</td>':`<td class="num ${v<=-10?'pos':v>=10?'neg':''}">${v>0?'+':''}${v.toFixed(0)}%</td>`;
   // Placements under 0.5% of spend are noise until asked for.
   const big=P.placements.filter(p=>p.share>=0.5),list=PLC_ALL?P.placements:big;
-  $('tblPlcPlace').querySelector('tbody').innerHTML=list.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td>${money(p.spend)}${pct(p.share)}${count(p.impr)}${count(p.clicks)}${pct(p.ctr,2)}${money(p.cpc)}${vs(p.cpcVsAvg)}<td class="num est">${p.estComm?full(p.estComm):'—'}</td>${roasCell(p.estRoas)}</tr>`).join('');
+  $('tblPlcPlace').querySelector('tbody').innerHTML=list.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td>${money(p.spend)}${pct(p.share)}${count(p.impr)}${count(p.clicks)}${pct(p.ctr,2)}${money(p.cpc)}${vs(p.cpcVsAvg)}<td class="num est">${p.estComm?full(p.estComm):'—'}</td>${roasCell(p.estRoas)}</tr>`).join('')
+    +plcOtherRow(P.platforms.find(p=>p.platform===Placement.OTHER),11,srcNames);
   const more=$('btnPlcAll');more.classList.toggle('hidden',big.length===P.placements.length);
   more.textContent=PLC_ALL?'Sembunyikan placement kecil':`Tampilkan ${P.placements.length-big.length} placement kecil (<0,5% biaya)`;
   more.onclick=()=>{PLC_ALL=!PLC_ALL;renderPlacement()};
-  head('tblPlcTag',['Tag','Biaya FB','Komisi FB','ROAS FB','Biaya IG','Komisi IG','ROAS IG','Komisi lain / tak diketahui','Lebih untung di']);
+  head('tblPlcTag',['Tag','Biaya FB','Komisi FB','ROAS FB','Biaya IG','Komisi IG','ROAS IG','Komisi Lainnya + Other','Lebih untung di']);
   const pf=(t,k)=>t.platforms[k]||{spend:0,comm:0,roas:null};
   const tagCut=15,tagList=PLC_TAGS_ALL?P.tags:P.tags.slice(0,tagCut);
   $('tblPlcTag').querySelector('tbody').innerHTML=tagList.map(t=>{
-    const fb=pf(t,'Facebook'),ig=pf(t,'Instagram'),other=pf(t,'Lainnya').comm+pf(t,'Tidak diketahui').comm;
+    const fb=pf(t,'Facebook'),ig=pf(t,'Instagram'),other=pf(t,'Lainnya').comm+pf(t,Placement.OTHER).comm;
     // A side with under Rp10.000 spend has too little to call either way.
     const ok=x=>x.spend>=10000&&x.roas!=null;
     const best=!fb.comm&&!ig.comm?'Belum ada komisi':ok(fb)&&ok(ig)?(Math.abs(fb.roas-ig.roas)<0.1?'Setara':fb.roas>ig.roas?'Facebook':'Instagram'):'—';
@@ -763,12 +775,21 @@ function renderAttr(){
 }
 /* Share of Meta link clicks that never reached Shopee. Negative means Shopee
    counted more clicks than Meta sent (organic or shared links). */
+/* Every Shopee click on the tag inside the click report window. The tooltip
+   splits it by Perujuk; the platform card has the full Facebook/Instagram/Other
+   breakdown. */
+function inCell(t){
+  if(!t.shopeeClicks)return'<td class="num">—</td>';
+  const s=t.shopeeSrc,tip=`Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik.`
+    +(s?` Menurut Perujuk: Facebook ${nf(s.fb)} · Instagram ${nf(s.ig)} · Other ${nf(s.other)}.`:'');
+  return`<td class="num" title="${tip}">${nf(t.shopeeClicks)}</td>`;
+}
 function lostCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=x!=null&&isFinite(x)?x:-1e15;y=y!=null&&isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td>${inCell(t)}<td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.leak?t.leak.shopeeClicks:t.shopeeClicks)} klik Shopee${t.shopeeSrc?' dari Facebook/Instagram':''}`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+FILTER+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';

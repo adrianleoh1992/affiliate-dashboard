@@ -813,3 +813,5 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .pick-manual{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px}
 .pick-manual select{max-width:100%}
 .banner #btnFixMatch{margin-left:6px}
+#plcCard .src-other{display:block;font-size:11px;color:var(--text-mute);font-weight:400}
+#plcCard tr.plc-other td{color:var(--text-dim)}
