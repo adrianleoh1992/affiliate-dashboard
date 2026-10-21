@@ -74,6 +74,13 @@
         <div class="zone-body"><div class="chips" data-zchips="clicks"></div>
           <button class="btn sm zone-pick" data-zpick="clicks" type="button">+ Pilih file</button></div>
       </div>
+      <div class="zone" data-zone="placement">
+        <div class="zone-head"><span class="zn">4</span>
+          <div><b>Meta Ads per placement</b><small>Opsional · breakdown Platform &amp; placement, per hari atau satu periode</small></div>
+          <button class="btn ghost sm zone-del hidden" data-zdel="placement">Hapus</button></div>
+        <div class="zone-body"><div class="chips" data-zchips="placement"></div>
+          <button class="btn sm zone-pick" data-zpick="placement" type="button">+ Pilih file</button></div>
+      </div>
     </div>
     <p class="drop-hint" id="dropHint">Bisa juga menarik file ke mana saja di kartu ini — jenisnya dikenali dari isi file, bukan dari kotak tujuan.</p>
     <input type="file" id="files" multiple accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" class="hidden">
@@ -168,6 +175,18 @@
         <div id="attrStrip" class="strip"></div>
         <div class="table-tools" id="attrTools"><label for="attrSearch">Cari tag</label><input id="attrSearch" type="search" placeholder="Ketik nama tag…" autocomplete="off"><span id="attrSearchCount" class="hint"></span></div>
         <div class="tscroll"><table id="tblAttr"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+      </div>
+      <div class="card hidden" data-print="tags" id="plcCard">
+        <div class="card-head"><h2>Platform &amp; placement</h2><span class="sub" id="plcNote"></span></div>
+        <p class="hint">Per platform angkanya nyata: biaya dan klik dari Meta, klik Shopee dari kolom Perujuk, pesanan dan komisi dari kolom Platform laporan komisi. Hanya tag yang punya iklan di file placement yang dihitung.
+          Shopee tidak tahu placement Meta, jadi <b>komisi per placement adalah estimasi</b>: komisi tiap tag di platform itu dibagi menurut porsi klik Meta tiap placement. "Tidak diketahui" = klik/pesanan dengan perujuk Others, Websites, dan sejenisnya.</p>
+        <div class="tscroll"><table id="tblPlcPlat"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+        <h3 class="sub-head">Per placement</h3>
+        <div class="tscroll"><table id="tblPlcPlace"><thead></thead><tbody></tbody></table></div>
+        <button class="btn sm hidden" id="btnPlcAll" type="button"></button>
+        <h3 class="sub-head">Per tag: Facebook vs Instagram</h3>
+        <div class="tscroll"><table id="tblPlcTag"><thead></thead><tbody></tbody></table></div>
+        <button class="btn sm hidden" id="btnPlcTags" type="button"></button>
       </div>
       <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
@@ -537,6 +556,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="engine.js"></script>
+<script src="placement.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
 <script src="supabase-config.js"></script>

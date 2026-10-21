@@ -180,6 +180,38 @@ async function main() {
     assert.equal((await tags()).length, 3);
   });
 
+  test('a placement export feeds the platform card without doubling spend', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const placements = [plc('Facebook', 'Feed', 60, 6), plc('Facebook', 'Facebook Reels', 20, 2), plc('Instagram', 'Instagram Reels', 20, 2)];
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), { ...aff('2', 'Alpha'), Platform: 'Instagram' }] },
+      { name: 'placement.csv', rows: placements }]);
+    assert.equal(await page.locator('#plcCard').isVisible(), true);
+    // Daily placement rows stand in for the missing plain ads export.
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100);
+    const plat = await page.locator('#tblPlcPlat tbody').innerText();
+    assert.match(plat, /Facebook\tRp80\t80%[\s\S]*2\.50x/);
+    assert.match(plat, /Instagram\tRp20\t20%[\s\S]*10\.00x/);
+    assert.ok(!/100%/.test(plat.split('\n')[0].split('\t')[7]), 'no click report means no lost-click figure');
+    await upload(page, [{ name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100, 'plain ads and placement rows are never added together');
+    assert.match(await page.locator('#uploadStatus').innerText(), /Placement 3/);
+  });
+
+  test('an ad no tag claims raises a notice and can be matched by hand', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Bravo')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Zulu', 300)] }]);
+    assert.match(await page.locator('#banners').innerText(), /1 iklan belum cocok ke tag Shopee/);
+    await page.locator('#btnFixMatch').click();
+    const pick = page.locator('#tblMatch select[data-pick-ad="Zulu"]');
+    // Bravo has commission and no ad, so it is offered first.
+    assert.match(await pick.locator('optgroup').first().innerText(), /Bravo/);
+    await pick.selectOption('Bravo');
+    await page.waitForFunction(() => !RESULT.matchLog.some(m => m.adName === 'Zulu' && m.confidence < .5));
+    assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), true);
+    assert.doesNotMatch(await page.locator('#banners').innerText(), /belum cocok/);
+  });
+
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
     assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);

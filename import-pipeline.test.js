@@ -232,6 +232,18 @@ test('export without Link clicks reads Meta clicks from link_click Results', () 
   assert.equal(days.reduce((sum, day) => sum + day.clicks, 0), 42);
 });
 
+test('placement exports are their own type and may span the whole period', () => {
+  const row = changes => ads({ Platform: 'Facebook', Placement: 'Feed', ...changes });
+  const period = parse([row({ 'Reporting ends': '2026-08-07' }), row({ Placement: 'Facebook Reels', 'Reporting ends': '2026-08-07' })]);
+  assert.equal(period.ok, true);
+  assert.equal(period.type, 'placement');
+  assert.ok(!hasIssue(period, 'non_daily_ads'));
+  const daily = parse([row()]);
+  assert.equal(daily.type, 'placement');
+  assert.equal(daily.rows[0]['Amount spent (IDR)'], 1000);
+  assert.equal(parse([ads()]).type, 'ads', 'plain exports stay ads');
+});
+
 test('Shopee optional blank refunds and double-dash completion markers keep valid orders readable', () => {
   const rows = [
     aff({ 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),
