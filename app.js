@@ -612,7 +612,21 @@ $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compac
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false;
+let ATTR_ALL=false;const ATTR_OPEN=new Set();
+/* Products behind one tag's orders, split by kind: the direct list is what the
+   link sold, the indirect list is what buyers chose instead. */
+function attrProductsHTML(t){
+  const P=t.attrProducts||{},top=15;
+  const list=(kind,title)=>{
+    const items=P[kind]||[];
+    if(!items.length)return`<div class="attr-prod"><h4>${title}</h4><p class="hint">Tidak ada.</p></div>`;
+    const more=items.length>top?`<p class="hint">+${nf(items.length-top)} produk lain (${rp(items.slice(top).reduce((s,p)=>s+p.comm,0))}).</p>`:'';
+    return`<div class="attr-prod"><h4>${title} · ${nf(items.length)} produk</h4><table><thead><tr><th>Produk</th><th class="num">Pesanan</th><th class="num">Qty</th><th class="num">Komisi</th></tr></thead><tbody>`
+      +items.slice(0,top).map(p=>`<tr><td><div class="nm">${esc(p.name)}</div>${p.shop?`<div class="rs">${esc(p.shop)}</div>`:''}</td><td class="num">${nf(p.orders)}</td><td class="num">${nf(p.qty)}</td><td class="num">${rp(p.comm)}</td></tr>`).join('')
+      +`</tbody></table>${more}</div>`;
+  };
+  return`<div class="daybox attr-box"><div class="attr-prods">${list('direct','Terjual langsung')}${list('indirect','Terjual tidak langsung')}${(P.unknown||[]).length?list('unknown','Tipe tidak diketahui'):''}</div></div>`;
+}
 function renderAttr(){
   const A=RESULT.attribution||{},tot=A.total,cut=30;
   const tb=$('tblAttr');
@@ -631,9 +645,22 @@ function renderAttr(){
   const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
     .sort((a,b)=>b.comm-a.comm||a.tag.localeCompare(b.tag));
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
-  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr)}</tr>`).join('')
+  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr class="dayrow" data-attr="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false" title="Klik untuk melihat produk yang terjual"><td><span class="exp attr-exp" aria-hidden="true">▸</span>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr)}</tr>`).join('')
     ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
   tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  tb.querySelectorAll('tbody tr[data-attr]').forEach(tr=>{
+    const toggle=()=>{
+      const next=tr.nextElementSibling;
+      if(next&&next.classList.contains('daydetail')){next.remove();tr.classList.remove('open');tr.setAttribute('aria-expanded','false');ATTR_OPEN.delete(tr.dataset.attr);return}
+      const t=RESULT.tags.find(x=>x.tag===tr.dataset.attr);if(!t)return;
+      const det=document.createElement('tr');det.className='daydetail';
+      det.innerHTML=`<td colspan="${head.length}">${attrProductsHTML(t)}</td>`;
+      tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');ATTR_OPEN.add(tr.dataset.attr);
+    };
+    tr.onclick=toggle;
+    tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
+    if(ATTR_OPEN.has(tr.dataset.attr))toggle();
+  });
   const btn=$('btnAttrAll');btn.classList.toggle('hidden',rows.length<=cut);
   btn.textContent=ATTR_ALL?`Tampilkan ${cut} teratas`:`Tampilkan semua ${rows.length} tag`;btn.setAttribute('aria-pressed',String(ATTR_ALL));
   btn.onclick=()=>{ATTR_ALL=!ATTR_ALL;renderAttr()};

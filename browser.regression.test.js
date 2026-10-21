@@ -120,10 +120,19 @@ async function main() {
     assert.match(head, /Pesanan langsung/i); assert.match(head, /Komisi tidak langsung/i);
     assert.doesNotMatch(head, /Tidak diketahui/i, 'no unknown column when every row is labelled');
     const alpha = await page.locator('#tblAttr tbody tr', { hasText: 'Alpha' }).innerText();
-    assert.deepEqual(alpha.split('\t').map(x => x.trim()), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
+    assert.deepEqual(alpha.split('\t').map(x => x.trim().replace(/^▸/, '')), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
     const total = await page.locator('#tblAttr tfoot tr').innerText();
     assert.deepEqual(total.split('\t').map(x => x.trim()), ['Total akun', '1', 'Rp200', '3', 'Rp600', '75%']);
     assert.match(await page.locator('#attrNote').innerText(), /Tipe Pesanan/);
+    // Clicking a tag opens the products sold under it, split by kind.
+    await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').click();
+    const detail = await page.locator('#tblAttr tbody tr.daydetail').innerText();
+    assert.match(detail, /Terjual langsung · 1 produk[\s\S]*Synthetic Product 1/i);
+    assert.match(detail, /Terjual tidak langsung · 2 produk[\s\S]*Synthetic Product 2[\s\S]*Synthetic Product 3/i);
+    assert.doesNotMatch(detail, /Synthetic Product 4/, 'another tag\'s products stay out');
+    assert.equal(await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').getAttribute('aria-expanded'), 'true');
+    await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').press('Enter');
+    assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 0);
   });
 
   test('a commission report without an attribution column says so instead of showing zeros', async page => {

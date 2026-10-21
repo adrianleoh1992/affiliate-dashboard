@@ -784,3 +784,20 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 
 /* Direct vs indirect orders: the account total closes the table. */
 #tblAttr tfoot td,#tblStoredAttr tfoot td{font-weight:700;border-top:2px solid var(--border)}
+/* Products behind a tag's direct and indirect orders, opened under its row. */
+.attr-exp{display:inline-grid;margin-right:8px;vertical-align:middle}
+.attr-prods{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.attr-prod h4{margin:0 0 6px;font-size:12px}
+.attr-box{position:sticky;left:0;max-width:calc(100vw - 48px)}
+.attr-prod{min-width:0}
+.attr-prod table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.attr-prod th:first-child{width:auto}.attr-prod th.num{width:64px}.attr-prod th:last-child{width:76px}
+.attr-prod td:first-child{white-space:normal;overflow-wrap:anywhere}
+.attr-prod th,.attr-prod td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:left}
+.attr-prod th.num,.attr-prod td.num{text-align:right;white-space:nowrap}
+.attr-prod .rs{font-size:11px;color:var(--text-dim)}
+.attr-prod .hint{margin:6px 0 0}
+@media (max-width:600px){
+  .attr-prod th.num{width:46px}.attr-prod th:last-child{width:62px}
+  .attr-prod th:nth-child(3),.attr-prod td:nth-child(3){display:none}
+}

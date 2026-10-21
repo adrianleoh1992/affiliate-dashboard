@@ -502,6 +502,11 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   assert.equal(a.direct.orders, 1); near(a.direct.comm, 150);
   assert.equal(a.indirect.orders, 2); near(a.indirect.comm, 50); near(a.indirect.commEff, 40);
   assert.equal(a.unknown.rows, 0); assert.equal(a.mixed, 0);
+  const pa = r.tags.find(t => t.tag === 'A').attrProducts;
+  assert.equal(pa.direct.length, 1, 'two rows of one product in one order are one product');
+  assert.equal(pa.direct[0].orders, 1); near(pa.direct[0].comm, 150); assert.equal(pa.direct[0].qty, 2);
+  assert.equal(pa.indirect.length, 1); assert.equal(pa.indirect[0].orders, 2);
+  assert.ok(!pa.direct.concat(pa.indirect).some(p => p.comm === 40), 'cancelled rows are not products sold');
   const b = r.tags.find(t => t.tag === 'B');
   assert.equal(b.attr.mixed, 1); assert.equal(b.attr.direct.orders, 1); assert.equal(b.attr.indirect.orders, 1);
   assert.equal(b.attr.unknown.orders, 1); near(b.attr.unknown.comm, 7);
@@ -518,6 +523,7 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   const none = analyze({ affiliate: [aff('o1')] });
   assert.equal(none.attribution.column, '');
   assert.equal(none.tags[0].attrDirectOrders, null);
+  assert.equal(none.tags[0].attrProducts, null);
   const X = require('./export-data.js');
   assert.match(X.csv(none), /"Order","Pesanan langsung","Komisi langsung"/);
   assert.match(X.csv(r), /"Pesanan tidak langsung"/);

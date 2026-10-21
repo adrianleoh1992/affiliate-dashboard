@@ -605,7 +605,7 @@ function analyze(data, options) {
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
       days: new Set(), daily: dict(), shopeeClicks: 0, metaClicksWindow: 0, spendWindow: 0,
       adNames: dict(), unitKeys: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
-      attr: attrBucket(),
+      attr: attrBucket(), attrProducts: { direct: dict(), indirect: dict(), unknown: dict() },
     };
     return T[t];
   }
@@ -660,6 +660,16 @@ function analyze(data, options) {
     if (attrCol && kind === 'unknown') attrValues[rawAttr || '(kosong)'] = (attrValues[rawAttr || '(kosong)'] || 0) + 1;
     const ce = st === 'Tertunda' ? c * o.pendingFactor : c;
     addAttr(b.attr, kind, id, c, ce);
+    // What was actually bought, per kind: an indirect order names the product
+    // the buyer chose instead of the one in the link.
+    if (attrCol) {
+      const name = String(pick(r, COL.aff.product) || '(tanpa nama produk)'), shopName = String(pick(r, COL.aff.shop) || '');
+      const key = name + '\u0000' + shopName, list = b.attrProducts[kind];
+      if (!list[key]) list[key] = { name, shop: shopName, orders: new Set(), qty: 0, comm: 0, gmv: 0 };
+      const p = list[key];
+      p.qty += q; p.comm += c; p.gmv += g;
+      if (id) p.orders.add(id);
+    }
     addAttr(attrAll, kind, id, c, ce);
 
     if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
@@ -1086,6 +1096,11 @@ function analyze(data, options) {
       topShop: topOf(b.shops, 1)[0] || null,
       adNames: Object.keys(b.adNames),
       attr: attrOut(b.attr),
+      attrProducts: attrCol ? ['direct', 'indirect', 'unknown'].reduce((out, k) => {
+        out[k] = Object.values(b.attrProducts[k]).map(p => ({ ...p, orders: p.orders.size }))
+          .sort((x, y) => y.comm - x.comm || y.orders - x.orders || x.name.localeCompare(y.name));
+        return out;
+      }, {}) : null,
       // Flat copies for CSV export; empty, not 0, when the report has no
       // attribution column, so a missing split never reads as "no orders".
       attrDirectOrders: attrCol ? b.attr.direct.orders.size : null,
