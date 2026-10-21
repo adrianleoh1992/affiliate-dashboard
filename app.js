@@ -1065,7 +1065,16 @@ function acceptMatch(key,ad,tag){const m=map();m[key||ad.trim()]=tag;
   // otherwise drop the mapping just accepted.
   $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()}
 $('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(b)acceptMatch(b.dataset.acceptKey,b.dataset.acceptAd,b.dataset.acceptTag)});
-$('tblMatch').addEventListener('change',e=>{const s=e.target.closest('select[data-pick-key]');if(s&&s.value)acceptMatch(s.dataset.pickKey,s.dataset.pickAd,s.value)});
+function pickFrom(input){
+  const tag=input.value.trim();if(!tag)return;
+  if(!RESULT.tags.some(t=>t.tag===tag))return toast('Tag "'+tag+'" tidak ada di laporan Shopee. Pilih dari daftar.');
+  acceptMatch(input.dataset.pickKey,input.dataset.pickAd,tag);
+}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-pick-go]');if(b)pickFrom(b.parentElement.querySelector('input[data-pick-key]'))});
+$('tblMatch').addEventListener('keydown',e=>{const i=e.target.closest('input[data-pick-key]');if(i&&e.key==='Enter'){e.preventDefault();pickFrom(i)}});
+let MATCH_QUERY='',MATCH_OPEN=false;
+$('matchSearch').oninput=()=>{MATCH_QUERY=$('matchSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMatch()};
+$('matchOnlyOpen').onchange=()=>{MATCH_OPEN=$('matchOnlyOpen').checked;if(RESULT)renderMatch()};
 /* Ads with spend that no Shopee tag claims. Their spend sits on a tag of
    their own name with no clicks or commission, so it reads as pure loss. */
 function unmatchedAds(){return RESULT.matchLog.filter(m=>m.confidence<.5&&m.spend>0).sort((a,b)=>b.spend-a.spend)}
@@ -1078,13 +1087,15 @@ function pickableTags(){
   const rest=shopee.filter(t=>t.spend>0).sort((a,b)=>a.tag.localeCompare(b.tag));
   return {orphan,rest};
 }
+// One shared list feeds every picker; typing in a picker searches it.
+function tagOptionsHtml(){
+  const P=pickableTags(),opt=(t,lead)=>`<option value="${esc(t.tag)}" label="${lead}${t.shopeeClicks?nf(t.shopeeClicks)+' klik':''}${t.comm?' · '+rp(t.comm):''}"></option>`;
+  return P.orphan.map(t=>opt(t,'tanpa iklan · ')).join('')+P.rest.map(t=>opt(t,'')).join('');
+}
 function pickHtml(m,twin){
   const key=twin&&m.adId?'id:'+m.adId:m.adName.trim(),P=pickableTags();
   if(!P.orphan.length&&!P.rest.length)return'';
-  const opt=t=>`<option value="${esc(t.tag)}">${esc(t.tag)}${t.shopeeClicks?' · '+nf(t.shopeeClicks)+' klik':''}${t.comm?' · '+rp(t.comm):''}</option>`;
-  return `<label class="pick-manual"><span>Pilih tag manual:</span><select data-pick-key="${esc(key)}" data-pick-ad="${esc(m.adName)}"><option value="">— pilih tag —</option>`
-    +(P.orphan.length?`<optgroup label="Tag tanpa iklan (kemungkinan pasangannya)">${P.orphan.map(opt).join('')}</optgroup>`:'')
-    +(P.rest.length?`<optgroup label="Tag lain">${P.rest.map(opt).join('')}</optgroup>`:'')+'</select></label>';
+  return `<div class="pick-manual"><label><span>Pilih tag manual:</span><input type="search" list="tagOptions" placeholder="Ketik untuk cari tag…" autocomplete="off" data-pick-key="${esc(key)}" data-pick-ad="${esc(m.adName)}"></label><button class="btn sm" type="button" data-pick-go>Pasangkan</button></div>`;
 }
 /* A mapping whose tag catches under ~25% of the ad's Meta link clicks sends
    most of its traffic to another sub_id, even when the name matches exactly. */
@@ -1092,7 +1103,11 @@ const lowCapture=m=>m.confidence>=.5&&!!(m.capture&&m.capture.low);
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
   const twin=repeatedNames(RESULT.matchLog),rank=m=>lowCapture(m)?Math.min(m.confidence,.49):m.confidence;
-  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>{
+  const hit=s=>!MATCH_QUERY||String(s||'').toLocaleLowerCase().includes(MATCH_QUERY);
+  const list=RESULT.matchLog.filter(m=>(!MATCH_OPEN||m.confidence<.5)&&(hit(m.adName)||hit(m.tag)));
+  $('tagOptions').innerHTML=tagOptionsHtml();
+  $('matchCount').textContent=`${list.length} dari ${RESULT.matchLog.length} iklan`;
+  $('tblMatch').querySelector('tbody').innerHTML=list.slice().sort((a,b)=>{
     // Unmatched ads that spent money are the ones to fix first, biggest first.
     const ua=a.confidence<.5&&a.spend>0,ub=b.confidence<.5&&b.spend>0;
     return ua!==ub?(ua?-1:1):ua?b.spend-a.spend:rank(a)-rank(b)}).map(m=>{
@@ -1101,7 +1116,14 @@ function renderMatch(){
     return `<tr><td><b>${esc(m.adName)}</b>${twin.has(m.adName)?`<br><small>${esc(whichAd(m))}</small>`:''}</td><td><span class="pill">${esc(m.tag)}</span>${cap}</td>
       <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}${m.confidence<.5&&m.spend>0?pickHtml(m,twin.has(m.adName)):''}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
-  }).join('');
+  }).join('')||`<tr><td colspan="6" class="tbl-empty">${MATCH_OPEN&&!MATCH_QUERY?'Semua iklan sudah dipasangkan ke tag.':'Tidak ada iklan yang cocok dengan pencarian.'}</td></tr>`;
+  // Shopee tags with clicks or commission but no ad: either organic, or the
+  // other half of an ad whose name was mistyped.
+  const orphan=pickableTags().orphan.filter(t=>hit(t.tag));
+  $('tblOrphan').querySelector('thead').innerHTML='<tr><th>Tag</th><th class="num">Klik Shopee</th><th class="num">Pesanan</th><th class="num">Komisi</th></tr>';
+  $('tblOrphan').querySelector('tbody').innerHTML=orphan.map(t=>`<tr><td>${esc(t.tag)}</td><td class="num">${nf(t.shopeeClicks)}</td><td class="num">${nf(t.orders)}</td><td class="num">${rp(t.comm)}</td></tr>`).join('')
+    ||`<tr><td colspan="4" class="tbl-empty">${MATCH_QUERY?'Tidak ada tag yang cocok dengan pencarian.':'Semua tag Shopee sudah punya iklan.'}</td></tr>`;
+  $('orphanCount').textContent=orphan.length+' tag';
   // The mapping table now lives behind one button, so that button has to say
   // when something inside needs looking at.
   const weak=RESULT.matchLog.filter(m=>m.confidence<.5||lowCapture(m)).length;

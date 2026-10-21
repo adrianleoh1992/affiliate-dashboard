@@ -434,7 +434,13 @@
     <p class="hint">Baris dengan keyakinan di bawah 50% belum tersambung ke tag mana pun: klik tag yang
       disarankan untuk menyambungkannya. Baris bertanda <b>klik masuk rendah</b> sudah tersambung, tapi
       sebagian besar kliknya tercatat di sub_id lain, jadi cek link iklannya.</p>
+    <div class="table-tools"><label for="matchSearch">Cari</label><input id="matchSearch" type="search" placeholder="Nama iklan atau tag…" autocomplete="off">
+      <label class="check-row"><input type="checkbox" id="matchOnlyOpen"> Hanya yang belum dipasangkan</label><span id="matchCount" class="hint"></span></div>
     <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+    <datalist id="tagOptions"></datalist>
+    <h3 class="sec-split">Tag Shopee tanpa iklan <span class="hint" id="orphanCount"></span></h3>
+    <p class="hint">Tag yang punya klik atau komisi tapi tidak ada iklan yang terpasang. Bisa organik, atau pasangan iklan yang namanya salah ketik. Pasangkan lewat "Pilih tag manual" di tabel atas.</p>
+    <div class="tscroll"><table id="tblOrphan"><thead></thead><tbody></tbody></table></div>
     <h3 class="sec-split">Perbaiki manual</h3>
     <div id="mapRows"></div>
     <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>

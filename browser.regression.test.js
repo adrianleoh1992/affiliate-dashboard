@@ -203,10 +203,22 @@ async function main() {
       { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Zulu', 300)] }]);
     assert.match(await page.locator('#banners').innerText(), /1 iklan belum cocok ke tag Shopee/);
     await page.locator('#btnFixMatch').click();
-    const pick = page.locator('#tblMatch select[data-pick-ad="Zulu"]');
-    // Bravo has commission and no ad, so it is offered first.
-    assert.match(await pick.locator('optgroup').first().innerText(), /Bravo/);
-    await pick.selectOption('Bravo');
+    // Bravo has commission and no ad: it is listed as an unpaired tag and offered first.
+    assert.match(await page.locator('#tblOrphan tbody').innerText(), /Bravo/);
+    assert.equal(await page.locator('#tagOptions option').first().getAttribute('value'), 'Bravo');
+    await page.check('#matchOnlyOpen');
+    assert.deepEqual(await page.locator('#tblMatch tbody tr b').allInnerTexts(), ['Zulu']);
+    await page.uncheck('#matchOnlyOpen');
+    await page.fill('#matchSearch', 'alp');
+    assert.deepEqual(await page.locator('#tblMatch tbody tr b').allInnerTexts(), ['Alpha']);
+    assert.match(await page.locator('#tblOrphan tbody').innerText(), /Tidak ada tag yang cocok/);
+    await page.fill('#matchSearch', '');
+    const pick = page.locator('#tblMatch input[data-pick-ad="Zulu"]');
+    await pick.fill('Nope');
+    await pick.press('Enter');
+    assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), false, 'an unknown tag is refused');
+    await pick.fill('Bravo');
+    await page.locator('#tblMatch [data-pick-go]').first().click();
     await page.waitForFunction(() => !RESULT.matchLog.some(m => m.adName === 'Zulu' && m.confidence < .5));
     assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), true);
     assert.doesNotMatch(await page.locator('#banners').innerText(), /belum cocok/);
