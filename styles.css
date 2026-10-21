@@ -783,4 +783,4 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .meta-saved{background:var(--warn-soft);color:var(--warn);padding:10px 12px;border-radius:7px;font-size:13px;margin:8px 0 0;overflow-wrap:anywhere}
 
 /* Direct vs indirect orders: the account total closes the table. */
-#tblAttr tfoot td{font-weight:700;border-top:2px solid var(--border)}
+#tblAttr tfoot td,#tblStoredAttr tfoot td{font-weight:700;border-top:2px solid var(--border)}

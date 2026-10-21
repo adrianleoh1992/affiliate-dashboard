@@ -120,8 +120,35 @@ const DailyAgg = (() => {
   /* One part per order: [comm, comm_done, comm_pending, gmv, qty, refund,
      excluded, rows]. Rows without an order ID get a part of their own, keyed
      by their fingerprint. Totals are always summed over the parts in key
-     order, so the browser and the database get bit-identical numbers. */
+     order, so the browser and the database get bit-identical numbers.
+
+     A report with Shopee's direct/indirect column ("Tipe Pesanan") adds three
+     more: [..., comm_direct, comm_indirect, attr], attr being bits of the kept
+     rows: 1 direct, 2 indirect, 4 unlabelled. A report without the column
+     keeps 8 entries, which reads back as "unknown", never as zero. Same rules
+     as Engine.attrKind/attrColumn (checked by a parity test). */
   const ORDER_KEY = /^[0-9a-f]{16}$/, PART_KEY = /^(?:r:)?[0-9a-f]{16}$/;
+  const ATTR = { DIRECT: 1, INDIRECT: 2, UNKNOWN: 4 };
+  const ATTR_COLUMNS = ['Tipe Atribusi', 'Jenis Atribusi', 'Atribusi', 'Attribution Type', 'Tipe Pesanan', 'Jenis Pesanan'];
+  function attrKind(v) {
+    const s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return '';
+    if (/tidak\s*langsung|tidak\s*dipromosikan|indirect|berbeda|different/.test(s)) return 'indirect';
+    if (/langsung|dipromosikan|direct|sama|same/.test(s)) return 'direct';
+    return '';
+  }
+  function attrColumn(rows) {
+    const keys = new Set();
+    for (const r of (rows || []).slice(0, 50)) Object.keys(r || {}).forEach(k => keys.add(k));
+    for (const k of ATTR_COLUMNS) if (keys.has(k)) return k;
+    for (const k of keys) if (/atribusi|attribution/i.test(k)) return k;
+    return '';
+  }
+  /* Direct/indirect summary of one part: null when the report had no column. */
+  function partAttr(part) {
+    if (!Array.isArray(part) || part.length !== 11) return null;
+    return { direct: part[8], indirect: part[9], unknown: part[0] - part[8] - part[9], bits: part[10] };
+  }
   const AMOUNTS = ['comm', 'comm_done', 'comm_pending', 'gmv', 'qty', 'refund'];
   function sortedParts(parts) {
     const out = {};
@@ -169,6 +196,7 @@ const DailyAgg = (() => {
      orders would quietly disagree with the decision screen by a few orders. */
   function aggregateAffiliate(rows) {
     const EXCLUDE = new Set(['Dibatalkan', 'Belum Dibayar']);
+    const attrCol = attrColumn(rows);
     const by = new Map();
     for (const r of rows) {
       const date = day(r['Waktu Pemesanan']);
@@ -181,11 +209,17 @@ const DailyAgg = (() => {
       const orderId = String(r['ID Pemesanan'] || '').trim();
       const id = orderId ? hashRow({ orderId }) : 'r:' + hashRow(r);
       let part = b.parts.get(id);
-      if (!part) { part = [0, 0, 0, 0, 0, 0, 0, 0]; b.parts.set(id, part); }
+      if (!part) { part = attrCol ? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]; b.parts.set(id, part); }
       part[7]++;
       if (EXCLUDE.has(status)) { part[6]++; continue; }
       const comm = num(pick(r, ['Total Komisi per Produk(Rp)', 'Total Komisi per Pesanan(Rp)', 'Komisi Bersih Affiliate (Rp)']));
       part[0] += comm;
+      if (attrCol) {
+        const kind = attrKind(r[attrCol]);
+        if (kind === 'direct') { part[8] += comm; part[10] |= ATTR.DIRECT; }
+        else if (kind === 'indirect') { part[9] += comm; part[10] |= ATTR.INDIRECT; }
+        else part[10] |= ATTR.UNKNOWN;
+      }
       if (status === 'Selesai') part[1] += comm;
       else if (status === 'Tertunda') part[2] += comm;
       part[3] += num(r['Nilai Pembelian(Rp)']);
@@ -475,7 +509,7 @@ const DailyAgg = (() => {
   return {
     hashRow, hashRows, dedupe, prepare, changes, checkDays, recordKey, resolveKeep,
     aggregateAffiliate, aggregateAds, aggregateClicks, adIdOf, fingerprinted, mergeVersion,
-    partsTotals, sortedParts, ORDER_KEY, PART_KEY, AMOUNTS,
+    partsTotals, sortedParts, ORDER_KEY, PART_KEY, AMOUNTS, ATTR, attrKind, attrColumn, partAttr,
     planIngest, num, day, isDate, rowDate, aggregate, mergeDaily,
   };
 })();

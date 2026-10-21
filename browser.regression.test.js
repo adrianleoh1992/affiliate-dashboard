@@ -311,6 +311,21 @@ async function main() {
     assert.equal(await page.locator('#tblUploads tbody').innerText(), history);
   });
 
+  test('saved history shows direct and indirect orders per tag, old days as unknown', async page => {
+    const T = 'Tipe Pesanan';
+    await upload(page, [{ name: 'old.csv', rows: [aff('9', 'Bravo')] }]);
+    await saveDaily(page);
+    await upload(page, [{ name: 'new.csv', rows: [{ ...aff('1'), [T]: 'Pesanan Produk dari Toko yang Dipromosikan' },
+      { ...aff('2'), [T]: 'Pesanan dari Toko yang tidak Dipromosikan' }, { ...aff('3'), [T]: 'Pesanan dari Toko yang tidak Dipromosikan' }] }]);
+    await saveDaily(page);
+    await page.locator('[data-tab="tersimpan"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('#tblStoredAttr tbody tr').length === 2);
+    const cells = async row => (await row.locator('td').allInnerTexts()).map(x => x.trim());
+    assert.deepEqual(await cells(page.locator('#tblStoredAttr tbody tr', { hasText: 'Alpha' })), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%', '0 · Rp0']);
+    assert.deepEqual(await cells(page.locator('#tblStoredAttr tbody tr', { hasText: 'Bravo' })), ['Bravo', '0', 'Rp0', '0', 'Rp0', '—', '1 · Rp200']);
+    assert.deepEqual(await cells(page.locator('#tblStoredAttr tfoot tr')), ['Total akun', '1', 'Rp200', '2', 'Rp400', '67%', '1 · Rp200']);
+  });
+
   test('deleting one stored day and saving again restores it without doubling other days', async page => {
     await upload(page, [{ name: 'two-days.csv', rows: [aff('1'), aff('2', 'Alpha', '2026-08-02')] }]);
     await saveDaily(page);
