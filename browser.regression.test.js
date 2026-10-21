@@ -287,11 +287,19 @@ async function main() {
       { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 80, 8), plc('Instagram', 'Instagram Reels', 20, 2)] },
       { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Others'), from(3, 'Others'), from(4, 'Websites')] }]);
     const plat = await page.locator('#tblPlcPlat tbody').innerText();
-    assert.match(plat, /Other \(bukan FB\/IG\)\s*Others 2 · Websites 1/);
+    assert.match(plat, /Other \(bukan FB\/IG\)\s*▸?\s*Others 2 · Websites 1/);
     const place = await page.locator('#tblPlcPlace tbody tr.plc-other').innerText();
-    assert.match(place, /^Other\tBukan placement Meta\s*3 klik Shopee · 1 pesanan · Others 2 · Websites 1\s*Rp200\s*—$/);
+    assert.match(place, /^Other\s*▸?\s*Bukan placement Meta\s*3 klik Shopee · 1 pesanan · Others 2 · Websites 1\s*Rp200\s*—$/);
     await page.locator('#tblPlcTag tr[data-plc-tag="Alpha"] .attr-open').click();
     assert.match(await page.locator('#tblPlcTag tr.daydetail tr.plc-other').innerText(), /3 klik Shopee · 1 pesanan/);
+    // Opening Other lists the tags its clicks landed on.
+    await page.locator('#tblPlcPlat button[data-other="plat"]').click();
+    const tagsOther = await page.locator('#tblPlcPlat tr.daydetail').innerText();
+    assert.match(tagsOther, /Alpha\s*3\s*1\s*Rp200\s*Others 2 · Websites 1/);
+    await page.locator('#tblPlcPlace button[data-other="place"]').click();
+    assert.equal(await page.locator('#tblPlcPlace tr.daydetail').count(), 1);
+    await page.locator('#tblPlcPlat button[data-other="plat"]').click();
+    assert.equal(await page.locator('#tblPlcPlat tr.daydetail').count(), 0);
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {

@@ -98,10 +98,15 @@
     const shopee = new Map();
     // Each source behind the Other row, by the name Shopee gave it.
     const others = new Map();
-    const otherOf = name => {
+    // …and by tag, so the Other row can be opened to show where it went.
+    const otherTagMap = new Map();
+    const otherOf = (name, tag) => {
       const k = String(name || '').trim() || '(tanpa sumber)';
       if (!others.has(k)) others.set(k, { source: k, shopeeClicks: 0, orders: new Set(), comm: 0 });
-      return others.get(k);
+      if (!otherTagMap.has(tag)) otherTagMap.set(tag, { tag, shopeeClicks: 0, orders: new Set(), comm: 0, sources: new Map() });
+      const t = otherTagMap.get(tag);
+      if (!t.sources.has(k)) t.sources.set(k, { source: k, shopeeClicks: 0, orders: 0 });
+      return [others.get(k), t, t.sources.get(k)];
     };
     for (const r of input.clicks || []) {
       if (!inRange(E.dayOnly(E.pick(r, E.COL.clk.time)))) continue;
@@ -109,7 +114,7 @@
       if (!adTags.has(tag)) continue;
       const src = E.pick(r, E.COL.clk.src), plat = shopeePlatform(src);
       cell(shopee, tag + '\u0000' + plat).shopeeClicks++;
-      if (plat === OTHER) otherOf(src).shopeeClicks++;
+      if (plat === OTHER) otherOf(src, tag).forEach(o => o.shopeeClicks++);
     }
     let hasOrderPlatform = false;
     for (const r of input.affiliate || []) {
@@ -125,7 +130,11 @@
       const c = cell(shopee, tag + '\u0000' + plat);
       c.comm += comm;
       if (id) c.orders.add(id);
-      if (plat === OTHER) { const o = otherOf(pf); o.comm += comm; if (id) o.orders.add(tag + '\u0000' + id); }
+      if (plat === OTHER) {
+        const [o, t, ts] = otherOf(pf, tag);
+        o.comm += comm; t.comm += comm;
+        if (id) { o.orders.add(tag + '\u0000' + id); if (!t.orders.has(id)) ts.orders++; t.orders.add(id); }
+      }
     }
 
     const finish = (o, extra) => {
@@ -210,9 +219,13 @@
 
     const otherSources = [...others.values()].map(o => ({ source: o.source, shopeeClicks: o.shopeeClicks, orders: o.orders.size, comm: o.comm }))
       .sort((a, b) => b.shopeeClicks - a.shopeeClicks || b.comm - a.comm);
+    const otherTags = [...otherTagMap.values()].map(t => ({
+      tag: t.tag, shopeeClicks: t.shopeeClicks, orders: t.orders.size, comm: t.comm,
+      sources: [...t.sources.values()].sort((a, b) => b.shopeeClicks - a.shopeeClicks || b.orders - a.orders),
+    })).sort((a, b) => b.shopeeClicks - a.shopeeClicks || b.comm - a.comm);
 
     return {
-      range: { start, end }, platforms, total, placements, tags, avgCpc, otherSources,
+      range: { start, end }, platforms, total, placements, tags, avgCpc, otherSources, otherTags,
       unmatchedSpend: tags.filter(t => t.tag === UNMATCHED).reduce((s, t) => s + t.spend, 0),
       daily: rows.every(r => E.dayOnly(r['Reporting starts']) === E.dayOnly(r['Reporting ends'] || r['Reporting starts'])),
       hasClicks: (input.clicks || []).length > 0, hasOrderPlatform,
