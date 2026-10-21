@@ -538,7 +538,8 @@ function renderClickKpi(){
       ['Impresi','—',1],['CPM','—',1],['CPC',per(sp,sC)],
       ['CTR',pc(sC,im)],['CR',pc(od,sC)],
       ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
-      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
+      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1],
+      ...(RESULT.tags.some(t=>t.shopeeSrc)?[['Hanya perujuk Facebook/Instagram','dipakai untuk klik hilang',1]]:[])]),
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
       lost>0?`dari ${lostTags.length} tag · ${rp(k.wasted)} terbuang`:'tidak ada klik yang hilang',
       lost>0?[...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
@@ -606,7 +607,7 @@ function bindBreakdown(tableId,lookup,cols){
     tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
 }
-const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
+const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['shopeeFromMeta','Klik Masuk (FB+IG)',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
 $('attrSearch').oninput=()=>{ATTR_QUERY=$('attrSearch').value.trim().toLocaleLowerCase();if(RESULT)renderAttr()};
@@ -763,12 +764,22 @@ function renderAttr(){
 }
 /* Share of Meta link clicks that never reached Shopee. Negative means Shopee
    counted more clicks than Meta sent (organic or shared links). */
+/* Shopee clicks whose Perujuk is Facebook or Instagram: the clicks a Meta ad
+   could have sent. The tooltip splits them and names what came from
+   elsewhere (Others, WhatsApp, websites, …). */
+function inCell(t){
+  if(t.shopeeFromMeta==null||!t.shopeeSrc)return'<td class="num">—</td>';
+  const s=t.shopeeSrc;
+  // Clicks from elsewhere stay visible under the number: they are real
+  // visitors (shares, organic posts), just not ones the ad can claim.
+  return`<td class="num" title="Klik Shopee menurut Perujuk: Facebook ${nf(s.fb)} · Instagram ${nf(s.ig)} · sumber lain ${nf(s.other)}">${t.shopeeFromMeta?nf(t.shopeeFromMeta):'—'}${s.other?`<small class="src-other">+${nf(s.other)} lain</small>`:''}</td>`;
+}
 function lostCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=x!=null&&isFinite(x)?x:-1e15;y=y!=null&&isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}</span><span class="rs">${esc(t.reason)}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td>${inCell(t)}<td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.leak?t.leak.shopeeClicks:t.shopeeClicks)} klik Shopee${t.shopeeSrc?' dari Facebook/Instagram':''}`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?t.convRate.toFixed(2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+FILTER+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+FILTER+' · '+rows.length+' tag':'';

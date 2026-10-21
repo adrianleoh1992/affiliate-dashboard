@@ -263,6 +263,20 @@ async function main() {
     assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');
   });
 
+  test('arrived clicks count Facebook and Instagram, and list the rest underneath', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] },
+      { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Instagram'), from(3, 'Others'), from(4, 'WhatsApp')] }]);
+    assert.match(await page.locator('#tblMain thead').innerText(), /Klik Masuk \(FB\+IG\)/i);
+    const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
+    const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
+    assert.match(cells[await col('shopeeFromMeta')], /^2\s*\+2 lain$/);
+    assert.equal(cells[await col('shopeeClicks')], '4');
+    assert.equal(cells[await col('lostTotal')], '80%'); // 10 Meta clicks, 2 from Facebook/Instagram
+  });
+
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const row1 = aff('1'), row2 = aff('2');

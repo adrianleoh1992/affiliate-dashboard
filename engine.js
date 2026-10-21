@@ -603,7 +603,7 @@ function analyze(data, options) {
       tag: t, comm: 0, commDone: 0, commPending: 0, gmv: 0, qty: 0, refund: 0,
       orders: new Set(), doneOrders: new Set(), pendingOrders: new Set(),
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
-      days: new Set(), daily: dict(), shopeeClicks: 0, metaClicksWindow: 0, spendWindow: 0,
+      days: new Set(), daily: dict(), shopeeClicks: 0, shopeeSrc: { fb: 0, ig: 0, other: 0 }, metaClicksWindow: 0, spendWindow: 0,
       adNames: dict(), unitKeys: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
       attr: attrBucket(), attrProducts: { direct: dict(), indirect: dict(), unknown: dict() },
     };
@@ -853,12 +853,18 @@ function analyze(data, options) {
 
   /* ── Shopee click report ────────────────────────────────────────────── */
   const clickSrc = dict(), clickRegion = dict(), clickDaily = dict();
+  /* Shopee's "Perujuk" says where a click came from. Only Facebook and
+     Instagram can be Meta ad clicks; Others, WhatsApp, websites, … are
+     shares and organic posts, so they are counted apart. */
+  const hasClickSrc = fClk.some(r => pick(r, COL.clk.src));
+  const srcKind = v => { const x = String(v || '').trim().toLowerCase(); return x === 'facebook' ? 'fb' : x === 'instagram' ? 'ig' : 'other'; };
   fClk.forEach((r, i) => {
     const t = clickTagOf[i];
     const d = dayOnly(pick(r, COL.clk.time));
     if (t) {
       const b = bucket(t);
       b.shopeeClicks++;
+      b.shopeeSrc[srcKind(pick(r, COL.clk.src))]++;
       // Per tag AND per day, so a single date can be opened up to show which
       // tag lost its clicks that day rather than only the month-wide total.
       if (isDate(d)) {
@@ -1003,7 +1009,9 @@ function analyze(data, options) {
     const winSpend = b.spendWindow, winClicks = b.metaClicksWindow;
     let leak = null;
     if (clkStart && b.metaClicksWindow > 0) {
-      const shopee = b.shopeeClicks;
+      // Only clicks Shopee attributes to Facebook or Instagram can come from a
+      // Meta ad; shares (Others, WhatsApp, …) would otherwise hide a broken link.
+      const shopee = hasClickSrc ? b.shopeeSrc.fb + b.shopeeSrc.ig : b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
       const wasted = (winSpend / b.metaClicksWindow) * failed;
@@ -1076,6 +1084,7 @@ function analyze(data, options) {
        full-range spend by window-only Shopee clicks reads far too high, so the
        Shopee-side cost is matched to the click window on both sides. */
     const shopeeClicks = b.shopeeClicks;
+    const shopeeFromMeta = hasClickSrc ? b.shopeeSrc.fb + b.shopeeSrc.ig : null;
     const cpcShopee = shopeeClicks > 0 && winSpend > 0 ? winSpend / shopeeClicks : 0;
 
     /* Landing page views are shown with their cost but not used as a funnel
@@ -1097,7 +1106,7 @@ function analyze(data, options) {
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
-      shopeeClicks, cpcShopee, winSpend, winClicks, cpLpv, lostTotal,
+      shopeeClicks, shopeeFromMeta, shopeeSrc: hasClickSrc ? { ...b.shopeeSrc } : null, cpcShopee, winSpend, winClicks, cpLpv, lostTotal,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, capture, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
