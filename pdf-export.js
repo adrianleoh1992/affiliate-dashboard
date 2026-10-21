@@ -122,6 +122,15 @@
         headStyles: { fillColor: COLORS.accent, textColor: COLORS.white, fontStyle: 'bold', fontSize: options.fontSize || 8 },
         alternateRowStyles: { fillColor: COLORS.pale }, columnStyles,
         didParseCell: data => {
+          // oneLine tables shrink a too-wide body value (down to 5pt) rather
+          // than wrap it, so "Rp 1.500.000" never reads as two numbers.
+          if (options.oneLine && data.section === 'body') {
+            const cell = data.cell, size = cell.styles.fontSize;
+            const room = columnStyles[data.column.index].cellWidth - 2 * cell.styles.cellPadding - 0.2;
+            doc.setFont(font, 'normal');
+            const wide = Math.max(...cell.text.map(line => doc.getStringUnitWidth(line) * size / doc.internal.scaleFactor));
+            if (wide > room) cell.styles.fontSize = Math.max(5, Math.floor(size * room / wide * 10) / 10);
+          }
           if (options.statuses && data.section === 'body' && data.column.index === 1) {
             data.cell.styles.textColor = statusColors[options.statuses[data.row.index]] || COLORS.muted;
             data.cell.styles.fontStyle = 'bold';
@@ -355,7 +364,7 @@
       lost(t.lostTotal),
       split && t.attr ? integer(t.attr.direct.orders) : '-', split && t.attr ? rupiah(t.attr.direct.comm) : '-',
       split && t.attr ? integer(t.attr.indirect.orders) : '-', split && t.attr ? rupiah(t.attr.indirect.comm) : '-',
-    ]), [31, 12, 13, 10, 14, 13, 14, 12, 15, 16, 15, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7 });
+    ]), [31, 12, 13, 10, 14, 13, 14, 12, 15, 16, 15, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7, oneLine: true });
 
     if (mode !== 'ringkas') {
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
