@@ -92,9 +92,10 @@ const DailyStore = (() => {
       if (!entries.length || entries.length > MAX_BACKUP_RECORDS) bad('rincian pesanan tidak valid');
       const out = {};
       for (const [key, part] of entries) {
-        if (!agg().PART_KEY.test(key) || !Array.isArray(part) || part.length !== 8) bad('rincian pesanan tidak valid');
-        part.forEach((value, i) => number(value, 'rincian pesanan', i >= 6));
-        if (part[7] < 1 || part[6] > part[7]) bad('rincian pesanan tidak valid');
+        // 8 entries, or 11 with the direct/indirect split (DailyAgg.partAttr).
+        if (!agg().PART_KEY.test(key) || !Array.isArray(part) || (part.length !== 8 && part.length !== 11)) bad('rincian pesanan tidak valid');
+        part.forEach((value, i) => number(value, 'rincian pesanan', i === 6 || i === 7 || i === 10));
+        if (part[7] < 1 || part[6] > part[7] || (part.length === 11 && part[10] > 7)) bad('rincian pesanan tidak valid');
         out[key] = [...part];
       }
       return agg().sortedParts(out);

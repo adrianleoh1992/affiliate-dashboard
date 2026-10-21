@@ -236,6 +236,34 @@ test('a revised commission report replaces orders for the whole team', async () 
     where a.name = 'Revisi'`)), 0, 'commission days keep no fingerprints');
 });
 
+test('direct and indirect orders are shared, and an old-format day upgrades on re-upload', async () => {
+  const a = await browser('admin@example.com'), b = await browser('tim@example.com');
+  const acctA = await account(a, 'Atribusi');
+  const T = 'Tipe Pesanan', direct = 'Pesanan Produk dari Toko yang Dipromosikan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+  // Saved before the column was read: 8-entry parts, which stay valid.
+  await save(a, acctA, 'affiliate', [affiliate('d1', '2026-09-20'), affiliate('d2', '2026-09-20')], 'lama.csv');
+  const res = await save(a, acctA, 'affiliate', [affiliate('d1', '2026-09-20', { [T]: direct }),
+    affiliate('d2', '2026-09-20', { [T]: indirect }), affiliate('d2', '2026-09-20', { [T]: indirect, 'ID Produk': 'p-y' })], 'baru.csv');
+  assert.deepEqual(res, { added: 0, updated: 1, duplicates: 0 });
+  const acctB = await account(b, 'Atribusi');
+  const [day] = await b.local.range(acctB.id, 'affiliate', '2026-09-20', '2026-09-20');
+  const parts = Object.values(day.order_parts).map(A.partAttr).sort((x, y) => x.bits - y.bits);
+  assert.deepEqual(parts, [{ direct: 1234.5, indirect: 0, unknown: 0, bits: 1 }, { direct: 0, indirect: 2469, unknown: 0, bits: 2 }]);
+  assert.equal(day.comm, 1234.5 * 3, 'totals are unchanged by the split');
+  // The database checks the extra entries itself.
+  const acctId = psql(DB_URL, `select id from dashboard.accounts where name = 'Atribusi'`);
+  assert.throws(() => psql(DB_URL, `update dashboard.daily_affiliate set order_parts =
+    jsonb_set(order_parts, array[(select min(k) from jsonb_object_keys(order_parts) k)], '[1234.5,1234.5,0,10000,1,0,0,1,1234.5,0,8]')
+    where account_id = ${acctId}`), /check constraint/);
+  assert.throws(() => psql(DB_URL, `update dashboard.daily_affiliate set order_parts =
+    jsonb_set(order_parts, array[(select min(k) from jsonb_object_keys(order_parts) k)], '[1234.5,1234.5,0,10000,1,0,0,1,1234.5]')
+    where account_id = ${acctId}`), /check constraint/);
+  // Sanity: the same statement with a valid part is accepted.
+  psql(DB_URL, `update dashboard.daily_affiliate set order_parts =
+    jsonb_set(order_parts, array[(select min(k) from jsonb_object_keys(order_parts) k)], order_parts->(select min(k) from jsonb_object_keys(order_parts) k))
+    where account_id = ${acctId}`);
+});
+
 test('the database itself refuses the double counts and losses a browser check would catch', async () => {
   const a = await browser('admin@example.com'), b = await browser('tim@example.com');
   const acct = await account(a, 'Penjaga');
@@ -671,7 +699,9 @@ test('browser: sign in, save a CSV, and a teammate sees the same history', async
   let failed = 0;
   try {
     psql(DB_URL, require('node:fs').readFileSync(path.join(ROOT, 'tests/supabase-stub.sql'), 'utf8'));
-    psql(DB_URL, require('node:fs').readFileSync(path.join(ROOT, 'migrations/20261018000000_shared_daily_store.sql'), 'utf8'));
+    const fs = require('node:fs');
+    for (const file of fs.readdirSync(path.join(ROOT, 'migrations')).filter(f => f.endsWith('.sql')).sort())
+      psql(DB_URL, fs.readFileSync(path.join(ROOT, 'migrations', file), 'utf8'));
     psql(DB_URL, `insert into auth.users values ${Object.entries(USERS).map(([email, id]) => `('${id}', '${email}')`).join(', ')};
       insert into dashboard.team_members (user_id) values ('${USERS['admin@example.com']}'), ('${USERS['tim@example.com']}');`);
     for (const { name, fn } of cases) {

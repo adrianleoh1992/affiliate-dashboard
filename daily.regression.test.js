@@ -807,6 +807,33 @@ test('new backups preserve migrated legacy history without enabling unsafe incre
   store.close();
 });
 
+test('direct and indirect commission is kept per order, and backups carry it', async () => {
+  const E = require('./engine');
+  for (const v of ['Pesanan Produk dari Toko yang Dipromosikan', 'Pesanan dari Toko yang tidak Dipromosikan',
+    'Pesanan Langsung', 'Pesanan Tidak Langsung', 'Ordered in Same Shop', 'Different shop', 'Lainnya', '', null]) {
+    assert.equal(A.attrKind(v), E.attrKind(v), 'daily store and engine agree on ' + v);
+  }
+  const T = 'Tipe Pesanan', direct = 'Pesanan Produk dari Toko yang Dipromosikan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+  const [rec] = A.aggregateAffiliate([
+    affiliate('o1', '2026-08-01', { [T]: direct }), affiliate('o1', '2026-08-01', { [T]: direct, 'ID Produk': 'x' }),
+    affiliate('o2', '2026-08-01', { [T]: indirect }), affiliate('o3', '2026-08-01', { [T]: '?' }),
+    affiliate('o4', '2026-08-01', { [T]: direct, 'Status Pesanan': 'Dibatalkan' })]);
+  const byBits = Object.values(rec.order_parts).map(p => A.partAttr(p)).sort((x, y) => x.bits - y.bits);
+  assert.deepEqual(byBits, [{ direct: 0, indirect: 0, unknown: 0, bits: 0 }, { direct: 400, indirect: 0, unknown: 0, bits: 1 },
+    { direct: 0, indirect: 200, unknown: 0, bits: 2 }, { direct: 0, indirect: 0, unknown: 200, bits: 4 }]);
+  assert.equal(rec.comm, 800, 'totals ignore the split');
+  const [old] = A.aggregateAffiliate([affiliate('o1')]);
+  assert.equal(A.partAttr(Object.values(old.order_parts)[0]), null, 'no column, no split');
+
+  const { store, account } = await context();
+  await save(store, account, 'affiliate', [affiliate('o1', '2026-08-01', { [T]: direct }), affiliate('o2', '2026-08-01', { [T]: indirect })]);
+  const backup = await store.exportAccount(account.id);
+  const other = await store.ensureAccount('shopee', 'Restored');
+  await store.importAccount(other.id, backup, { replace: true });
+  const [day] = await store.range(other.id, 'affiliate');
+  assert.deepEqual(Object.values(day.order_parts).map(p => A.partAttr(p).bits).sort(), [1, 2]);
+});
+
 (async () => {
   let failures = 0;
   for (const { name, fn } of cases) {

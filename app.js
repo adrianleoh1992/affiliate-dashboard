@@ -243,7 +243,7 @@ function renderPeriod(){
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
 function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map(),adIdMap:adIdMap()},o);rememberAdIds(RESULT.learnedIds,RESULT.forgetIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
-function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderAttr();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -610,6 +610,40 @@ const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efe
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
+/* Direct vs indirect orders per tag. Shopee's report decides which is which;
+   rows it does not label clearly are shown as unknown, never split by guess. */
+let ATTR_ALL=false;
+function renderAttr(){
+  const A=RESULT.attribution||{},tot=A.total,cut=30;
+  const tb=$('tblAttr');
+  if(!A.column||!tot){
+    $('attrNote').textContent='';$('attrStrip').innerHTML='';$('btnAttrAll').classList.add('hidden');
+    tb.querySelector('thead').innerHTML='';tb.querySelector('tfoot').innerHTML='';
+    tb.querySelector('tbody').innerHTML='<tr><td class="tbl-empty">Laporan komisi ini tidak punya kolom tipe atribusi (langsung/tidak langsung), jadi belum bisa dipisah. Unggah laporan komisi Shopee terbaru yang memuat kolom itu.</td></tr>';
+    return;
+  }
+  const unk=tot.unknown.rows>0;
+  const share=a=>{const c=a.direct.comm+a.indirect.comm;return c>0?(a.indirect.comm/c*100).toFixed(0)+'%':'—'};
+  const cells=a=>`<td class="num">${nf(a.direct.orders)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${nf(a.indirect.orders)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
+    +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${nf(a.unknown.orders)} · ${rp(a.unknown.comm)}</td>`:'');
+  const head=['Tag','Pesanan langsung','Komisi langsung','Pesanan tidak langsung','Komisi tidak langsung','Porsi komisi tidak langsung'].concat(unk?['Tidak diketahui']:[]);
+  tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
+  const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
+    .sort((a,b)=>b.comm-a.comm||a.tag.localeCompare(b.tag));
+  const shown=ATTR_ALL?rows:rows.slice(0,cut);
+  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr)}</tr>`).join('')
+    ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
+  tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  const btn=$('btnAttrAll');btn.classList.toggle('hidden',rows.length<=cut);
+  btn.textContent=ATTR_ALL?`Tampilkan ${cut} teratas`:`Tampilkan semua ${rows.length} tag`;btn.setAttribute('aria-pressed',String(ATTR_ALL));
+  btn.onclick=()=>{ATTR_ALL=!ATTR_ALL;renderAttr()};
+  const both=tot.direct.comm+tot.indirect.comm;
+  $('attrStrip').innerHTML=[['Pesanan langsung',nf(tot.direct.orders)],['Komisi langsung',rp(tot.direct.comm)],['Pesanan tidak langsung',nf(tot.indirect.orders)],['Komisi tidak langsung',rp(tot.indirect.comm)],['Porsi komisi tidak langsung',both>0?(tot.indirect.comm/both*100).toFixed(0)+'%':'—']]
+    .concat(unk?[['Tidak diketahui',nf(tot.unknown.orders)+' pesanan']]:[])
+    .map(x=>`<div class="s"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
+  const odd=(A.unknownValues||[]).map(v=>`"${v.value}" (${nf(v.rows)} baris)`).join(', ');
+  $('attrNote').textContent=`Kolom "${A.column}"`+(tot.mixed?` · ${nf(tot.mixed)} pesanan campuran dihitung di kedua sisi`:'')+(odd?` · nilai tak dikenali: ${odd}`:'');
+}
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
