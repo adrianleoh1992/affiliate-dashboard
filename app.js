@@ -612,20 +612,19 @@ $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compac
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false;const ATTR_OPEN=new Set();
-/* Products behind one tag's orders, split by kind: the direct list is what the
-   link sold, the indirect list is what buyers chose instead. */
-function attrProductsHTML(t){
-  const P=t.attrProducts||{},top=15;
-  const list=(kind,title)=>{
-    const items=P[kind]||[];
-    if(!items.length)return`<div class="attr-prod"><h4>${title}</h4><p class="hint">Tidak ada.</p></div>`;
-    const more=items.length>top?`<p class="hint">+${nf(items.length-top)} produk lain (${rp(items.slice(top).reduce((s,p)=>s+p.comm,0))}).</p>`:'';
-    return`<div class="attr-prod"><h4>${title} · ${nf(items.length)} produk</h4><table><thead><tr><th>Produk</th><th class="num">Pesanan</th><th class="num">Qty</th><th class="num">Komisi</th></tr></thead><tbody>`
-      +items.slice(0,top).map(p=>`<tr><td><div class="nm">${esc(p.name)}</div>${p.shop?`<div class="rs">${esc(p.shop)}</div>`:''}</td><td class="num">${nf(p.orders)}</td><td class="num">${nf(p.qty)}</td><td class="num">${rp(p.comm)}</td></tr>`).join('')
-      +`</tbody></table>${more}</div>`;
-  };
-  return`<div class="daybox attr-box"><div class="attr-prods">${list('direct','Terjual langsung')}${list('indirect','Terjual tidak langsung')}${(P.unknown||[]).length?list('unknown','Tipe tidak diketahui'):''}</div></div>`;
+let ATTR_ALL=false;const ATTR_OPEN=new Map(); // tag → {kind, all}
+const ATTR_KIND={direct:'Terjual langsung',indirect:'Terjual tidak langsung',unknown:'Tipe tidak diketahui'},ATTR_TOP=5;
+/* Products behind one kind of a tag's orders: the direct list is what the
+   link sold, the indirect list is what buyers chose instead. Five first, the
+   rest on request, so a long indirect list does not push the table away. */
+function attrProductsHTML(t,kind,all){
+  const items=(t.attrProducts||{})[kind]||[];
+  if(!items.length)return`<div class="daybox attr-box"><div class="attr-prod"><h4>${ATTR_KIND[kind]}</h4><p class="hint">Tidak ada.</p></div></div>`;
+  const shown=all?items:items.slice(0,ATTR_TOP),rest=items.slice(ATTR_TOP);
+  const more=rest.length?`<button class="btn sm attr-more" data-more="${all?'less':'all'}">${all?'Tampilkan '+ATTR_TOP+' teratas':`Tampilkan semua ${nf(items.length)} produk (+${nf(rest.length)}, ${rp(rest.reduce((s,p)=>s+p.comm,0))})`}</button>`:'';
+  return`<div class="daybox attr-box"><div class="attr-prod"><h4>${ATTR_KIND[kind]} · ${esc(t.tag)} · ${nf(items.length)} produk</h4><table><thead><tr><th>Produk</th><th class="num">Pesanan</th><th class="num">Qty</th><th class="num">Komisi</th></tr></thead><tbody>`
+    +shown.map(p=>`<tr><td><div class="nm">${esc(p.name)}</div>${p.shop?`<div class="rs">${esc(p.shop)}</div>`:''}</td><td class="num">${nf(p.orders)}</td><td class="num">${nf(p.qty)}</td><td class="num">${rp(p.comm)}</td></tr>`).join('')
+    +`</tbody></table>${more}</div></div>`;
 }
 function renderAttr(){
   const A=RESULT.attribution||{},tot=A.total,cut=30;
@@ -638,28 +637,40 @@ function renderAttr(){
   }
   const unk=tot.unknown.rows>0;
   const share=a=>{const c=a.direct.comm+a.indirect.comm;return c>0?(a.indirect.comm/c*100).toFixed(0)+'%':'—'};
-  const cells=a=>`<td class="num">${nf(a.direct.orders)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${nf(a.indirect.orders)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
-    +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${nf(a.unknown.orders)} · ${rp(a.unknown.comm)}</td>`:'');
+  // In a tag row the order counts open that kind's products; the total row is plain.
+  const count=(a,kind,label,tag)=>tag&&a[kind].orders?`<button class="attr-open" data-kind="${kind}" aria-expanded="false" title="Lihat produk ${label}">${nf(a[kind].orders)}<span class="exp" aria-hidden="true">▸</span></button>`:nf(a[kind].orders);
+  const cells=(a,tag)=>`<td class="num">${count(a,'direct','langsung',tag)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${count(a,'indirect','tidak langsung',tag)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
+    +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${count(a,'unknown','tidak diketahui',tag)} · ${rp(a.unknown.comm)}</td>`:'');
   const head=['Tag','Pesanan langsung','Komisi langsung','Pesanan tidak langsung','Komisi tidak langsung','Porsi komisi tidak langsung'].concat(unk?['Tidak diketahui']:[]);
   tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
   const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
     .sort((a,b)=>b.comm-a.comm||a.tag.localeCompare(b.tag));
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
-  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr class="dayrow" data-attr="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false" title="Klik untuk melihat produk yang terjual"><td><span class="exp attr-exp" aria-hidden="true">▸</span>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr)}</tr>`).join('')
+  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr data-attr="${esc(t.tag)}"><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr,t.tag)}</tr>`).join('')
     ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
   tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  /* One detail row per tag, showing one kind at a time: the same number
+     closes it, the other number switches it. */
+  const show=(tr,kind,all)=>{
+    const tag=tr.dataset.attr,next=tr.nextElementSibling;
+    if(next&&next.classList.contains('daydetail'))next.remove();
+    tr.querySelectorAll('.attr-open').forEach(b=>{const on=b.dataset.kind===kind;b.classList.toggle('open',on);b.setAttribute('aria-expanded',String(on))});
+    if(!kind){ATTR_OPEN.delete(tag);return}
+    const t=RESULT.tags.find(x=>x.tag===tag);if(!t)return;
+    ATTR_OPEN.set(tag,{kind,all});
+    const det=document.createElement('tr');det.className='daydetail';
+    det.innerHTML=`<td colspan="${head.length}">${attrProductsHTML(t,kind,all)}</td>`;
+    tr.after(det);
+    const more=det.querySelector('.attr-more');
+    if(more)more.onclick=()=>show(tr,kind,more.dataset.more==='all');
+  };
   tb.querySelectorAll('tbody tr[data-attr]').forEach(tr=>{
-    const toggle=()=>{
-      const next=tr.nextElementSibling;
-      if(next&&next.classList.contains('daydetail')){next.remove();tr.classList.remove('open');tr.setAttribute('aria-expanded','false');ATTR_OPEN.delete(tr.dataset.attr);return}
-      const t=RESULT.tags.find(x=>x.tag===tr.dataset.attr);if(!t)return;
-      const det=document.createElement('tr');det.className='daydetail';
-      det.innerHTML=`<td colspan="${head.length}">${attrProductsHTML(t)}</td>`;
-      tr.after(det);tr.classList.add('open');tr.setAttribute('aria-expanded','true');ATTR_OPEN.add(tr.dataset.attr);
-    };
-    tr.onclick=toggle;
-    tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}};
-    if(ATTR_OPEN.has(tr.dataset.attr))toggle();
+    tr.querySelectorAll('.attr-open').forEach(b=>b.onclick=()=>{
+      const cur=ATTR_OPEN.get(tr.dataset.attr);
+      show(tr,cur&&cur.kind===b.dataset.kind?'':b.dataset.kind,false);
+    });
+    const was=ATTR_OPEN.get(tr.dataset.attr);
+    if(was)show(tr,was.kind,was.all);
   });
   const btn=$('btnAttrAll');btn.classList.toggle('hidden',rows.length<=cut);
   btn.textContent=ATTR_ALL?`Tampilkan ${cut} teratas`:`Tampilkan semua ${rows.length} tag`;btn.setAttribute('aria-pressed',String(ATTR_ALL));

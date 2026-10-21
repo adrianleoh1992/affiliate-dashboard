@@ -798,6 +798,13 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 .attr-prod .rs{font-size:11px;color:var(--text-dim)}
 .attr-prod .hint{margin:6px 0 0}
 @media (max-width:600px){
-  .attr-prod th.num{width:46px}.attr-prod th:last-child{width:62px}
+  .attr-prod th.num{width:56px}.attr-prod th:last-child{width:62px}
   .attr-prod th:nth-child(3),.attr-prod td:nth-child(3){display:none}
 }
+/* Order counts that open their kind's products under the row. */
+.attr-open{display:inline-flex;align-items:center;gap:6px;font:inherit;color:inherit;background:none;border:0;padding:2px 0;cursor:pointer;font-variant-numeric:tabular-nums}
+.attr-open:hover,.attr-open:focus-visible{color:var(--accent);text-decoration:underline}
+.attr-open .exp{transition:transform .15s}
+.attr-open.open .exp{transform:rotate(90deg);background:var(--accent);border-color:var(--accent);color:#fff}
+.attr-more{margin-top:8px}
+.attr-box .attr-prod{max-width:820px}

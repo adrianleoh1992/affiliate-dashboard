@@ -305,6 +305,40 @@
       paragraph('Tag terbesar: ' + a.concentration.topTag + ' | ROAS periode ' + ratio(a.concentration.topRoas) + '.', { size: 8 });
     }
 
+    // Direct vs indirect orders (Shopee "Tipe Pesanan"), as in the dashboard card.
+    const attribution = result.attribution || {};
+    section('Pesanan langsung vs tidak langsung', attribution.column
+      ? 'Langsung = produk dari toko yang dipromosikan; tidak langsung = pembeli belanja di toko lain setelah klik link. Komisi laporan (Selesai + Tertunda), tanpa batal dan belum dibayar.'
+      : null);
+    if (!attribution.column || !attribution.total) {
+      paragraph('Laporan komisi periode ini tidak punya kolom Tipe Pesanan, jadi pesanan belum bisa dipisah.');
+    } else {
+      const at = attribution.total, split = x => amount(x.direct.comm) + amount(x.indirect.comm);
+      const share = x => split(x) > 0 ? percent(amount(x.indirect.comm) / split(x) * 100) : '-';
+      metricGrid([
+        ['Pesanan langsung', integer(at.direct.orders), money(at.direct.comm) + ' komisi'],
+        ['Pesanan tidak langsung', integer(at.indirect.orders), money(at.indirect.comm) + ' komisi'],
+        ['Porsi komisi tidak langsung', share(at), at.unknown.rows ? integer(at.unknown.orders) + ' pesanan tanpa tipe' : 'Semua baris bertipe'],
+      ], 3);
+      const attrTags = result.tags.filter(t => t.attr && (t.attr.direct.rows || t.attr.indirect.rows || t.attr.unknown.rows))
+        .sort((x, z) => amount(z.comm) - amount(x.comm) || String(x.tag).localeCompare(String(z.tag)));
+      table(['Tag', 'Pesanan langsung', 'Komisi langsung', 'Pesanan tidak langsung', 'Komisi tidak langsung', 'Porsi tidak langsung'],
+        attrTags.map(t => [t.tag, integer(t.attr.direct.orders), money(t.attr.direct.comm), integer(t.attr.indirect.orders), money(t.attr.indirect.comm), share(t.attr)])
+          .concat([['Total akun', integer(at.direct.orders), money(at.direct.comm), integer(at.indirect.orders), money(at.indirect.comm), share(at)]]),
+        [50, 24, 28, 26, 28, 26], { numeric: [1, 2, 3, 4, 5] });
+      if (mode === 'lengkap') {
+        section('Produk terjual per tag, langsung dan tidak langsung', 'Lima produk teratas per jenis menurut komisi laporan; sisanya dijumlah di baris "produk lain".');
+        const kindName = { direct: 'Langsung', indirect: 'Tidak langsung', unknown: 'Tanpa tipe' };
+        const body = [];
+        attrTags.forEach(t => ['direct', 'indirect', 'unknown'].forEach(kind => {
+          const items = array(t.attrProducts && t.attrProducts[kind]);
+          items.slice(0, 5).forEach(p => body.push([t.tag + '\n' + kindName[kind], p.name + (p.shop ? '\n' + p.shop : ''), integer(p.orders), money(p.comm)]));
+          if (items.length > 5) body.push([t.tag + '\n' + kindName[kind], '+' + integer(items.length - 5) + ' produk lain', '-', money(items.slice(5).reduce((sum, p) => sum + amount(p.comm), 0))]);
+        }));
+        table(['Tag / jenis', 'Produk / toko', 'Pesanan', 'Komisi'], body, [40, 98, 20, 24], { numeric: [2, 3] });
+      }
+    }
+
     if (mode !== 'ringkas') {
       section('Efisiensi tag', 'CPC Shopee memakai biaya pada jendela laporan klik. Pesanan dapat muncul pada lebih dari satu tag; gunakan pesanan unik portofolio untuk total.');
       table(['Tag', 'Klik Meta / CPC', 'Klik Shopee / CPC', 'Pesanan / biaya', 'ROAS / ROI'], tags.map(t => [

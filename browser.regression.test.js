@@ -120,19 +120,37 @@ async function main() {
     assert.match(head, /Pesanan langsung/i); assert.match(head, /Komisi tidak langsung/i);
     assert.doesNotMatch(head, /Tidak diketahui/i, 'no unknown column when every row is labelled');
     const alpha = await page.locator('#tblAttr tbody tr', { hasText: 'Alpha' }).innerText();
-    assert.deepEqual(alpha.split('\t').map(x => x.trim().replace(/^▸/, '')), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
+    assert.deepEqual(alpha.split('\t').map(x => x.replace(/▸/g, '').trim()), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
     const total = await page.locator('#tblAttr tfoot tr').innerText();
     assert.deepEqual(total.split('\t').map(x => x.trim()), ['Total akun', '1', 'Rp200', '3', 'Rp600', '75%']);
     assert.match(await page.locator('#attrNote').innerText(), /Tipe Pesanan/);
-    // Clicking a tag opens the products sold under it, split by kind.
-    await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').click();
-    const detail = await page.locator('#tblAttr tbody tr.daydetail').innerText();
-    assert.match(detail, /Terjual langsung · 1 produk[\s\S]*Synthetic Product 1/i);
-    assert.match(detail, /Terjual tidak langsung · 2 produk[\s\S]*Synthetic Product 2[\s\S]*Synthetic Product 3/i);
-    assert.doesNotMatch(detail, /Synthetic Product 4/, 'another tag\'s products stay out');
-    assert.equal(await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').getAttribute('aria-expanded'), 'true');
-    await page.locator('#tblAttr tbody tr[data-attr="Alpha"]').press('Enter');
+    // Each order count opens that kind's products under the row; the other count switches, the same one closes.
+    const row = page.locator('#tblAttr tbody tr[data-attr="Alpha"]');
+    await row.locator('button[data-kind="indirect"]').click();
+    let detail = await page.locator('#tblAttr tbody tr.daydetail').innerText();
+    assert.match(detail, /Terjual tidak langsung · Alpha · 2 produk[\s\S]*Synthetic Product 2[\s\S]*Synthetic Product 3/i);
+    assert.doesNotMatch(detail, /Synthetic Product 1|Synthetic Product 4/, 'only this kind, only this tag');
+    assert.equal(await row.locator('button[data-kind="indirect"]').getAttribute('aria-expanded'), 'true');
+    await row.locator('button[data-kind="direct"]').click();
+    assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 1);
+    assert.match(await page.locator('#tblAttr tbody tr.daydetail').innerText(), /Terjual langsung · Alpha · 1 produk[\s\S]*Synthetic Product 1/i);
+    await row.locator('button[data-kind="direct"]').press('Enter');
     assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 0);
+    assert.equal(await page.locator('#tblAttr tfoot button').count(), 0, 'the total row is not a link');
+  });
+
+  test('a long product list shows five first and the rest on request', async page => {
+    const T = 'Tipe Pesanan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+    await upload(page, [{ name: 'affiliate.csv', rows: Array.from({ length: 8 }, (_, i) => ({ ...aff(String(i + 1)), [T]: indirect })) }]);
+    const row = page.locator('#tblAttr tbody tr[data-attr="Alpha"]');
+    await row.locator('button[data-kind="indirect"]').click();
+    const products = () => page.locator('#tblAttr tr.daydetail tbody tr').count();
+    assert.equal(await products(), 5);
+    await page.locator('#tblAttr .attr-more').click();
+    assert.equal(await products(), 8);
+    assert.match(await page.locator('#tblAttr .attr-more').innerText(), /5 teratas/);
+    await page.locator('#tblAttr .attr-more').click();
+    assert.equal(await products(), 5);
   });
 
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
