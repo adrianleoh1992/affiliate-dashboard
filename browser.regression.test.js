@@ -198,6 +198,20 @@ async function main() {
     assert.match(await page.locator('#uploadStatus').innerText(), /Placement 3/);
   });
 
+  test('an ad no tag claims raises a notice and can be matched by hand', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Bravo')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Zulu', 300)] }]);
+    assert.match(await page.locator('#banners').innerText(), /1 iklan belum cocok ke tag Shopee/);
+    await page.locator('#btnFixMatch').click();
+    const pick = page.locator('#tblMatch select[data-pick-ad="Zulu"]');
+    // Bravo has commission and no ad, so it is offered first.
+    assert.match(await pick.locator('optgroup').first().innerText(), /Bravo/);
+    await pick.selectOption('Bravo');
+    await page.waitForFunction(() => !RESULT.matchLog.some(m => m.adName === 'Zulu' && m.confidence < .5));
+    assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), true);
+    assert.doesNotMatch(await page.locator('#banners').innerText(), /belum cocok/);
+  });
+
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
     assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);

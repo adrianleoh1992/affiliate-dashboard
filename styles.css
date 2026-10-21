@@ -810,3 +810,6 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 #plcCard .sub-head{font-size:13px;margin:16px 0 6px}
 #plcCard td.est{font-style:italic;opacity:.8}
 #plcCard #btnPlcAll,#plcCard #btnPlcTags{margin-top:8px}
+.pick-manual{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px}
+.pick-manual select{max-width:100%}
+.banner #btnFixMatch{margin-left:6px}

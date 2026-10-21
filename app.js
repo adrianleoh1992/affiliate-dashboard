@@ -267,7 +267,7 @@ function renderCalibration(){
   // Lag is the single most decision-changing setting, so show whether the
   // current value actually matches this account's observed behaviour.
   let unstable=0;
-  try{if(!STAB)STAB=E.stability({...DATA,tagMap:map(),adIdMap:adIdMap()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
+  try{if(!STAB)STAB=E.stability({...DATA,ads:adsRows(),tagMap:map(),adIdMap:adIdMap()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
   const warn=!L.matches||unstable>0;
   el.className='calibration'+(warn?' warn':'');
   const parts=[];
@@ -365,7 +365,7 @@ function renderGaps(){
       <div class="gap-runs">${r.runs.map(x=>`<span class="gap-chip">${x.start}${x.n>1?' → '+x.end:''}<em>${x.n} hari</em></span>`).join('')}</div>
     </div>`).join('');
 }
-function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!adsRows().length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
+function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!adsRows().length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag kehilangan lebih dari 30% klik.</b> Perkiraan biaya terbuang ${rp(k.wasted)} — periksa link.`]);const um=unmatchedAds();if(um.length){const sp=um.reduce((s,m)=>s+m.spend,0);b.push(['warn','🔗',`<b>${um.length} iklan belum cocok ke tag Shopee</b> (biaya ${rp(sp)}): ${um.slice(0,3).map(m=>esc(m.adName)).join(', ')}${um.length>3?` dan ${um.length-3} lainnya`:''}. Biasanya nama iklan berbeda dari tag di link. <button class="btn sm" type="button" id="btnFixMatch">Cocokkan sekarang</button>`])}$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');if($('btnFixMatch'))$('btnFixMatch').onclick=openMap;$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
 // Four cards, matching the mind map. Every number that used to sit in its own
 // KPI tile is still here — it moved one level down, into the card it belongs to.
 // Eight tiles of equal weight meant nothing stood out; these four have a
@@ -1059,22 +1059,47 @@ function suggestHtml(m,twin){const list=(m.candidates&&m.candidates.length)?m.ca
   const key=twin&&m.adId?'id:'+m.adId:m.adName.trim();
   const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
   return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-key="${esc(key)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
-$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptKey||b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
-  try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
+function acceptMatch(key,ad,tag){const m=map();m[key||ad.trim()]=tag;
+  try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(ad+' → '+tag);
   // Keep the rows below in step: Simpan rebuilds the map from them, and would
   // otherwise drop the mapping just accepted.
-  $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()});
+  $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(b)acceptMatch(b.dataset.acceptKey,b.dataset.acceptAd,b.dataset.acceptTag)});
+$('tblMatch').addEventListener('change',e=>{const s=e.target.closest('select[data-pick-key]');if(s&&s.value)acceptMatch(s.dataset.pickKey,s.dataset.pickAd,s.value)});
+/* Ads with spend that no Shopee tag claims. Their spend sits on a tag of
+   their own name with no clicks or commission, so it reads as pure loss. */
+function unmatchedAds(){return RESULT.matchLog.filter(m=>m.confidence<.5&&m.spend>0).sort((a,b)=>b.spend-a.spend)}
+/* Tags an unmatched ad can be joined to: every sub_id Shopee reported.
+   Those with clicks or commission but no ad come first: an ad whose name
+   was mistyped usually left exactly such a tag behind. */
+function pickableTags(){
+  const shopee=RESULT.tags.filter(t=>t.comm>0||t.shopeeClicks>0||t.orders>0);
+  const orphan=shopee.filter(t=>!(t.spend>0)).sort((a,b)=>(b.shopeeClicks||0)-(a.shopeeClicks||0)||b.comm-a.comm);
+  const rest=shopee.filter(t=>t.spend>0).sort((a,b)=>a.tag.localeCompare(b.tag));
+  return {orphan,rest};
+}
+function pickHtml(m,twin){
+  const key=twin&&m.adId?'id:'+m.adId:m.adName.trim(),P=pickableTags();
+  if(!P.orphan.length&&!P.rest.length)return'';
+  const opt=t=>`<option value="${esc(t.tag)}">${esc(t.tag)}${t.shopeeClicks?' · '+nf(t.shopeeClicks)+' klik':''}${t.comm?' · '+rp(t.comm):''}</option>`;
+  return `<label class="pick-manual"><span>Pilih tag manual:</span><select data-pick-key="${esc(key)}" data-pick-ad="${esc(m.adName)}"><option value="">— pilih tag —</option>`
+    +(P.orphan.length?`<optgroup label="Tag tanpa iklan (kemungkinan pasangannya)">${P.orphan.map(opt).join('')}</optgroup>`:'')
+    +(P.rest.length?`<optgroup label="Tag lain">${P.rest.map(opt).join('')}</optgroup>`:'')+'</select></label>';
+}
 /* A mapping whose tag catches under ~25% of the ad's Meta link clicks sends
    most of its traffic to another sub_id, even when the name matches exactly. */
 const lowCapture=m=>m.confidence>=.5&&!!(m.capture&&m.capture.low);
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
   const twin=repeatedNames(RESULT.matchLog),rank=m=>lowCapture(m)?Math.min(m.confidence,.49):m.confidence;
-  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>rank(a)-rank(b)).map(m=>{
+  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>{
+    // Unmatched ads that spent money are the ones to fix first, biggest first.
+    const ua=a.confidence<.5&&a.spend>0,ub=b.confidence<.5&&b.spend>0;
+    return ua!==ub?(ua?-1:1):ua?b.spend-a.spend:rank(a)-rank(b)}).map(m=>{
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
     const cap=lowCapture(m)?`<br><small class="leak-bad">Klik masuk rendah: klik Shopee di tag ini hanya ${Math.round(m.capture.pct)}% dari klik Meta selama iklan jalan. Cek link iklan.</small>`:'';
     return `<tr><td><b>${esc(m.adName)}</b>${twin.has(m.adName)?`<br><small>${esc(whichAd(m))}</small>`:''}</td><td><span class="pill">${esc(m.tag)}</span>${cap}</td>
-      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}${m.confidence<.5&&m.spend>0?pickHtml(m,twin.has(m.adName)):''}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
   }).join('');
   // The mapping table now lives behind one button, so that button has to say
