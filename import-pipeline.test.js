@@ -214,6 +214,24 @@ test('missing optional counters are visible warnings', () => {
   assert.ok(hasIssue(r, 'empty_optional_number'));
 });
 
+test('export without Link clicks reads Meta clicks from link_click Results', () => {
+  const base = changes => { const row = ads(changes); delete row['Link clicks']; return row; };
+  const r = parse([
+    base({ 'Results': '42', 'Result indicator': 'actions:link_click', 'Unique link clicks': '40' }),
+    base({ 'Ad name': 'quiet', 'Results': '', 'Result indicator': '', 'Unique link clicks': '' }),
+    base({ 'Ad name': 'lpv', 'Results': '7', 'Result indicator': 'actions:landing_page_view', 'Unique link clicks': '9' }),
+  ]);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.rows.map(row => row['Link clicks']), [42, 0, '']);
+  assert.ok(hasIssue(r, 'link_clicks_from_results'));
+  assert.ok(hasIssue(r, 'link_clicks_unknown'));
+  assert.ok(!hasIssue(r, 'optional_columns_missing') || !r.issues.find(i => i.code === 'optional_columns_missing').message.includes('Link clicks'));
+  const result = E.analyze({ affiliate: [], ads: r.rows, clicks: [] });
+  assert.equal(result.tags.reduce((sum, tag) => sum + tag.clicks, 0), 42);
+  const days = A.aggregate('ads', r.rows);
+  assert.equal(days.reduce((sum, day) => sum + day.clicks, 0), 42);
+});
+
 test('Shopee optional blank refunds and double-dash completion markers keep valid orders readable', () => {
   const rows = [
     aff({ 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),

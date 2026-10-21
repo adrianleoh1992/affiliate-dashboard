@@ -170,6 +170,17 @@
     }
     if (errors) return finish(true);
     if (!records.length) { issue('error', 'no_rows', 'Header terbaca, tetapi laporan tidak berisi baris data.'); return finish(true); }
+    // Some Meta exports (seen on Beautyismust, Oct 2026) carry no "Link clicks"
+    // column, only Results with "Result indicator" = actions:link_click. That
+    // Results figure is the same counter, so it stands in for Link clicks.
+    // "Unique link clicks" is not used: it counts people, not clicks.
+    const clicksFromResults = result.type === 'ads' && !hasAny(col.clicks)
+      && fields.includes('Results') && fields.includes('Result indicator');
+    let otherResultRows = 0;
+    if (clicksFromResults) {
+      fields.push(col.clicks[0]);
+      issue('warning', 'link_clicks_from_results', 'Kolom Link clicks tidak ada di ekspor ini. Klik Meta diambil dari kolom Results pada baris dengan Result indicator = link_click. Tambahkan kolom Link clicks pada ekspor berikutnya agar lebih pasti.');
+    }
     const optional = result.type === 'affiliate' ? ['gmv', 'qty', 'tag', 'clickAt'] : result.type === 'ads' ? ['clicks', 'impr', 'reach', 'lpv'] : [];
     const missing = optional.filter(key => !hasAny(col[key])).map(key => col[key][0]);
     if (missing.length) issue('warning', 'optional_columns_missing', `Kolom pelengkap tidak tersedia: ${missing.join(', ')}. Metrik terkait belum lengkap; sertakan kolom ini pada ekspor berikutnya.`);
@@ -229,6 +240,12 @@
           if (number.ambiguous) rowIssue('warning', 'ambiguous_number', `${field} "${raw}" dibaca sebagai ${number.value}. Verifikasi pemisah desimal/ribuan pada sumber; gunakan format tanpa pemisah ribuan untuk menghilangkan ambiguitas.`, field, raw);
         }
       }
+      if (clicksFromResults) {
+        const indicator = String(row['Result indicator'] || '').trim();
+        if (/(^|[:.])link_click$/.test(indicator)) row[col.clicks[0]] = typeof row.Results === 'number' ? row.Results : 0;
+        else if (!indicator && typeof row.Results !== 'number') row[col.clicks[0]] = 0;
+        else { row[col.clicks[0]] = ''; otherResultRows++; }
+      }
       // A commission column may be present but every alternative is empty.
       if (result.type === 'affiliate' && !excluded && !col.comm.some(name => typeof row[name] === 'number')) rowIssue('error', 'missing_commission', 'komisi kosong atau tidak valid. Isi komisi yang benar, termasuk angka 0 jika nol.', col.comm[0], E.pick(row, col.comm) || '');
       if (col.tag && !E.pick(row, col.tag)) rowIssue('warning', 'untagged_row', `tag kosong; ${result.type === 'affiliate' ? 'pesanan masuk kelompok (tanpa tag)' : 'klik tetap masuk total, tetapi tidak dapat dicocokkan ke tag'}.`, col.tag[0], '');
@@ -240,6 +257,7 @@
         if (!end || day > end) end = day;
       }
     });
+    if (otherResultRows) issue('warning', 'link_clicks_unknown', `${otherResultRows} baris memakai Results selain link_click, sehingga Klik Meta baris tersebut tidak diketahui. Ekspor ulang dengan kolom Link clicks.`, { column: col.clicks[0] });
     if (start) result.period = { start, end };
     if (!result.rows.length && !nonDaily) issue('error', 'no_valid_rows', 'Tidak ada baris valid yang bisa dimuat. Perbaiki temuan di atas lalu impor ulang.');
     return finish(nonDaily);
