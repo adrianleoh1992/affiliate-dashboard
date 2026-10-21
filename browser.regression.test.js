@@ -111,6 +111,27 @@ async function main() {
   const cases = [];
   const test = (name, fn) => cases.push({ name, fn });
 
+  test('direct and indirect orders show per tag with an account total', async page => {
+    const T = 'Tipe Pesanan', direct = 'Pesanan Produk dari Toko yang Dipromosikan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+    await upload(page, [{ name: 'affiliate.csv', rows: [
+      { ...aff('1', 'Alpha'), [T]: direct }, { ...aff('2', 'Alpha'), [T]: indirect },
+      { ...aff('3', 'Alpha'), [T]: indirect }, { ...aff('4', 'Bravo'), [T]: indirect }] }]);
+    const head = await page.locator('#tblAttr thead').innerText();
+    assert.match(head, /Pesanan langsung/i); assert.match(head, /Komisi tidak langsung/i);
+    assert.doesNotMatch(head, /Tidak diketahui/i, 'no unknown column when every row is labelled');
+    const alpha = await page.locator('#tblAttr tbody tr', { hasText: 'Alpha' }).innerText();
+    assert.deepEqual(alpha.split('\t').map(x => x.trim()), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
+    const total = await page.locator('#tblAttr tfoot tr').innerText();
+    assert.deepEqual(total.split('\t').map(x => x.trim()), ['Total akun', '1', 'Rp200', '3', 'Rp600', '75%']);
+    assert.match(await page.locator('#attrNote').innerText(), /Tipe Pesanan/);
+  });
+
+  test('a commission report without an attribution column says so instead of showing zeros', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
+    assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);
+    assert.equal(await page.locator('#tblAttr tfoot').innerText(), '');
+  });
+
   test('CSV upload renders metrics and sorts spend from highest to lowest', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Bravo')] },

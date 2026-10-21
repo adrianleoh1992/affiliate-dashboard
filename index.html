@@ -159,6 +159,15 @@
         <div class="table-tools"><label for="tagSearch">Cari tag atau alasan</label><input id="tagSearch" type="search" placeholder="Ketik nama tag, status, atau alasan…" autocomplete="off"><span id="tagSearchCount" class="hint"></span><button class="btn sm" id="btnMetrics" aria-pressed="false">Semua metrik</button></div>
         <div class="tscroll"><table class="compact-columns" id="tblMain"><thead></thead><tbody></tbody></table></div>
       </div>
+      <div class="card" data-print="tags" id="attrCard">
+        <div class="card-head"><h2>Pesanan langsung vs tidak langsung</h2>
+          <span class="sub" id="attrNote"></span>
+          <button class="btn sm hidden" id="btnAttrAll" aria-pressed="false">Tampilkan semua tag</button></div>
+        <p class="hint">Dari kolom "Tipe Pesanan" Shopee. Langsung: pesanan produk dari toko yang dipromosikan di link. Tidak langsung: setelah klik link tag ini, pembeli belanja di toko lain.
+          Komisi = yang dilaporkan Shopee (Selesai + Tertunda), tanpa pesanan batal dan belum dibayar.</p>
+        <div id="attrStrip" class="strip"></div>
+        <div class="tscroll"><table id="tblAttr"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+      </div>
       <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
           <span class="sub" id="adunitNote"></span></div>

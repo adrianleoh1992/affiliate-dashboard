@@ -472,4 +472,55 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   assert.match(out, /^﻿"Akun","Periode awal","Periode akhir","Nama iklan","Ad ID",/, 'the header row is plain text');
 }
 
+{
+  // Direct vs indirect orders per tag, read from Shopee's attribution column.
+  const T = 'Tipe Atribusi';
+  for (const [v, k] of [
+    // Shopee's own wording, column "Tipe Pesanan" (report of 21 Oct 2026).
+    ['Pesanan Produk dari Toko yang Dipromosikan', 'direct'], ['Pesanan dari Toko yang tidak Dipromosikan', 'indirect'],
+    ['Pesanan Langsung', 'direct'], ['Pesanan Tidak Langsung', 'indirect'],
+    ['Pesanan di Toko yang Sama', 'direct'], ['Pesanan di Toko Berbeda', 'indirect'],
+    ['Direct', 'direct'], ['Indirect', 'indirect'], ['Ordered in Same Shop', 'direct'],
+    ['Ordered in Different Shop', 'indirect'], ['', ''], ['Lainnya', ''], ['XTRA', '']]) {
+    assert.equal(E.attrKind(v), k, v);
+  }
+  const real = analyze({ affiliate: [aff('o1', 9, { 'Tipe Pesanan': 'Pesanan dari Toko yang tidak Dipromosikan' })] });
+  assert.equal(real.attribution.column, 'Tipe Pesanan');
+  assert.equal(real.attribution.total.indirect.orders, 1);
+  const r = analyze({ affiliate: [
+    aff('o1', 100, { [T]: 'Pesanan Langsung' }),
+    aff('o1', 50, { [T]: 'Pesanan Langsung' }),                 // second item, same order
+    aff('o2', 30, { [T]: 'Pesanan Tidak Langsung' }),
+    aff('o3', 20, { [T]: 'Pesanan Tidak Langsung', 'Status Pesanan': 'Tertunda' }),
+    aff('o4', 40, { [T]: 'Pesanan Langsung', 'Status Pesanan': 'Dibatalkan' }),  // excluded
+    aff('o5', 10, { [T]: 'Pesanan Langsung', 'Tag_link1': 'B' }),
+    aff('o5', 5, { [T]: 'Pesanan Tidak Langsung', 'Tag_link1': 'B' }),          // mixed order
+    aff('o6', 7, { [T]: '???', 'Tag_link1': 'B' }),                           // never guessed
+  ] }, { pendingFactor: 0.5 });
+  assert.equal(r.attribution.column, T);
+  const a = r.tags.find(t => t.tag === 'A').attr;
+  assert.equal(a.direct.orders, 1); near(a.direct.comm, 150);
+  assert.equal(a.indirect.orders, 2); near(a.indirect.comm, 50); near(a.indirect.commEff, 40);
+  assert.equal(a.unknown.rows, 0); assert.equal(a.mixed, 0);
+  const b = r.tags.find(t => t.tag === 'B');
+  assert.equal(b.attr.mixed, 1); assert.equal(b.attr.direct.orders, 1); assert.equal(b.attr.indirect.orders, 1);
+  assert.equal(b.attr.unknown.orders, 1); near(b.attr.unknown.comm, 7);
+  assert.equal(b.attrDirectOrders, 1); near(b.attrIndirectComm, 5);
+  const tot = r.attribution.total;
+  assert.equal(tot.direct.orders, 2); assert.equal(tot.indirect.orders, 3); assert.equal(tot.mixed, 1);
+  near(tot.direct.comm + tot.indirect.comm + tot.unknown.comm, r.kpi.comm);
+  assert.deepEqual(r.attribution.unknownValues, [{ value: '???', rows: 1 }]);
+
+  // A header Shopee might rename is still found by its word.
+  assert.equal(analyze({ affiliate: [aff('o1', 1, { 'Atribusi Pesanan': 'Langsung' })] }).attribution.column, 'Atribusi Pesanan');
+
+  // No column: nothing is invented, and the export leaves the cells empty.
+  const none = analyze({ affiliate: [aff('o1')] });
+  assert.equal(none.attribution.column, '');
+  assert.equal(none.tags[0].attrDirectOrders, null);
+  const X = require('./export-data.js');
+  assert.match(X.csv(none), /"Order","Pesanan langsung","Komisi langsung"/);
+  assert.match(X.csv(r), /"Pesanan tidak langsung"/);
+}
+
 console.log('engine regression tests: PASS');
