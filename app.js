@@ -609,10 +609,11 @@ function bindBreakdown(tableId,lookup,cols){
 const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER)&&(!TAG_QUERY||[t.tag,t.label,t.reason].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
+$('attrSearch').oninput=()=>{ATTR_QUERY=$('attrSearch').value.trim().toLocaleLowerCase();if(RESULT)renderAttr()};
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false,ATTR_SORT=null;const ATTR_OPEN=new Map(); // tag → {kind, all}
+let ATTR_ALL=false,ATTR_SORT=null,ATTR_QUERY='';const ATTR_OPEN=new Map(); // tag → {kind, all}
 const ATTR_KIND={direct:'Terjual langsung',indirect:'Terjual tidak langsung',unknown:'Tipe tidak diketahui'},ATTR_TOP=5;
 /* Products behind one kind of a tag's orders: the direct list is what the
    link sold, the indirect list is what buyers chose instead. Five first, the
@@ -630,11 +631,12 @@ function renderAttr(){
   const A=RESULT.attribution||{},tot=A.total,cut=30;
   const tb=$('tblAttr');
   if(!A.column||!tot){
-    $('attrNote').textContent='';$('attrStrip').innerHTML='';$('btnAttrAll').classList.add('hidden');
+    $('attrNote').textContent='';$('attrStrip').innerHTML='';$('btnAttrAll').classList.add('hidden');$('attrTools').classList.add('hidden');
     tb.querySelector('thead').innerHTML='';tb.querySelector('tfoot').innerHTML='';
     tb.querySelector('tbody').innerHTML='<tr><td class="tbl-empty">Laporan komisi ini tidak punya kolom tipe atribusi (langsung/tidak langsung), jadi belum bisa dipisah. Unggah laporan komisi Shopee terbaru yang memuat kolom itu.</td></tr>';
     return;
   }
+  $('attrTools').classList.remove('hidden');
   const unk=tot.unknown.rows>0;
   const share=a=>{const c=a.direct.comm+a.indirect.comm;return c>0?(a.indirect.comm/c*100).toFixed(0)+'%':'—'};
   // In a tag row the order counts open that kind's products; the total row is plain.
@@ -653,7 +655,8 @@ function renderAttr(){
     const go=()=>{const k=th.dataset.sort;ATTR_SORT=S&&S.key===k?{key:k,dir:-S.dir}:{key:k,dir:k==='tag'?1:-1};renderAttr()};
     th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};
   });
-  const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
+  const withAttr=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows));
+  const rows=withAttr.filter(t=>!ATTR_QUERY||t.tag.toLocaleLowerCase().includes(ATTR_QUERY))
     .sort((a,b)=>{
       if(!S)return b.comm-a.comm||a.tag.localeCompare(b.tag);
       const x=val[S.key](a),y=val[S.key](b);
@@ -661,8 +664,10 @@ function renderAttr(){
     });
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
   tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr data-attr="${esc(t.tag)}"><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr,t.tag)}</tr>`).join('')
-    ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
-  tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+    ||`<tr><td colspan="${head.length}" class="tbl-empty">${ATTR_QUERY?'Tidak ada tag yang cocok dengan pencarian.':'Tidak ada pesanan pada periode ini.'}</td></tr>`;
+  // The total stays the whole account, whatever the search shows.
+  tb.querySelector('tfoot').innerHTML=withAttr.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  $('attrSearchCount').textContent=ATTR_QUERY?rows.length+' dari '+withAttr.length+' tag':withAttr.length+' tag';
   /* One detail row per tag, showing one kind at a time: the same number
      closes it, the other number switches it. */
   const show=(tr,kind,all)=>{

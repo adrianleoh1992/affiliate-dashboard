@@ -163,6 +163,23 @@ async function main() {
     assert.equal(await products(), 5);
   });
 
+  test('the direct/indirect table filters by tag search and keeps the account total', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const typed = (id, tag, kind) => ({ ...aff(id, tag), 'Tipe Pesanan': kind });
+    await upload(page, [{ name: 'affiliate.csv', rows: [typed('1', 'Alpha', 'Pesanan Produk dari Toko yang Dipromosikan'),
+      typed('2', 'Bravo', 'Pesanan dari Toko yang tidak Dipromosikan'), typed('3', 'Charlie', 'Pesanan dari Toko yang tidak Dipromosikan')] }]);
+    const tags = () => page.locator('#tblAttr tbody tr[data-attr]').evaluateAll(rows => rows.map(r => r.dataset.attr).sort());
+    assert.deepEqual(await tags(), ['Alpha', 'Bravo', 'Charlie']);
+    await page.fill('#attrSearch', 'brav');
+    assert.deepEqual(await tags(), ['Bravo']);
+    assert.match(await page.locator('#attrSearchCount').innerText(), /1 dari 3 tag/);
+    assert.match(await page.locator('#tblAttr tfoot').innerText(), /Total akun/);
+    await page.fill('#attrSearch', 'zzz');
+    assert.match(await page.locator('#tblAttr tbody').innerText(), /Tidak ada tag yang cocok/);
+    await page.fill('#attrSearch', '');
+    assert.equal((await tags()).length, 3);
+  });
+
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
     assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);
