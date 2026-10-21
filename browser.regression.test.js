@@ -181,6 +181,22 @@ async function main() {
     assert.deepEqual(totals, { comm: 400, spend: 400 });
   });
 
+  test('the decision table shows LP views, their cost and the share of clicks lost before Shopee', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] },
+      { name: 'clicks.csv', rows: [1, 2, 3, 4].map(i => ({ ...click(), 'Klik ID': 'k' + i })) }]);
+    const head = await page.locator('#tblMain thead').innerText();
+    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
+    const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
+    const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
+    assert.equal(cells[await col('lpv')], '8');
+    assert.equal(cells[await col('cpLpv')], '13'); // Rp100 / 8 LP views
+    assert.equal(cells[await col('lostTotal')], '60%'); // 10 Meta clicks, 4 reached Shopee
+    await page.locator('#tblMain th[data-sort="lostTotal"]').click();
+    assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');
+  });
+
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const row1 = aff('1'), row2 = aff('2');

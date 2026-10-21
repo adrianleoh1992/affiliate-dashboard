@@ -340,13 +340,16 @@
     }
 
     if (mode !== 'ringkas') {
-      section('Efisiensi tag', 'CPC Shopee memakai biaya pada jendela laporan klik. Pesanan dapat muncul pada lebih dari satu tag; gunakan pesanan unik portofolio untuk total.');
-      table(['Tag', 'Klik Meta / CPC', 'Klik Shopee / CPC', 'Pesanan / biaya', 'ROAS / ROI'], tags.map(t => [
+      section('Efisiensi tag', 'CPC Shopee dan klik hilang memakai jendela laporan klik. Klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka, jadi LP view bukan tahap klik. Pesanan dapat muncul pada lebih dari satu tag; gunakan pesanan unik portofolio untuk total.');
+      const lost = v => (v == null || !finite(v) ? '-' : v < 0 ? '+' + Math.abs(v).toFixed(0) + '% lebih' : v.toFixed(0) + '%');
+      table(['Tag', 'Klik Meta / CPC', 'LP view / biaya', 'Klik Shopee / CPC', 'Klik hilang', 'Pesanan / biaya', 'ROAS / ROI'], tags.map(t => [
         t.tag, integer(t.clicks) + '\n' + (amount(t.clicks) > 0 && amount(t.spend) > 0 ? money(t.cpc) : '-'),
+        (amount(t.lpv) > 0 ? integer(t.lpv) : '-') + '\n' + (amount(t.cpLpv) > 0 ? money(t.cpLpv) : '-'),
         (r.clickStart ? integer(t.shopeeClicks) : '-') + '\n' + (amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0 ? money(t.cpcShopee) : '-'),
+        lost(t.lostTotal),
         integer(t.orders) + '\n' + (amount(t.orders) > 0 && amount(t.spend) > 0 ? money(t.costPerOrder) : '-'),
         ratio(t.roasEff, amount(t.spend) > 0) + '\n' + percent(t.roi, amount(t.spend) > 0),
-      ]), [46, 34, 36, 36, 30]);
+      ]), [36, 26, 26, 27, 23, 24, 20]);
 
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
       // Copies of one ad in other campaigns share its name; only then is the campaign printed.

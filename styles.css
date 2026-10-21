@@ -729,12 +729,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var
 #tblMain>thead>tr>th:first-child{background:var(--surface-2);z-index:3}
 #tblMain.compact-columns th:nth-child(6),#tblMain.compact-columns td:nth-child(6),
 #tblMain.compact-columns th:nth-child(7),#tblMain.compact-columns td:nth-child(7),
-#tblMain.compact-columns th:nth-child(8),#tblMain.compact-columns td:nth-child(8),
-#tblMain.compact-columns th:nth-child(9),#tblMain.compact-columns td:nth-child(9),
-#tblMain.compact-columns th:nth-child(10),#tblMain.compact-columns td:nth-child(10),
-#tblMain.compact-columns th:nth-child(11),#tblMain.compact-columns td:nth-child(11),
-#tblMain.compact-columns th:nth-child(14),#tblMain.compact-columns td:nth-child(14),
-#tblMain.compact-columns th:nth-child(15),#tblMain.compact-columns td:nth-child(15){display:none}
+#tblMain.compact-columns th:nth-child(17),#tblMain.compact-columns td:nth-child(17),
+#tblMain.compact-columns th:nth-child(18),#tblMain.compact-columns td:nth-child(18){display:none}
 .export-context{background:var(--surface-2);border-radius:7px;padding:11px 13px;color:var(--text-dim);font-size:12px;margin-bottom:18px;overflow-wrap:anywhere}
 .export-preview{margin:18px 0 12px;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:13px;font-weight:600}
 .button-row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}

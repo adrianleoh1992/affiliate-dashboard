@@ -1078,6 +1078,16 @@ function analyze(data, options) {
     const shopeeClicks = b.shopeeClicks;
     const cpcShopee = shopeeClicks > 0 && winSpend > 0 ? winSpend / shopeeClicks : 0;
 
+    /* Landing page views are shown with their cost but not used as a funnel
+       step: a Shopee link opens the Shopee app, which Meta mostly cannot see
+       load. In adrian's 20 Oct 2026 data Shopee logged 3-28x more clicks
+       than Meta's LP views on most tags, so "clicks lost before the LP"
+       would mostly measure Meta's blind spot. The loss that holds up is Meta
+       link clicks → Shopee clicks in the click window (the leak above);
+       negative when Shopee counted more than Meta sent. */
+    const cpLpv = b.lpv > 0 ? spend / b.lpv : 0;
+    const lostTotal = leak ? 100 - leak.pct : null;
+
     const activeUnits = Object.keys(b.unitKeys).length;
     const delivery = topOf(b.delivery, 1)[0];
 
@@ -1087,7 +1097,7 @@ function analyze(data, options) {
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
-      shopeeClicks, cpcShopee, winSpend, winClicks,
+      shopeeClicks, cpcShopee, winSpend, winClicks, cpLpv, lostTotal,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
       leak, capture, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
