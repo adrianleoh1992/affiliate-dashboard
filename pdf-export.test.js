@@ -159,7 +159,7 @@ async function main() {
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
       for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
-        'Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
+        'Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
       assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
@@ -184,7 +184,7 @@ async function main() {
       assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text === 'Total akun'), 'Direct/indirect account total exported');
       assert.equal(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Tag / jenis'), mode === 'lengkap', 'Product split only in Lengkap');
       // Every mode carries the per-tag click costs, lost clicks and direct/indirect split.
-      for (const h of ['Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang', 'Order langsung', 'Komisi langsung', 'Order tidak langsung', 'Komisi tidak langsung'])
+      for (const h of ['Klik Meta', 'Klik masuk Shopee', 'CPC Meta', 'LP view', 'Biaya / LP', 'CPC Shopee', 'Klik hilang', 'Order langsung', 'Komisi langsung', 'Order tidak langsung', 'Komisi tidak langsung'])
         assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === h), mode + ' per-tag click table column: ' + h);
       const pageNumbers = new Set(report.bounds.filter(cell => cell.kind === 'body').map(cell => cell.page));
       for (const pageNumber of pageNumbers) {
@@ -227,7 +227,7 @@ async function main() {
         return results.map(result => {
           labels = [];
           DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' });
-          return ['Klik Meta', 'Klik Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
+          return ['Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
         });
       } finally { window.jspdf.jsPDF = OriginalPDF; }
     }, [clickSource, { ...clickSource, clicks: [] }, { ...clickSource, ads: [] }]
@@ -330,6 +330,55 @@ async function main() {
     assert.deepEqual(wrapped, [], 'every value in the per-tag click table stays on one line');
     assert.ok(wide.some(lines => lines[0] === 'Rp 1.500.000'), 'large money value printed whole');
     console.log('PASS PDF per-tag click table keeps large money values on one line');
+    // Platform & placement, as in the dashboard card, with the Other referrers.
+    const OTHER = 'Other (bukan FB/IG)';
+    const plat = (platform, spend, clicks, shopeeClicks, orders, comm) => ({ platform, spend, impr: 0, clicks, shopeeClicks, orders, comm,
+      cpc: clicks ? spend / clicks : null, lost: clicks ? 100 - shopeeClicks / clicks * 100 : null, roas: spend ? comm / spend : null, net: comm - spend });
+    const withPlacement = { ...fixture(), placement: {
+      range: { start: '2026-08-01', end: '2026-08-14' }, daily: false, hasClicks: true, hasOrderPlatform: true, unmatchedSpend: 0, avgCpc: 10,
+      platforms: [plat('Facebook', 800, 80, 70, 5, 1200), plat('Instagram', 200, 20, 15, 1, 100), plat(OTHER, 0, 0, 9, 2, 55)],
+      total: plat('Total', 1000, 100, 94, 8, 1355),
+      placements: [{ platform: 'Facebook', placement: 'Feed', spend: 800, impr: 8000, clicks: 80, estComm: 1200, share: 80, cpc: 10, ctr: 1, cpcVsAvg: 0, estRoas: 1.5 },
+        { platform: 'Instagram', placement: 'Instagram Reels', spend: 200, impr: 2000, clicks: 20, estComm: 100, share: 20, cpc: 10, ctr: 1, cpcVsAvg: 0, estRoas: 0.5 }],
+      otherSources: [{ source: 'Others', shopeeClicks: 8, orders: 2, comm: 55 }, { source: 'Websites', shopeeClicks: 1, orders: 0, comm: 0 }],
+      otherTags: [{ tag: 'Alpha', shopeeClicks: 9, orders: 2, comm: 55, sources: [{ source: 'Others', shopeeClicks: 8, orders: 2 }, { source: 'Websites', shopeeClicks: 1, orders: 0 }] }],
+      tags: [{ tag: 'Alpha', spend: 1000, comm: 1355, roas: 1.355, placements: [], platforms: {
+        Facebook: plat('Facebook', 800, 80, 70, 5, 1200), Instagram: plat('Instagram', 200, 20, 15, 1, 100), [OTHER]: plat(OTHER, 0, 0, 9, 2, 55) } }],
+    } };
+    const placementTables = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, api = OriginalPDF.API, original = api.autoTable, out = {};
+      let words = [];
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), drawText = doc.text;
+        doc.text = function (value, ...rest) { words.push(String(value)); return drawText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = api;
+      api.autoTable = function (options) { (out[options.head[0][0] + '|' + options.head[0][1]] ||= []).push(options.body); return original.call(this, options); };
+      try {
+        return ['ringkas', 'standar'].map(mode => {
+          for (const key of Object.keys(out)) delete out[key];
+          words = [];
+          DashboardPDF.create(result, { mode, generatedAt: '2026-09-06', version: 'abc1234' });
+          const raw = words.join(' ');
+          return { tables: JSON.parse(JSON.stringify(out)), version: raw.includes('Versi abc1234'), sources: raw.includes('Sumber Other: Others 8, Websites 1') };
+        });
+      } finally { api.autoTable = original; window.jspdf.jsPDF = OriginalPDF; }
+    }, withPlacement);
+    for (const [i, report] of placementTables.entries()) {
+      const platform = report.tables['Platform|Biaya'][0];
+      assert.deepEqual(platform.map(row => row[0]), ['Facebook', 'Instagram', 'Other', 'Total']);
+      assert.equal(platform[2][4], '9', 'Other row carries its Shopee clicks');
+      assert.equal(platform[2][5], '-', 'Other has no lost-click figure');
+      const place = report.tables['Platform|Placement'][0];
+      assert.deepEqual(place[place.length - 1].slice(0, 2), ['Other', 'Bukan placement Meta']);
+      assert.equal(place[place.length - 1][8], 'Rp 55');
+      assert.deepEqual(report.tables['Tag|Klik Shopee'][0][0], ['Alpha', '9', '2', 'Rp 55', 'Others 8, Websites 1']);
+      assert.equal(!!report.tables['Tag|Biaya FB'], i === 1, 'Facebook vs Instagram per tag only from Standar up');
+      assert.ok(report.version, 'version printed on the cover');
+      assert.ok(report.sources, 'Other sources named under the platform table');
+    }
+    console.log('PASS PDF platform, placement and Other sections');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);

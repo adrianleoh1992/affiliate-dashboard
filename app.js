@@ -1468,7 +1468,8 @@ async function downloadPdf(mode){
   try{
     await loadPdfLibraries();await new Promise(resolve=>requestAnimationFrame(resolve));
     if(epoch!==IMPORT_EPOCH||account!==active()||RESULT!==result)throw new Error('Data atau akun berubah. Buka ulang ekspor untuk membuat laporan terbaru.');
-    const doc=DashboardPDF.create(result,{account,mode,title,quality});
+    const version=(($('appVersion')||{}).textContent||'').replace(/^·\s*versi\s*/,'').trim();
+    const doc=DashboardPDF.create(result,{account,mode,title,quality,version});
     downloadBlob(doc.output('blob'),`laporan-${DashboardExport.filenamePart(account)}-${result.range.start}_${result.range.end}-${mode}.pdf`);toast('PDF '+mode+' diunduh');
   }catch(e){$('pdfError').textContent=e.message;$('pdfError').classList.remove('hidden')}
   finally{PDF_BUSY=false;document.querySelectorAll('[data-pdf]').forEach(b=>b.disabled=false);$('pdfBusy').classList.add('hidden')}
