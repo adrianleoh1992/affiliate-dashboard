@@ -56,6 +56,13 @@ near(taxTag.winSpend, 111);
 near(taxTag.cpcShopee, 111);
 near(taxTag.leak.wasted, 99.9); // 9 lost clicks at the window's Rp11.10 CPC
 near(taxed.adUnits[0].byDate['2026-08-01'].comm, 100);
+// 10 Meta clicks reached Shopee once in the window: 90% lost. LP views only carry their cost.
+near(taxTag.lostTotal, 90);
+assert.equal(taxTag.cpLpv, 0);
+const lp = analyze({ affiliate: [aff('1')], ads: [ad('2026-08-01', 100, { 'Landing page views': 4 })], clicks: [click(), click(), click(), click(), click(), click(), click(), click(), click(), click(), click(), click()] }).tags[0];
+near(lp.cpLpv, 25);
+near(lp.lostTotal, -20); // Shopee counted 12 clicks for 10 Meta clicks
+assert.equal(analyze({ affiliate: [aff('1')], ads: [ad()] }).tags[0].lostTotal, null, 'no click report, no loss figure');
 near(taxed.daily.reduce((sum, day) => sum + day.spend, 0), taxed.kpi.spend);
 near(taxed.daily[1].commEff, 0);
 near(taxed.daily[1].netEff, -999);
@@ -502,6 +509,11 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   assert.equal(a.direct.orders, 1); near(a.direct.comm, 150);
   assert.equal(a.indirect.orders, 2); near(a.indirect.comm, 50); near(a.indirect.commEff, 40);
   assert.equal(a.unknown.rows, 0); assert.equal(a.mixed, 0);
+  const pa = r.tags.find(t => t.tag === 'A').attrProducts;
+  assert.equal(pa.direct.length, 1, 'two rows of one product in one order are one product');
+  assert.equal(pa.direct[0].orders, 1); near(pa.direct[0].comm, 150); assert.equal(pa.direct[0].qty, 2);
+  assert.equal(pa.indirect.length, 1); assert.equal(pa.indirect[0].orders, 2);
+  assert.ok(!pa.direct.concat(pa.indirect).some(p => p.comm === 40), 'cancelled rows are not products sold');
   const b = r.tags.find(t => t.tag === 'B');
   assert.equal(b.attr.mixed, 1); assert.equal(b.attr.direct.orders, 1); assert.equal(b.attr.indirect.orders, 1);
   assert.equal(b.attr.unknown.orders, 1); near(b.attr.unknown.comm, 7);
@@ -518,6 +530,7 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
   const none = analyze({ affiliate: [aff('o1')] });
   assert.equal(none.attribution.column, '');
   assert.equal(none.tags[0].attrDirectOrders, null);
+  assert.equal(none.tags[0].attrProducts, null);
   const X = require('./export-data.js');
   assert.match(X.csv(none), /"Order","Pesanan langsung","Komisi langsung"/);
   assert.match(X.csv(r), /"Pesanan tidak langsung"/);

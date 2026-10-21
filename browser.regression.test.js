@@ -120,10 +120,47 @@ async function main() {
     assert.match(head, /Pesanan langsung/i); assert.match(head, /Komisi tidak langsung/i);
     assert.doesNotMatch(head, /Tidak diketahui/i, 'no unknown column when every row is labelled');
     const alpha = await page.locator('#tblAttr tbody tr', { hasText: 'Alpha' }).innerText();
-    assert.deepEqual(alpha.split('\t').map(x => x.trim()), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
+    assert.deepEqual(alpha.split('\t').map(x => x.replace(/▸/g, '').trim()), ['Alpha', '1', 'Rp200', '2', 'Rp400', '67%']);
     const total = await page.locator('#tblAttr tfoot tr').innerText();
     assert.deepEqual(total.split('\t').map(x => x.trim()), ['Total akun', '1', 'Rp200', '3', 'Rp600', '75%']);
     assert.match(await page.locator('#attrNote').innerText(), /Tipe Pesanan/);
+    // Each order count opens that kind's products under the row; the other count switches, the same one closes.
+    const row = page.locator('#tblAttr tbody tr[data-attr="Alpha"]');
+    await row.locator('button[data-kind="indirect"]').click();
+    let detail = await page.locator('#tblAttr tbody tr.daydetail').innerText();
+    assert.match(detail, /Terjual tidak langsung · Alpha · 2 produk[\s\S]*Synthetic Product 2[\s\S]*Synthetic Product 3/i);
+    assert.doesNotMatch(detail, /Synthetic Product 1|Synthetic Product 4/, 'only this kind, only this tag');
+    assert.equal(await row.locator('button[data-kind="indirect"]').getAttribute('aria-expanded'), 'true');
+    await row.locator('button[data-kind="direct"]').click();
+    assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 1);
+    assert.match(await page.locator('#tblAttr tbody tr.daydetail').innerText(), /Terjual langsung · Alpha · 1 produk[\s\S]*Synthetic Product 1/i);
+    await row.locator('button[data-kind="direct"]').press('Enter');
+    assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 0);
+    assert.equal(await page.locator('#tblAttr tfoot button').count(), 0, 'the total row is not a link');
+    // Column headers sort: highest first, then lowest; the total row stays last.
+    const order = async () => page.locator('#tblAttr tbody tr[data-attr]').evaluateAll(rows => rows.map(r => r.dataset.attr));
+    await page.locator('#tblAttr th[data-sort="dOrders"]').click();
+    assert.deepEqual(await order(), ['Alpha', 'Bravo']);
+    assert.equal(await page.locator('#tblAttr th[data-sort="dOrders"]').getAttribute('aria-sort'), 'descending');
+    await page.locator('#tblAttr th[data-sort="dOrders"]').click();
+    assert.deepEqual(await order(), ['Bravo', 'Alpha']);
+    await page.locator('#tblAttr th[data-sort="share"]').press('Enter');
+    assert.deepEqual(await order(), ['Bravo', 'Alpha'], 'Bravo is 100% indirect, Alpha 67%');
+    assert.match(await page.locator('#tblAttr tfoot').innerText(), /Total akun/);
+  });
+
+  test('a long product list shows five first and the rest on request', async page => {
+    const T = 'Tipe Pesanan', indirect = 'Pesanan dari Toko yang tidak Dipromosikan';
+    await upload(page, [{ name: 'affiliate.csv', rows: Array.from({ length: 8 }, (_, i) => ({ ...aff(String(i + 1)), [T]: indirect })) }]);
+    const row = page.locator('#tblAttr tbody tr[data-attr="Alpha"]');
+    await row.locator('button[data-kind="indirect"]').click();
+    const products = () => page.locator('#tblAttr tr.daydetail tbody tr').count();
+    assert.equal(await products(), 5);
+    await page.locator('#tblAttr .attr-more').click();
+    assert.equal(await products(), 8);
+    assert.match(await page.locator('#tblAttr .attr-more').innerText(), /5 teratas/);
+    await page.locator('#tblAttr .attr-more').click();
+    assert.equal(await products(), 5);
   });
 
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
@@ -142,6 +179,22 @@ async function main() {
     assert.match(await page.locator('#tblMain tbody tr').first().innerText(), /Alpha/);
     const totals = await page.evaluate(() => ({ comm: RESULT.kpi.comm, spend: RESULT.kpi.spend }));
     assert.deepEqual(totals, { comm: 400, spend: 400 });
+  });
+
+  test('the decision table shows LP views, their cost and the share of clicks lost before Shopee', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] },
+      { name: 'clicks.csv', rows: [1, 2, 3, 4].map(i => ({ ...click(), 'Klik ID': 'k' + i })) }]);
+    const head = await page.locator('#tblMain thead').innerText();
+    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
+    const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
+    const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
+    assert.equal(cells[await col('lpv')], '8');
+    assert.equal(cells[await col('cpLpv')], '13'); // Rp100 / 8 LP views
+    assert.equal(cells[await col('lostTotal')], '60%'); // 10 Meta clicks, 4 reached Shopee
+    await page.locator('#tblMain th[data-sort="lostTotal"]').click();
+    assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {
