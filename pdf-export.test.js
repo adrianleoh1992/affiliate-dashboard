@@ -566,6 +566,29 @@ async function main() {
     assert.equal(masuk['Scale Bocor'], '10,00%\ncek link');
     assert.equal(masuk['Stop Bocor'], '0,00%\ncek link');
     console.log('PASS PDF must-scale cards fit page 1; STOP loss, maxGain and live link money match Prioritas tindakan and the leak table');
+    // Large money values in the per-tag click table shrink to fit instead of wrapping:
+    // "Rp 1.500.000" split over two lines reads as Rp1.500.
+    const wide = await page.evaluate(result => {
+      const big = JSON.parse(JSON.stringify(result));
+      const t = big.tags.find(x => x.spend > 0) || big.tags[0];
+      Object.assign(t, { tag: 'Tag dengan nama yang cukup panjang', clicks: 123456, cpc: 13889, lpv: 98765, cpLpv: 1500000, shopeeClicks: 54321, cpcShopee: 27778, winSpend: 9e8, lostTotal: 92.4 });
+      t.attr = { direct: { orders: 12345, comm: 2500000 }, indirect: { orders: 23456, comm: 12345678 }, unknown: { orders: 0, comm: 0 } };
+      big.attribution = { column: 'Tipe Pesanan', total: { direct: t.attr.direct, indirect: t.attr.indirect, unknown: t.attr.unknown, mixed: 0 } };
+      big.range = { ...big.range, clickStart: big.range.start, clickEnd: big.range.end };
+      const api = window.jspdf.jsPDF.API, originalTable = api.autoTable, cells = [];
+      api.autoTable = function (options) {
+        if (options.head[0].includes('Biaya / LP')) options.didDrawCell = data => { if (data.section === 'body') cells.push(data.cell.text); };
+        return originalTable.call(this, options);
+      };
+      try { DashboardPDF.create(big, { mode: 'ringkas', generatedAt: '2026-09-06' }); }
+      finally { api.autoTable = originalTable; }
+      return cells;
+    }, activity);
+    assert.ok(wide.length > 0, 'per-tag click table drawn');
+    const wrapped = wide.filter((lines, i) => i % 12 !== 0 && lines.length > 1);
+    assert.deepEqual(wrapped, [], 'every value in the per-tag click table stays on one line');
+    assert.ok(wide.some(lines => lines[0] === 'Rp 1.500.000'), 'large money value printed whole');
+    console.log('PASS PDF per-tag click table keeps large money values on one line');
     if (qaDir) {
       const result = demoFixture();
       assert.equal(result.tags.length, 3);
