@@ -193,6 +193,11 @@ async function main() {
     assert.match(plat, /Facebook\tRp80\t80%[\s\S]*2\.50x/);
     assert.match(plat, /Instagram\tRp20\t20%[\s\S]*10\.00x/);
     assert.ok(!/100%/.test(plat.split('\n')[0].split('\t')[7]), 'no click report means no lost-click figure');
+    // Clicking a tag opens its own placements with estimated commission.
+    await page.locator('#tblPlcTag tr[data-plc-tag="Alpha"] .attr-open').click();
+    const detail = await page.locator('#tblPlcTag tr.daydetail').innerText();
+    assert.match(detail, /Feed[\s\S]*Rp60[\s\S]*Rp150/);
+    assert.match(detail, /Instagram Reels[\s\S]*Rp20[\s\S]*Rp200/);
     await upload(page, [{ name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
     assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100, 'plain ads and placement rows are never added together');
     assert.match(await page.locator('#uploadStatus').innerText(), /Placement 3/);

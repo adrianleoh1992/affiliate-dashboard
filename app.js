@@ -634,7 +634,17 @@ function adsRows(){
   if(DATA.ads.length||!DATA.placement.length)return DATA.ads;
   return DATA.placement.filter(r=>E.dayOnly(r['Reporting starts'])===E.dayOnly(r['Reporting ends']||r['Reporting starts']));
 }
-let PLC_ALL=false,PLC_TAGS_ALL=false;
+let PLC_ALL=false,PLC_TAGS_ALL=false;const PLC_OPEN=new Set();
+// One tag's placements. Spend and clicks are Meta's; commission is the tag's
+// platform commission split by click share, so it is marked as an estimate.
+function plcTagDetail(t){
+  const rows=(t.placements||[]).filter(p=>p.spend>0||p.clicks>0);
+  if(!rows.length)return'<p class="hint">Tidak ada biaya per placement untuk tag ini.</p>';
+  const roas=v=>v==null||!isFinite(v)?'—':`<span class="${v>=1?'pos':'neg'}">${rx(v)}</span>`;
+  return`<div class="daybox attr-box"><table><thead><tr><th>Platform</th><th>Placement</th><th class="num">Biaya</th><th class="num">Klik Meta</th><th class="num">CTR</th><th class="num">CPC</th><th class="num">Estimasi komisi</th><th class="num">Estimasi ROAS</th></tr></thead><tbody>`
+    +rows.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td><td class="num">${full(p.spend)}</td><td class="num">${nf(p.clicks)}</td><td class="num">${p.ctr==null?'—':p.ctr.toFixed(2).replace('.',',')+'%'}</td><td class="num">${p.cpc==null?'—':full(p.cpc)}</td><td class="num est">${p.estComm?full(p.estComm):'—'}</td><td class="num">${roas(p.estRoas)}</td></tr>`).join('')
+    +'</tbody></table><p class="hint">Komisi per placement adalah estimasi: komisi tag di platform itu dibagi menurut porsi klik Meta tiap placement.</p></div>';
+}
 function renderPlacement(){
   const P=RESULT.placement,card=$('plcCard');
   card.classList.toggle('hidden',!P);if(!P)return;
@@ -663,8 +673,12 @@ function renderPlacement(){
     // A side with under Rp10.000 spend has too little to call either way.
     const ok=x=>x.spend>=10000&&x.roas!=null;
     const best=!fb.comm&&!ig.comm?'Belum ada komisi':ok(fb)&&ok(ig)?(Math.abs(fb.roas-ig.roas)<0.1?'Setara':fb.roas>ig.roas?'Facebook':'Instagram'):'—';
-    return`<tr><td>${esc(t.tag)}</td>${money(fb.spend)}${money(fb.comm)}${roasCell(fb.spend?fb.roas:null)}${money(ig.spend)}${money(ig.comm)}${roasCell(ig.spend?ig.roas:null)}${money(other)}<td>${best}</td></tr>`;
+    const open=PLC_OPEN.has(t.tag);
+    const detail=open?`<tr class="daydetail"><td colspan="9">${plcTagDetail(t)}</td></tr>`:'';
+    return`<tr data-plc-tag="${esc(t.tag)}"><td><button class="attr-open${open?' open':''}" aria-expanded="${open}" title="Lihat placement ${esc(t.tag)}">${esc(t.tag)}<span class="exp" aria-hidden="true">▸</span></button></td>${money(fb.spend)}${money(fb.comm)}${roasCell(fb.spend?fb.roas:null)}${money(ig.spend)}${money(ig.comm)}${roasCell(ig.spend?ig.roas:null)}${money(other)}<td>${best}</td></tr>`+detail;
   }).join('');
+  $('tblPlcTag').querySelectorAll('tr[data-plc-tag] .attr-open').forEach(b=>b.onclick=()=>{
+    const tag=b.closest('tr').dataset.plcTag;PLC_OPEN.has(tag)?PLC_OPEN.delete(tag):PLC_OPEN.add(tag);renderPlacement()});
   const tagBtn=$('btnPlcTags');tagBtn.classList.toggle('hidden',P.tags.length<=tagCut);
   tagBtn.textContent=PLC_TAGS_ALL?`Tampilkan ${tagCut} teratas`:`Tampilkan semua ${P.tags.length} tag`;
   tagBtn.onclick=()=>{PLC_TAGS_ALL=!PLC_TAGS_ALL;renderPlacement()};
