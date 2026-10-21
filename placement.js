@@ -170,7 +170,13 @@
       const p = places.get(key) || { platform: plat, placement: place, spend: 0, impr: 0, clicks: 0, estComm: 0 };
       p.spend += v.spend; p.impr += v.impr; p.clicks += v.clicks; p.estComm += comm;
       places.set(key, p);
+      const tr = tagRows.get(tag);
+      tr.placements = tr.placements || [];
+      tr.placements.push({ platform: plat, placement: place, spend: v.spend, impr: v.impr, clicks: v.clicks, estComm: comm,
+        cpc: v.clicks ? v.spend / v.clicks : null, ctr: v.impr ? v.clicks / v.impr * 100 : null,
+        estRoas: v.spend ? comm / v.spend : null });
     }
+    tags.forEach(t => (t.placements = t.placements || []).sort((a, b) => b.spend - a.spend));
     const totalSpend = [...places.values()].reduce((s, p) => s + p.spend, 0);
     const totalClicks = [...places.values()].reduce((s, p) => s + p.clicks, 0);
     const avgCpc = totalClicks ? totalSpend / totalClicks : null;
