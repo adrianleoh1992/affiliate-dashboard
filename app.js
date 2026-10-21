@@ -639,7 +639,7 @@ function breakdownHTML(title,byDate,note){
       <td class="num ${net>=0?'pos':'neg'}">${rp(net)}</td>
       <td class="num">${v.spend?dec(v.commEff/v.spend,2):'—'}</td>
       <td class="num">${nf(v.clicks)}</td>
-      <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
+      <td class="num">${v.clicks&&v.spend?full(v.spend/v.clicks):'—'}</td>
       <td class="num">${sh?nf(sh):'—'}</td>
       <td class="num">${nf(v.orders)}</td>
       <td class="num">${v.orders&&v.spend?rp(v.spend/v.orders):'—'}</td>
@@ -857,7 +857,7 @@ const DAYCOLS=['','Tanggal','Biaya','Komisi Efektif','Laba','ROAS','Klik Meta','
 // order is effective, like the Komisi column beside it.
 function orderCells(v,orders){
   return `<td class="num">${nf(v.clicks)}</td>
-    <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
+    <td class="num">${v.clicks&&v.spend?full(v.spend/v.clicks):'—'}</td>
     <td class="num">${v.shopeeClicks?nf(v.shopeeClicks):'—'}</td>
     <td class="num">${v.shopeeClicks&&v.spend?full(v.spend/v.shopeeClicks):'—'}</td>
     <td class="num">${nf(orders)}</td>

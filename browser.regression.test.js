@@ -456,6 +456,7 @@ async function main() {
     assert.equal(await page.locator('#kpis').isVisible(), false);
     assert.equal(await page.locator('#tblStored tbody tr').first().locator('td').nth(1).innerText(), 'Rp200');
     assert.equal(await page.locator('#tblStored tbody tr').first().locator('td').nth(2).innerText(), 'Rp100');
+    assert.equal(await page.locator('#tblStored tbody tr').first().locator('td').nth(9).innerText(), 'Rp10', 'stored CPC is money too');
     await page.evaluate(() => {
       document.getElementById('ppn').value = '11';
       const factor = document.getElementById('pendingFactor');
@@ -977,7 +978,7 @@ async function main() {
         commSub: card(1).querySelector('.sub').textContent, commDrill: card(1).querySelector('.kdrill').textContent,
         net: card(3).querySelector('.sub').textContent,
         netDrill: card(3).querySelector('.kdrill').textContent, synth: document.getElementById('synth').textContent,
-        day: [3, 4, 5].map(i => row[i].textContent), dayTitle: row[3].title,
+        day: [3, 4, 5].map(i => row[i].textContent), dayTitle: row[3].title, dayCpc: row[7].textContent,
         dailyNet: RESULT.daily.reduce((sum, d) => sum + d.netEff, 0), kpiNet: RESULT.kpi.netEff };
     });
     let ui = await read();
@@ -990,6 +991,7 @@ async function main() {
     assert.doesNotMatch(ui.netDrill + ui.synth, /bila PPN|invoice Meta/, 'no PPN what-if: the invoices carry no PPN');
     assert.deepEqual(ui.day, ['Rp144rb', 'Rp4rb', '1,03'], 'the one-day table matches the cards');
     assert.equal(ui.dayTitle, 'Total Rp146.000');
+    assert.equal(ui.dayCpc, 'Rp14.000', 'CPC Meta is money, like CPC Shopee beside it');
     assert.ok(Math.abs(ui.dailyNet - ui.kpiNet) < 1e-6);
     // An account that is billed PPN still gets it from Setelan.
     await setPpn(page, '11');
@@ -1001,7 +1003,7 @@ async function main() {
     await page.locator('[data-tab="harian"]').click();
     await page.waitForFunction(() => Boolean(Chart.getChart(document.getElementById('chRoas'))));
     await page.locator('#tblDaily tbody tr.dayrow').first().click();
-    assert.match(await page.locator('#tblDaily .daydetail tbody tr').first().innerText(), /Rp144rb\s+-Rp11rb\s+0,93/);
+    assert.match(await page.locator('#tblDaily .daydetail tbody tr').first().innerText(), /Rp144rb\s+-Rp11rb\s+0,93\s+10\s+Rp15\.540/);
     const charts = await page.evaluate(() => ({ daily: Chart.getChart(document.getElementById('chDaily')).data.datasets[0],
       roas: Chart.getChart(document.getElementById('chRoas')).data.datasets[0].data }));
     assert.equal(charts.daily.label, 'Komisi Efektif');
@@ -1009,7 +1011,7 @@ async function main() {
     assert.ok(Math.abs(charts.roas[0] - 144200 / 155400) < 1e-9);
     await page.locator('[data-tab="iklan"]').click();
     await page.locator('#tblMain tbody tr.dayrow').first().click();
-    assert.match(await page.locator('#tblMain .daydetail').textContent(), /Komisi Efektif[\s\S]+Rp144rb\s*-Rp11rb\s*0,93/);
+    assert.match(await page.locator('#tblMain .daydetail').textContent(), /Komisi Efektif[\s\S]+Rp144rb\s*-Rp11rb\s*0,93\s*10\s*Rp15\.540/);
   });
 
   test('placement rows under Spend Iklan include PPN and add up to the headline', async page => {

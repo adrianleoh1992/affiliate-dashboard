@@ -298,7 +298,7 @@
       <td class="num">${nf(d.orders)}</td><td class="num">${nf(d.clicks)}</td>
       <td class="num">${d.shopeeClicks ? nf(d.shopeeClicks) : '—'}</td>
       <td class="num ${d.leak != null && d.leak < 70 ? 'neg' : ''}">${d.leak != null ? d.leak.toFixed(0) + '%' : '—'}</td>
-      <td class="num">${d.clicks ? nf(d.cpc) : '—'}</td></tr>`).join('');
+      <td class="num">${d.clicks ? window.full(d.cpc) : '—'}</td></tr>`).join('');
   }
 
   /* Direct vs indirect orders per tag from the saved order parts. A part
