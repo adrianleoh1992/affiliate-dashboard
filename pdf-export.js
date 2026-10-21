@@ -117,9 +117,9 @@
       doc.autoTable({ startY: y, head: [head.map(text)], body: body.map(row => row.map(text)),
         margin: { top: TOP, right: M, bottom: 18, left: M }, tableWidth: WIDTH,
         theme: 'plain', showHead: 'everyPage', rowPageBreak: 'avoid',
-        styles: { font, fontSize: 8, cellPadding: 2.3, overflow: 'linebreak', valign: 'top',
+        styles: { font, fontSize: options.fontSize || 8, cellPadding: options.fontSize ? 1.6 : 2.3, overflow: 'linebreak', valign: 'top',
           textColor: COLORS.ink, lineColor: COLORS.line, lineWidth: { bottom: 0.15 } },
-        headStyles: { fillColor: COLORS.accent, textColor: COLORS.white, fontStyle: 'bold', fontSize: 8 },
+        headStyles: { fillColor: COLORS.accent, textColor: COLORS.white, fontStyle: 'bold', fontSize: options.fontSize || 8 },
         alternateRowStyles: { fillColor: COLORS.pale }, columnStyles,
         didParseCell: data => {
           if (options.statuses && data.section === 'body' && data.column.index === 1) {
@@ -342,17 +342,20 @@
     /* One row per tag with every click cost, the clicks lost before Shopee
        and the direct/indirect split, in every mode: this is the table the
        account owner reads tag by tag. */
-    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee ("lebih" berarti Shopee mencatat lebih banyak). LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. Langsung/tidak langsung: pesanan dan komisi laporan menurut kolom Tipe Pesanan.');
-    const lost = v => (v == null || !finite(v) ? '-' : v < 0 ? '+' + Math.abs(v).toFixed(0) + '% lebih' : v.toFixed(0) + '%');
-    const kind = (t, key) => (t.attr && attribution.column && (amount(t.attr[key].orders) > 0 || amount(t.attr[key].comm) !== 0)
-      ? integer(t.attr[key].orders) + ' pesanan\n' + money(t.attr[key].comm) : '-');
-    table(['Tag', 'Klik Meta / CPC', 'LP view / biaya', 'Klik Shopee / CPC', 'Klik hilang', 'Langsung', 'Tidak langsung', 'Pesanan / biaya'], tags.map(t => [
-      t.tag, integer(t.clicks) + '\n' + (amount(t.clicks) > 0 && amount(t.spend) > 0 ? money(t.cpc) : '-'),
-      (amount(t.lpv) > 0 ? integer(t.lpv) : '-') + '\n' + (amount(t.cpLpv) > 0 ? money(t.cpLpv) : '-'),
-      (r.clickStart ? integer(t.shopeeClicks) : '-') + '\n' + (amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0 ? money(t.cpcShopee) : '-'),
-      lost(t.lostTotal), kind(t, 'direct'), kind(t, 'indirect'),
-      integer(t.orders) + '\n' + (amount(t.orders) > 0 && amount(t.spend) > 0 ? money(t.costPerOrder) : '-'),
-    ]), [35, 22, 21, 23, 15, 22, 23, 21], { numeric: [1, 2, 3, 4, 5, 6, 7] });
+    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang dalam rupiah, dibulatkan. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee, tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. L = langsung, TL = tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
+    // One value per cell, whole rupiah without the prefix, so every row stays on one line.
+    const lost = v => (v == null || !finite(v) ? '-' : v < 0 ? '+' + Math.abs(v).toFixed(0) + '%' : v.toFixed(0) + '%');
+    const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? integer(Math.round(amount(v))) : '-');
+    const split = attribution.column;
+    table(['Tag', 'Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang',
+      'Order L', 'Komisi L', 'Order TL', 'Komisi TL'], tags.map(t => [
+      t.tag, integer(t.clicks), rupiah(t.cpc, amount(t.clicks) > 0 && amount(t.spend) > 0),
+      amount(t.lpv) > 0 ? integer(t.lpv) : '-', rupiah(t.cpLpv),
+      r.clickStart ? integer(t.shopeeClicks) : '-', rupiah(t.cpcShopee, amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0),
+      lost(t.lostTotal),
+      split && t.attr ? integer(t.attr.direct.orders) : '-', split && t.attr ? rupiah(t.attr.direct.comm) : '-',
+      split && t.attr ? integer(t.attr.indirect.orders) : '-', split && t.attr ? rupiah(t.attr.indirect.comm) : '-',
+    ]), [34, 12, 13, 11, 14, 13, 14, 12, 13, 16, 13, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7 });
 
     if (mode !== 'ringkas') {
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
