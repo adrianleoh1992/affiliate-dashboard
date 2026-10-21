@@ -20,6 +20,7 @@ function fixture(size = 100) {
       'Nama Barang': 'Produk pengujian ' + index + ': ' + tag, 'Nama Toko': 'Café Nusantara',
       'Platform': 'Facebook', 'L1 Kategori Global': 'Perlengkapan rumah', 'Content Type': 'Video',
       'Tipe Penawaran': index % 2 ? 'Komisi XTRA' : '-',
+      'Tipe Pesanan': index % 3 ? 'Pesanan dari Toko yang tidak Dipromosikan' : 'Pesanan Produk dari Toko yang Dipromosikan',
     });
     ads.push({ 'Ad name': 'Campaign ' + index + ' | Set A | ' + tag, 'Campaign name': 'Campaign ' + index,
       'Amount spent (IDR)': '75000.25', 'Reporting starts': date, 'Reporting ends': date,
@@ -208,6 +209,13 @@ async function main() {
         assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text.includes(tag)), 'Every tag must be exported: ' + tag);
       }
       assert.ok(report.bounds.some(cell => cell.text.includes('[U+6771]')), 'Unsupported Unicode must retain explicit identity');
+      // Direct vs indirect orders, as on the dashboard; products per kind only in the complete report.
+      assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Pesanan tidak langsung'), 'Direct/indirect table exported');
+      assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text === 'Total akun'), 'Direct/indirect account total exported');
+      assert.equal(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Tag / jenis'), mode === 'lengkap', 'Product split only in Lengkap');
+      // Every mode carries the per-tag click costs, lost clicks and direct/indirect split.
+      for (const h of ['Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang', 'Order L', 'Komisi L', 'Order TL', 'Komisi TL'])
+        assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === h), mode + ' per-tag click table column: ' + h);
       const pageNumbers = new Set(report.bounds.filter(cell => cell.kind === 'body').map(cell => cell.page));
       for (const pageNumber of pageNumbers) {
         assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.page === pageNumber), 'Table headers must repeat on each page');

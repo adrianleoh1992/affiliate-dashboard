@@ -667,7 +667,7 @@ function bindBreakdown(tableId,lookup,cols){
     tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
 }
-const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
+const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 // The evaluasi filter keeps paid tags only, so the name says so.
 function filterName(f){return{evaluasi:'belum cukup data (berbiaya)'}[f]||f}
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER&&(FILTER!=='evaluasi'||t.spend>0))&&(!TAG_QUERY||[t.tag,t.label,t.reason,t.linkNote,t.borderAt!=null?'di batas':''].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
@@ -675,7 +675,20 @@ $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compac
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false;
+let ATTR_ALL=false,ATTR_SORT=null;const ATTR_OPEN=new Map(); // tag → {kind, all}
+const ATTR_KIND={direct:'Terjual langsung',indirect:'Terjual tidak langsung',unknown:'Tipe tidak diketahui'},ATTR_TOP=5;
+/* Products behind one kind of a tag's orders: the direct list is what the
+   link sold, the indirect list is what buyers chose instead. Five first, the
+   rest on request, so a long indirect list does not push the table away. */
+function attrProductsHTML(t,kind,all){
+  const items=(t.attrProducts||{})[kind]||[];
+  if(!items.length)return`<div class="daybox attr-box"><div class="attr-prod"><h4>${ATTR_KIND[kind]}</h4><p class="hint">Tidak ada.</p></div></div>`;
+  const shown=all?items:items.slice(0,ATTR_TOP),rest=items.slice(ATTR_TOP);
+  const more=rest.length?`<button class="btn sm attr-more" data-more="${all?'less':'all'}">${all?'Tampilkan '+ATTR_TOP+' teratas':`Tampilkan semua ${nf(items.length)} produk (+${nf(rest.length)}, ${rp(rest.reduce((s,p)=>s+p.comm,0))})`}</button>`:'';
+  return`<div class="daybox attr-box"><div class="attr-prod"><h4>${ATTR_KIND[kind]} · ${esc(t.tag)} · ${nf(items.length)} produk</h4><table><thead><tr><th>Produk</th><th class="num">Pesanan</th><th class="num">Qty</th><th class="num">Komisi</th></tr></thead><tbody>`
+    +shown.map(p=>`<tr><td><div class="nm">${esc(p.name)}</div>${p.shop?`<div class="rs">${esc(p.shop)}</div>`:''}</td><td class="num">${nf(p.orders)}</td><td class="num">${nf(p.qty)}</td><td class="num">${rp(p.comm)}</td></tr>`).join('')
+    +`</tbody></table>${more}</div></div>`;
+}
 function renderAttr(){
   const A=RESULT.attribution||{},tot=A.total,cut=30;
   const tb=$('tblAttr');
@@ -687,16 +700,55 @@ function renderAttr(){
   }
   const unk=tot.unknown.rows>0;
   const share=a=>{const c=a.direct.comm+a.indirect.comm;return c>0?(a.indirect.comm/c*100).toFixed(0)+'%':'—'};
-  const cells=a=>`<td class="num">${nf(a.direct.orders)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${nf(a.indirect.orders)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
-    +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${nf(a.unknown.orders)} · ${rp(a.unknown.comm)}</td>`:'');
+  // In a tag row the order counts open that kind's products; the total row is plain.
+  const count=(a,kind,label,tag)=>tag&&a[kind].orders?`<button class="attr-open" data-kind="${kind}" aria-expanded="false" title="Lihat produk ${label}">${nf(a[kind].orders)}<span class="exp" aria-hidden="true">▸</span></button>`:nf(a[kind].orders);
+  const cells=(a,tag)=>`<td class="num">${count(a,'direct','langsung',tag)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${count(a,'indirect','tidak langsung',tag)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
+    +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${count(a,'unknown','tidak diketahui',tag)} · ${rp(a.unknown.comm)}</td>`:'');
   const head=['Tag','Pesanan langsung','Komisi langsung','Pesanan tidak langsung','Komisi tidak langsung','Porsi komisi tidak langsung'].concat(unk?['Tidak diketahui']:[]);
-  tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
+  // Every column sorts; until one is picked the order is total commission, highest first.
+  const keys=['tag','dOrders','dComm','iOrders','iComm','share','unknown'];
+  const val={tag:t=>t.tag,dOrders:t=>t.attr.direct.orders,dComm:t=>t.attr.direct.comm,iOrders:t=>t.attr.indirect.orders,iComm:t=>t.attr.indirect.comm,
+    share:t=>{const c=t.attr.direct.comm+t.attr.indirect.comm;return c>0?t.attr.indirect.comm/c:-1},unknown:t=>t.attr.unknown.orders};
+  const S=ATTR_SORT&&head[keys.indexOf(ATTR_SORT.key)]?ATTR_SORT:null;
+  tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>{const k=keys[i],on=S&&S.key===k;
+    return`<th class="${i?'num':''} sortable" data-sort="${k}" tabindex="0" aria-sort="${on?(S.dir<0?'descending':'ascending'):'none'}">${h}${on?(S.dir<0?' ▾':' ▴'):''}</th>`}).join('')+'</tr>';
+  tb.querySelectorAll('th[data-sort]').forEach(th=>{
+    const go=()=>{const k=th.dataset.sort;ATTR_SORT=S&&S.key===k?{key:k,dir:-S.dir}:{key:k,dir:k==='tag'?1:-1};renderAttr()};
+    th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};
+  });
   const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
-    .sort((a,b)=>b.comm-a.comm||a.tag.localeCompare(b.tag));
+    .sort((a,b)=>{
+      if(!S)return b.comm-a.comm||a.tag.localeCompare(b.tag);
+      const x=val[S.key](a),y=val[S.key](b);
+      return (S.key==='tag'?S.dir*String(x).localeCompare(y):S.dir*(x-y))||b.comm-a.comm||a.tag.localeCompare(b.tag);
+    });
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
-  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr)}</tr>`).join('')
+  tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr data-attr="${esc(t.tag)}"><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr,t.tag)}</tr>`).join('')
     ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
   tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  /* One detail row per tag, showing one kind at a time: the same number
+     closes it, the other number switches it. */
+  const show=(tr,kind,all)=>{
+    const tag=tr.dataset.attr,next=tr.nextElementSibling;
+    if(next&&next.classList.contains('daydetail'))next.remove();
+    tr.querySelectorAll('.attr-open').forEach(b=>{const on=b.dataset.kind===kind;b.classList.toggle('open',on);b.setAttribute('aria-expanded',String(on))});
+    if(!kind){ATTR_OPEN.delete(tag);return}
+    const t=RESULT.tags.find(x=>x.tag===tag);if(!t)return;
+    ATTR_OPEN.set(tag,{kind,all});
+    const det=document.createElement('tr');det.className='daydetail';
+    det.innerHTML=`<td colspan="${head.length}">${attrProductsHTML(t,kind,all)}</td>`;
+    tr.after(det);
+    const more=det.querySelector('.attr-more');
+    if(more)more.onclick=()=>show(tr,kind,more.dataset.more==='all');
+  };
+  tb.querySelectorAll('tbody tr[data-attr]').forEach(tr=>{
+    tr.querySelectorAll('.attr-open').forEach(b=>b.onclick=()=>{
+      const cur=ATTR_OPEN.get(tr.dataset.attr);
+      show(tr,cur&&cur.kind===b.dataset.kind?'':b.dataset.kind,false);
+    });
+    const was=ATTR_OPEN.get(tr.dataset.attr);
+    if(was)show(tr,was.kind,was.all);
+  });
   const btn=$('btnAttrAll');btn.classList.toggle('hidden',rows.length<=cut);
   btn.textContent=ATTR_ALL?`Tampilkan ${cut} teratas`:`Tampilkan semua ${rows.length} tag`;btn.setAttribute('aria-pressed',String(ATTR_ALL));
   btn.onclick=()=>{ATTR_ALL=!ATTR_ALL;renderAttr()};
@@ -707,13 +759,16 @@ function renderAttr(){
   const odd=(A.unknownValues||[]).map(v=>`"${v.value}" (${nf(v.rows)} baris)`).join(', ');
   $('attrNote').textContent=`Kolom "${A.column}"`+(tot.mixed?` · ${nf(tot.mixed)} pesanan campuran dihitung di kedua sisi`:'')+(odd?` · nilai tak dikenali: ${odd}`:'');
 }
-function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=isFinite(x)?x:-1e15;y=isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
+/* Share of Meta link clicks that never reached Shopee. Negative means Shopee
+   counted more clicks than Meta sent (organic or shared links). */
+function lostCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
+function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=x!=null&&isFinite(x)?x:-1e15;y=y!=null&&isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
   // A ROAS a few orders away from the threshold that decided the verdict.
   const edge=t.borderAt!=null?` <span class="pill edge" title="ROAS matang ${rx(t.matureRoasEff)} berada dalam ±10% dari ambang ${t.borderAt===RESULT.options.thScale?'Scale':'Pantau'} ${rx(t.borderAt)}. Beberapa pesanan saja bisa membalik vonis.">di batas</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td><td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?nf(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+filterName(FILTER)+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+filterName(FILTER)+' · '+rows.length+' tag':'';
