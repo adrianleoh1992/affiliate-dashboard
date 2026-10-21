@@ -98,9 +98,11 @@ Token Meta Ads tidak pernah disimpan di database.
 
 ## Penyiapan
 
-1. Di Supabase, buka project lalu **SQL Editor**, jalankan isi
-   `supabase/migrations/20261018000000_shared_daily_store.sql` (atau
-   `supabase db push` dengan Supabase CLI).
+1. Di Supabase, buka project lalu **SQL Editor**, jalankan isi semua file di
+   `supabase/migrations/` berurutan menurut nama (atau `supabase db push`
+   dengan Supabase CLI). `20261021000000_order_parts_attribution.sql` hanya
+   mengganti satu fungsi cek supaya rincian pesanan boleh membawa pemisahan
+   langsung/tidak langsung; data lama tetap sah.
 2. Pilih cara membuat akun:
    - **Anggota mendaftar sendiri** lewat tombol *Daftar* di kartu Database
      bersama. Biarkan *Allow new users to sign up* menyala. Akun baru tidak bisa

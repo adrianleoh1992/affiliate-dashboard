@@ -140,6 +140,7 @@ const COL = {
     rate:     ['Persentase Komisi Shopee pada Produk'],
     offer:    ['Tipe Penawaran'],
     content:  ['Content Type'],
+    attr:     ['Tipe Atribusi', 'Jenis Atribusi', 'Atribusi', 'Attribution Type', 'Tipe Pesanan', 'Jenis Pesanan'],
   },
   ads: {
     date:    ['Reporting starts'],
@@ -174,6 +175,29 @@ function pick(row, keys) {
   for (const k of keys) if (Object.prototype.hasOwnProperty.call(row, k) && row[k] != null && String(row[k]).trim() !== '') return row[k];
   return undefined;
 }
+/* Direct vs indirect order. Shopee marks each commission row as an order of
+   the linked item/shop (langsung) or of something else the buyer bought after
+   the click (tidak langsung). Shopee's report (Oct 2026) calls the column
+   "Tipe Pesanan": "Pesanan Produk dari Toko yang Dipromosikan" (direct) and
+   "Pesanan dari Toko yang tidak Dipromosikan" (indirect). Older or English
+   exports may word it differently, so both are read leniently; anything that does not clearly say one or the
+   other stays unknown rather than being guessed. "tidak langsung" contains
+   "langsung", so the indirect test runs first. */
+function attrKind(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  if (!s) return '';
+  if (/tidak\s*langsung|tidak\s*dipromosikan|indirect|berbeda|different/.test(s)) return 'indirect';
+  if (/langsung|dipromosikan|direct|sama|same/.test(s)) return 'direct';
+  return '';
+}
+function attrColumn(rows) {
+  const keys = new Set();
+  for (const r of (rows || []).slice(0, 50)) Object.keys(r || {}).forEach(k => keys.add(k));
+  for (const k of COL.aff.attr) if (keys.has(k)) return k;
+  for (const k of keys) if (/atribusi|attribution/i.test(k)) return k;
+  return '';
+}
+
 function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '').trim(); }
 
 /* Exact means the same letters in the same case. Shopee keeps
@@ -596,8 +620,33 @@ function analyze(data, options) {
       spend: 0, clicks: 0, impr: 0, reach: 0, lpv: 0, allClicks: 0,
       days: new Set(), daily: dict(), shopeeClicks: 0, metaClicksWindow: 0, spendWindow: 0,
       adNames: dict(), unitKeys: dict(), delivery: dict(), quality: dict(), platforms: dict(), shops: dict(), products: dict(),
+      attr: attrBucket(),
     };
     return T[t];
+  }
+
+  const attrCol = attrColumn(fAff);
+  const attrAll = attrBucket(), attrValues = dict();
+  function attrBucket() {
+    const part = () => ({ orders: new Set(), rows: 0, comm: 0, commEff: 0 });
+    return { direct: part(), indirect: part(), unknown: part() };
+  }
+  function addAttr(a, kind, id, c, ce) {
+    const p = a[kind];
+    p.rows++; p.comm += c; p.commEff += ce;
+    if (id) p.orders.add(id);
+  }
+  function attrOut(a) {
+    const out = {};
+    ['direct', 'indirect', 'unknown'].forEach(k => {
+      out[k] = { orders: a[k].orders.size, rows: a[k].rows, comm: a[k].comm, commEff: a[k].commEff };
+    });
+    // One Shopee order can hold a linked item and another item; it then counts
+    // under both, so the two order counts may add up to more than the total.
+    let mixed = 0;
+    a.direct.orders.forEach(id => { if (a.indirect.orders.has(id)) mixed++; });
+    out.mixed = mixed;
+    return out;
   }
 
   const dailyAll = dict();
@@ -624,6 +673,13 @@ function analyze(data, options) {
     if (id) b.orders.add(id);
     if (st === 'Tertunda') { b.commPending += c; if (id) b.pendingOrders.add(id); }
     else { b.commDone += c; if (id) b.doneOrders.add(id); }
+
+    const rawAttr = attrCol ? String(r[attrCol] == null ? '' : r[attrCol]).trim() : '';
+    const kind = attrKind(rawAttr) || 'unknown';
+    if (attrCol && kind === 'unknown') attrValues[rawAttr || '(kosong)'] = (attrValues[rawAttr || '(kosong)'] || 0) + 1;
+    const ce = st === 'Tertunda' ? c * o.pendingFactor : c;
+    addAttr(b.attr, kind, id, c, ce);
+    addAttr(attrAll, kind, id, c, ce);
 
     if (!b.daily[d]) b.daily[d] = { comm: 0, spend: 0, clicks: 0, orders: new Set(), gmv: 0 };
     b.daily[d].comm += c; b.daily[d].gmv += g;
@@ -1104,6 +1160,13 @@ function analyze(data, options) {
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
       adNames: Object.keys(b.adNames),
+      attr: attrOut(b.attr),
+      // Flat copies for CSV export; empty, not 0, when the report has no
+      // attribution column, so a missing split never reads as "no orders".
+      attrDirectOrders: attrCol ? b.attr.direct.orders.size : null,
+      attrDirectComm: attrCol ? b.attr.direct.comm : null,
+      attrIndirectOrders: attrCol ? b.attr.indirect.orders.size : null,
+      attrIndirectComm: attrCol ? b.attr.indirect.comm : null,
     };
   }).sort((a, b) => b.spend - a.spend || b.comm - a.comm);
 
@@ -1377,6 +1440,7 @@ function analyze(data, options) {
     options: o,
     // Outside range on purpose: toSnapshot copies range whole, and saved snapshots keep their shape.
     byClick: { ...byClick, available: clickKnown, matureUntil: clickKnown ? matureByClickUntil : '', dataEnd: affEnd },
+    attribution: { column: attrCol, total: attrOut(attrAll), unknownValues: topOf(attrValues, 5).map(x => ({ value: x.name, rows: x.value })) },
     kpi, tags, adUnits, daily, matchLog, learnedIds, forgetIds, lagProfile, lagCal, settlement, actions,
     statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
       const v = statusDay[d];
@@ -1554,6 +1618,6 @@ function buildTrend(snapshots, account) {
 return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
-  cleanTag, resolveClickTag, strictKey, tagLookup, intactAdId, idAgrees, COL, pick, topOf, variantOf, variantClash, overlapScore,
+  cleanTag, attrKind, attrColumn, resolveClickTag, strictKey, tagLookup, intactAdId, idAgrees, COL, pick, topOf, variantOf, variantClash, overlapScore,
 };
 });

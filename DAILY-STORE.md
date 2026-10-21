@@ -9,6 +9,9 @@ reload tanpa mengunggah ulang laporan affiliate.
 - Akun yang dipilih pengguna.
 - Agregat per `(akun, tanggal, tag)` untuk affiliate dan klik. Agregat komisi
   menyimpan rincian per pesanan (`order_parts`, kunci hash ID Pemesanan).
+  Bila laporan punya kolom "Tipe Pesanan", tiap rincian membawa komisi
+  langsung, komisi tidak langsung, dan penanda jenis baris (11 angka, bukan 8);
+  data tanpa kolom itu tampil sebagai "tidak diketahui".
 - Agregat per `(akun, tanggal, Ad ID)` untuk Meta Ads, atau per nama iklan bila
   baris tidak membawa Ad ID (`ad_key` = `id:<Ad ID>` atau `name:<nama iklan>`).
 - Fingerprint baris dengan tanggal dan jenis laporan (hanya untuk klik dan iklan

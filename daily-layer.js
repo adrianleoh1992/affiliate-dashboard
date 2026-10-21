@@ -210,6 +210,7 @@
       Object.keys(DCHARTS).forEach(key => delete DCHARTS[key]);
       $('storedNote').textContent = start || end ? 'Tidak ada data pada rentang ini' : 'Belum ada data tersimpan';
       $('storedStrip').innerHTML = '';
+      renderStoredAttr([]);
       $('tblStored').querySelector('thead').innerHTML = '';
       $('tblStored').querySelector('tbody').innerHTML =
         '<tr><td style="text-align:center;color:var(--text-mute);padding:26px">Unggah CSV lalu tekan Simpan ke Riwayat.</td></tr>';
@@ -285,6 +286,8 @@
       { label: 'Klik Shopee', data: days.map(d => d.shopeeClicks), borderColor: cv('--warn'), backgroundColor: cv('--warn'), fmt: 'count' },
     ]}, options: { scales: { y: CT.axis('count', { beginAtZero: true }) } } });
 
+    renderStoredAttr(aff);
+
     const cols = ['Tanggal', 'Komisi Efektif', 'Biaya+PPN', 'Laba', 'ROAS', 'Order', 'Klik Meta', 'Klik Shopee', '% Masuk', 'CPC'];
     $('tblStored').querySelector('thead').innerHTML = '<tr>' +
       cols.map((h, i) => `<th class="${i ? 'num' : ''}">${h}</th>`).join('') + '</tr>';
@@ -296,6 +299,47 @@
       <td class="num">${d.shopeeClicks ? nf(d.shopeeClicks) : '—'}</td>
       <td class="num ${d.leak != null && d.leak < 70 ? 'neg' : ''}">${d.leak != null ? d.leak.toFixed(0) + '%' : '—'}</td>
       <td class="num">${d.clicks ? nf(d.cpc) : '—'}</td></tr>`).join('');
+  }
+
+  /* Direct vs indirect orders per tag from the saved order parts. A part
+     saved without Shopee's column, or a legacy record without parts, is
+     unknown: it is counted as such and never split by guess. */
+  function renderStoredAttr(aff) {
+    const tb = $('tblStoredAttr');
+    if (!tb) return;
+    const blank = () => ({ d: new Set(), i: new Set(), u: new Set(), dc: 0, ic: 0, uc: 0, uo: 0 });
+    const by = new Map(), all = blank();
+    const add = (b, key, part) => {
+      const pa = A.partAttr(part), order = A.ORDER_KEY.test(key);
+      if (!pa) { b.uc += part[0]; if (order) b.u.add(key); return; }
+      b.dc += pa.direct; b.ic += pa.indirect; b.uc += pa.unknown;
+      if (order) {
+        if (pa.bits & A.ATTR.DIRECT) b.d.add(key);
+        if (pa.bits & A.ATTR.INDIRECT) b.i.add(key);
+        if (pa.bits & A.ATTR.UNKNOWN) b.u.add(key);
+      }
+    };
+    aff.forEach(r => {
+      if (!by.has(r.tag)) by.set(r.tag, blank());
+      const b = by.get(r.tag);
+      if (r.order_parts) Object.entries(r.order_parts).forEach(([key, part]) => {
+        if (part[7] <= part[6]) return;
+        add(b, key, part); add(all, key, part);
+      });
+      else { b.uc += r.comm || 0; b.uo += r.orders || 0; all.uc += r.comm || 0; all.uo += r.orders || 0; }
+    });
+    const rows = [...by.entries()].map(([tag, b]) => ({ tag, ...b, comm: b.dc + b.ic + b.uc }))
+      .filter(r => r.d.size || r.i.size || r.u.size || r.uo || r.comm).sort((a, b) => b.comm - a.comm || a.tag.localeCompare(b.tag));
+    const unk = all.u.size + all.uo > 0 || Math.abs(all.uc) > 0.005;
+    const share = b => b.dc + b.ic > 0 ? (b.ic / (b.dc + b.ic) * 100).toFixed(0) + '%' : '—';
+    const cells = b => `<td class="num">${nf(b.d.size)}</td><td class="num">${rp(b.dc)}</td><td class="num">${nf(b.i.size)}</td><td class="num">${rp(b.ic)}</td><td class="num">${share(b)}</td>`
+      + (unk ? `<td class="num">${nf(b.u.size + b.uo)} · ${rp(b.uc)}</td>` : '');
+    const head = ['Tag', 'Pesanan langsung', 'Komisi langsung', 'Pesanan tidak langsung', 'Komisi tidak langsung', 'Porsi komisi tidak langsung'].concat(unk ? ['Tidak diketahui'] : []);
+    tb.querySelector('thead').innerHTML = rows.length ? '<tr>' + head.map((h, i) => `<th class="${i ? 'num' : ''}">${h}</th>`).join('') + '</tr>' : '';
+    tb.querySelector('tbody').innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.tag)}</td>${cells(r)}</tr>`).join('')
+      : '<tr><td class="tbl-empty">Belum ada laporan komisi tersimpan pada rentang ini.</td></tr>';
+    tb.querySelector('tfoot').innerHTML = rows.length ? `<tr><td>Total akun</td>${cells(all)}</tr>` : '';
+    $('storedAttrNote').textContent = rows.length ? `${nf(rows.length)} tag` + (unk ? ' · sebagian belum punya tipe pesanan' : '') : '';
   }
 
   async function renderUploads() {
