@@ -137,6 +137,16 @@ async function main() {
     await row.locator('button[data-kind="direct"]').press('Enter');
     assert.equal(await page.locator('#tblAttr tbody tr.daydetail').count(), 0);
     assert.equal(await page.locator('#tblAttr tfoot button').count(), 0, 'the total row is not a link');
+    // Column headers sort: highest first, then lowest; the total row stays last.
+    const order = async () => page.locator('#tblAttr tbody tr[data-attr]').evaluateAll(rows => rows.map(r => r.dataset.attr));
+    await page.locator('#tblAttr th[data-sort="dOrders"]').click();
+    assert.deepEqual(await order(), ['Alpha', 'Bravo']);
+    assert.equal(await page.locator('#tblAttr th[data-sort="dOrders"]').getAttribute('aria-sort'), 'descending');
+    await page.locator('#tblAttr th[data-sort="dOrders"]').click();
+    assert.deepEqual(await order(), ['Bravo', 'Alpha']);
+    await page.locator('#tblAttr th[data-sort="share"]').press('Enter');
+    assert.deepEqual(await order(), ['Bravo', 'Alpha'], 'Bravo is 100% indirect, Alpha 67%');
+    assert.match(await page.locator('#tblAttr tfoot').innerText(), /Total akun/);
   });
 
   test('a long product list shows five first and the rest on request', async page => {

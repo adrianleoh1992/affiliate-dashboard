@@ -612,7 +612,7 @@ $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compac
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false;const ATTR_OPEN=new Map(); // tag → {kind, all}
+let ATTR_ALL=false,ATTR_SORT=null;const ATTR_OPEN=new Map(); // tag → {kind, all}
 const ATTR_KIND={direct:'Terjual langsung',indirect:'Terjual tidak langsung',unknown:'Tipe tidak diketahui'},ATTR_TOP=5;
 /* Products behind one kind of a tag's orders: the direct list is what the
    link sold, the indirect list is what buyers chose instead. Five first, the
@@ -642,9 +642,23 @@ function renderAttr(){
   const cells=(a,tag)=>`<td class="num">${count(a,'direct','langsung',tag)}</td><td class="num">${rp(a.direct.comm)}</td><td class="num">${count(a,'indirect','tidak langsung',tag)}</td><td class="num">${rp(a.indirect.comm)}</td><td class="num">${share(a)}</td>`
     +(unk?`<td class="num" title="${nf(a.unknown.rows)} baris tanpa tipe atribusi yang jelas">${count(a,'unknown','tidak diketahui',tag)} · ${rp(a.unknown.comm)}</td>`:'');
   const head=['Tag','Pesanan langsung','Komisi langsung','Pesanan tidak langsung','Komisi tidak langsung','Porsi komisi tidak langsung'].concat(unk?['Tidak diketahui']:[]);
-  tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')+'</tr>';
+  // Every column sorts; until one is picked the order is total commission, highest first.
+  const keys=['tag','dOrders','dComm','iOrders','iComm','share','unknown'];
+  const val={tag:t=>t.tag,dOrders:t=>t.attr.direct.orders,dComm:t=>t.attr.direct.comm,iOrders:t=>t.attr.indirect.orders,iComm:t=>t.attr.indirect.comm,
+    share:t=>{const c=t.attr.direct.comm+t.attr.indirect.comm;return c>0?t.attr.indirect.comm/c:-1},unknown:t=>t.attr.unknown.orders};
+  const S=ATTR_SORT&&head[keys.indexOf(ATTR_SORT.key)]?ATTR_SORT:null;
+  tb.querySelector('thead').innerHTML='<tr>'+head.map((h,i)=>{const k=keys[i],on=S&&S.key===k;
+    return`<th class="${i?'num':''} sortable" data-sort="${k}" tabindex="0" aria-sort="${on?(S.dir<0?'descending':'ascending'):'none'}">${h}${on?(S.dir<0?' ▾':' ▴'):''}</th>`}).join('')+'</tr>';
+  tb.querySelectorAll('th[data-sort]').forEach(th=>{
+    const go=()=>{const k=th.dataset.sort;ATTR_SORT=S&&S.key===k?{key:k,dir:-S.dir}:{key:k,dir:k==='tag'?1:-1};renderAttr()};
+    th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};
+  });
   const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
-    .sort((a,b)=>b.comm-a.comm||a.tag.localeCompare(b.tag));
+    .sort((a,b)=>{
+      if(!S)return b.comm-a.comm||a.tag.localeCompare(b.tag);
+      const x=val[S.key](a),y=val[S.key](b);
+      return (S.key==='tag'?S.dir*String(x).localeCompare(y):S.dir*(x-y))||b.comm-a.comm||a.tag.localeCompare(b.tag);
+    });
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
   tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr data-attr="${esc(t.tag)}"><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr,t.tag)}</tr>`).join('')
     ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
