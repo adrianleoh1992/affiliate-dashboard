@@ -183,6 +183,9 @@ async function main() {
       assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Pesanan tidak langsung'), 'Direct/indirect table exported');
       assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text === 'Total akun'), 'Direct/indirect account total exported');
       assert.equal(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Tag / jenis'), mode === 'lengkap', 'Product split only in Lengkap');
+      // Every mode carries the per-tag click costs, lost clicks and direct/indirect split.
+      for (const h of ['Klik Meta / CPC', 'LP view / biaya', 'Klik Shopee / CPC', 'Klik hilang', 'Langsung', 'Tidak langsung'])
+        assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === h), mode + ' per-tag click table column: ' + h);
       const pageNumbers = new Set(report.bounds.filter(cell => cell.kind === 'body').map(cell => cell.page));
       for (const pageNumber of pageNumbers) {
         assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.page === pageNumber), 'Table headers must repeat on each page');
