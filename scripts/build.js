@@ -9,6 +9,12 @@ const assets = ['index.html', 'index-daily.html', 'styles.css', 'app.js', 'engin
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 for (const file of assets) fs.cpSync(path.join(root, file), path.join(out, file), { recursive: true });
+// A small version mark in the header, so a stale tab is easy to spot: the
+// commit Vercel built and the build time in WIB.
+const sha = (process.env.VERCEL_GIT_COMMIT_SHA || gitSha() || '').slice(0, 7);
+const built = new Date(Date.now() + 7 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' WIB';
+const indexPath = path.join(out, 'index.html');
+fs.writeFileSync(indexPath, fs.readFileSync(indexPath, 'utf8').replace('· versi lokal', `· versi ${sha || 'tanpa commit'} · ${built}`));
 // The shared database. Defaults to the team's Supabase project; the Vercel env
 // vars SUPABASE_URL and SUPABASE_ANON_KEY override it, and SUPABASE_URL=off
 // builds a browser-only dashboard. Only the public publishable key belongs
@@ -23,6 +29,9 @@ if (supabase.url || supabase.anonKey) {
   if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(supabase.anonKey) && jwtRole(supabase.anonKey) !== 'anon')
     throw new Error('SUPABASE_ANON_KEY harus publishable key (sb_publishable_…) atau anon key; kunci service_role/secret tidak boleh dipakai');
   fs.writeFileSync(path.join(out, 'supabase-config.js'), `window.SUPABASE_CONFIG = ${JSON.stringify(supabase)};\n`);
+}
+function gitSha() {
+  try { return require('node:child_process').execSync('git rev-parse HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch (_) { return ''; }
 }
 function jwtRole(token) {
   const parts = token.split('.');
