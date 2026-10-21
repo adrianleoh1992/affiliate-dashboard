@@ -386,10 +386,10 @@
     /* One row per tag with every click cost, the clicks lost before Shopee
        and the direct/indirect split, in every mode: this is the table the
        account owner reads tag by tag. */
-    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang dalam rupiah, dibulatkan. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee, tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. L = langsung, TL = tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
-    // One value per cell, whole rupiah without the prefix, so every row stays on one line.
+    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang (Rp) dibulatkan ke rupiah terdekat. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee, tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. L = langsung, TL = tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
+    // One value per cell, money as whole rupiah with Rp and counts plain, so every row stays on one line.
     const lost = v => (v == null || !finite(v) ? '-' : v < 0 ? '+' + Math.abs(v).toFixed(0) + '%' : v.toFixed(0) + '%');
-    const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? integer(Math.round(amount(v))) : '-');
+    const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? 'Rp ' + integer(Math.round(amount(v))) : '-');
     const split = attribution.column;
     table(['Tag', 'Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang',
       'Order L', 'Komisi L', 'Order TL', 'Komisi TL'], tags.map(t => [

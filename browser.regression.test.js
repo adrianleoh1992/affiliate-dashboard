@@ -215,7 +215,7 @@ async function main() {
     const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
     const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
     assert.equal(cells[await col('lpv')], '8');
-    assert.equal(cells[await col('cpLpv')], '13'); // Rp100 / 8 LP views
+    assert.equal(cells[await col('cpLpv')], 'Rp13'); // Rp100 / 8 LP views
     assert.equal(cells[await col('lostTotal')], '60%'); // 10 Meta clicks, 4 reached Shopee
     await page.locator('#tblMain th[data-sort="lostTotal"]').click();
     assert.equal(await page.locator('#tblMain th[data-sort="lostTotal"]').getAttribute('aria-sort'), 'descending');

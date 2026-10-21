@@ -768,7 +768,7 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
   // A ROAS a few orders away from the threshold that decided the verdict.
   const edge=t.borderAt!=null?` <span class="pill edge" title="ROAS matang ${rx(t.matureRoasEff)} berada dalam ±10% dari ambang ${t.borderAt===RESULT.options.thScale?'Scale':'Pantau'} ${rx(t.borderAt)}. Beberapa pesanan saja bisa membalik vonis.">di batas</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?nf(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?nf(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?nf(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?nf(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t.lostTotal,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+filterName(FILTER)+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+filterName(FILTER)+' · '+rows.length+' tag':'';
@@ -802,10 +802,10 @@ function renderUnit(){
     <td><span class="dot ${x.active?'on':'off'}"></span>${x.active?'Nyala':'Mati'}</td>
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.cpm)}</td>
     <td class="num">${nf(x.impr)}</td><td class="num">${nf(x.clicks)}</td>
-    <td class="num">${nf(x.cpc)}</td>
+    <td class="num">${full(x.cpc)}</td>
     <td class="num"${x.shopeeClicks?' title="Jendela laporan klik, dibagi proporsional dari tag induk"':''}>${x.shopeeClicks?nf(x.shopeeClicks):'—'}</td>
-    <td class="num"${x.cpcShopee?' title="Biaya pada jendela klik ÷ klik masuk, di tingkat tag"':''}>${x.cpcShopee?nf(x.cpcShopee):'—'}</td>
-    <td class="num col-ideal"><b>${nf(x.cpcIdeal)}</b></td>
+    <td class="num"${x.cpcShopee?' title="Biaya pada jendela klik ÷ klik masuk, di tingkat tag"':''}>${x.cpcShopee?full(x.cpcShopee):'—'}</td>
+    <td class="num col-ideal"><b>${full(x.cpcIdeal)}</b></td>
     <td class="num">${dec(x.ctr,2)}</td><td class="num">${nf(x.orders)}</td>
     <td class="num">${dec(x.convRate,2)}</td><td class="num">${rp(x.commEff)}</td>
     <td class="num ${x.netEff>=0?'pos':'neg'}">${rp(x.netEff)}</td>
@@ -859,7 +859,7 @@ function orderCells(v,orders){
   return `<td class="num">${nf(v.clicks)}</td>
     <td class="num">${v.clicks&&v.spend?nf(v.spend/v.clicks):'—'}</td>
     <td class="num">${v.shopeeClicks?nf(v.shopeeClicks):'—'}</td>
-    <td class="num">${v.shopeeClicks&&v.spend?nf(v.spend/v.shopeeClicks):'—'}</td>
+    <td class="num">${v.shopeeClicks&&v.spend?full(v.spend/v.shopeeClicks):'—'}</td>
     <td class="num">${nf(orders)}</td>
     <td class="num">${orders&&v.spend?rp(v.spend/orders):'—'}</td>
     <td class="num">${orders?rp(v.gmv/orders):'—'}</td>
