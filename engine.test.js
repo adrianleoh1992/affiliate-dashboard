@@ -66,6 +66,7 @@ assert.equal(a.leak.metaClicks, 20);
 assert.equal(a.leak.shopeeClicks, 2);
 assert.equal(a.leak.failed, 18);
 assert.equal(a.leak.severity, 'bad');
+assert.equal(a.leak.reliable, false, '20 Meta clicks are too few to judge a link');
 
 /* Verdict: mature ROAS is 275/100 = 2.75x. Aug 2-4 sit inside the
    3-day lag window and must not turn this profitable mature tag into STOP. */
@@ -78,7 +79,10 @@ assert.equal(r.range.matureUntil, '2026-08-01');
 const r2 = E.analyze(data, { ppn:0, minSpend:0, minDays:1, lagDays:0, streakDays:3 });
 const a2 = r2.tags.find(x => x.tag === 'A');
 assert.ok(a2.streak >= 3, 'without lag the streak should fire, got ' + a2.streak);
-assert.ok(/cek link/.test(a2.reason), 'severe leak should redirect the STOP reason: ' + a2.reason);
+// The link warning no longer replaces the STOP reason, and 20 clicks are too few to raise one.
+assert.match(a2.reason, /ROAS di bawah 1 selama \d+ hari produksi berturut/, 'the STOP reason must stay the real reason');
+assert.equal(a2.leak.reliable, false);
+assert.equal(a2.linkNote, '');
 
 /* Ad-unit grain */
 assert.equal(r.adUnits.length, 1);
@@ -141,6 +145,41 @@ assert.equal(r.actions.organicCandidates.length, 0);
 assert.ok(r.actions.concentration, 'concentration must be computed when paid tags exist');
 assert.equal(r.actions.concentration.topTag, 'A');
 assert.equal(Math.round(r.actions.concentration.topShare), 100);
+// One paid tag: no Pareto rows, the old fields carry the card.
+assert.deepEqual(r.actions.concentration.groups, []);
+assert.equal(r.actions.concentration.rest, undefined);
+
+/* ── Concentration as a Pareto: spend share vs paid effective commission ─── */
+{
+  const tagsSpend = [['Alpha', 1000, 3000], ['Bravo', 800, 1000], ['Charlie', 600, 600], ['Delta', 400, 100],
+    ['Echo', 200, 50], ['Foxtrot', 100, 10]];
+  const affiliate = tagsSpend.map(([tag, , comm], i) => ({ 'ID Pemesanan': 'p' + i, 'Status Pesanan': 'Selesai',
+    'Waktu Pemesanan': '2026-08-01 10:00:00', 'Waktu Klik': '2026-08-01 09:00:00', 'Total Komisi per Pesanan(Rp)': String(comm),
+    'Tag_link1': tag, 'Jumlah': '1', 'Nilai Pembelian(Rp)': '1000' }));
+  // An organic tag stays out of the paid commission base.
+  affiliate.push({ ...affiliate[0], 'ID Pemesanan': 'org', 'Tag_link1': 'Organik', 'Total Komisi per Pesanan(Rp)': '5000' });
+  const ads = tagsSpend.map(([tag, spend]) => ({ 'Reporting starts': '2026-08-01', 'Ad name': tag, 'Amount spent (IDR)': String(spend), 'Link clicks': '10' }));
+  // A paid ad name that is not in the commission report: commission 0, disclosed.
+  ads.push({ 'Reporting starts': '2026-08-01', 'Ad name': 'Zulu Kilo', 'Amount spent (IDR)': '300', 'Link clicks': '10' });
+  const res = E.analyze({ affiliate, ads, clicks: [], tagMap: {} }, { ppn: 0, minSpend: 0, minDays: 1 });
+  const C = res.actions.concentration, G = C.groups, last = G[G.length - 1];
+  assert.equal(C.count, 7);
+  assert.deepEqual(G.map(g => g.n), [1, 3, 5], 'only groups smaller than the paid tag count');
+  assert.equal(G[0].n, 1);
+  assert.ok(Math.abs(G[0].spendShare - C.topShare) < 1e-9);
+  assert.deepEqual(G[1].tags, ['Alpha', 'Bravo', 'Charlie']);
+  for (let i = 1; i < G.length; i++) assert.ok(G[i].spendShare >= G[i - 1].spendShare, 'cumulative shares never fall');
+  assert.equal(C.rest.n, 2);
+  assert.ok(Math.abs(last.spendShare + C.rest.spendShare - 100) < 1e-9);
+  assert.ok(Math.abs(last.commShare + C.rest.commShare - 100) < 1e-9);
+  assert.ok(Math.abs(last.spend + C.rest.spend - res.kpi.paidSpend) < 1e-9);
+  assert.ok(Math.abs((last.commEff + C.rest.commEff) / res.kpi.paidSpend - res.kpi.paidRoas) < 1e-9);
+  assert.ok(Math.abs(C.paidComm - 4760) < 1e-9, 'paid commission only, organic excluded');
+  assert.ok(Math.abs(G[0].commShare - 3000 / 4760 * 100) < 1e-9);
+  assert.ok(Math.abs(C.rest.roasEff - 60 / 300) < 1e-9);
+  assert.deepEqual([C.noComm.n, C.noComm.spend], [1, 300]);
+  assert.ok(Math.abs(C.noComm.spendShare - 300 / 3400 * 100) < 1e-9);
+}
 
 /* An organic tag should surface with a cost-per-order ceiling */
 const withOrganic = JSON.parse(JSON.stringify(data));

@@ -193,6 +193,8 @@
     const numericKeys = result.type === 'affiliate' ? ['comm', 'commNet', 'gmv', 'refund', 'price', 'qty', 'rate'] : isAds ? ['spend', 'clicks', 'impr', 'reach', 'freq', 'cpm', 'ctr', 'lpv', 'results', 'shopClicks', 'allClicks'] : [];
     const numeric = new Map();
     numericKeys.forEach(key => col[key].filter(name => fields.includes(name)).forEach(name => numeric.set(name, key)));
+    // The synthesized Link clicks column is filled from Results below, so it is never "blank".
+    if (clicksFromResults) numeric.delete(col.clicks[0]);
     const countKeys = new Set(['qty', 'clicks', 'impr', 'reach', 'lpv', 'results', 'shopClicks', 'allClicks']);
     let start = '', end = '', nonDaily = false;
     records.forEach((cells, index) => {
@@ -232,13 +234,23 @@
       if (isAds) for (const field of ['Currency', 'Account currency']) {
         if (row[field] && row[field].toUpperCase() !== 'IDR') rowIssue('error', 'unsupported_currency', `mata uang ${row[field]} bukan IDR. Gunakan laporan IDR agar biaya tidak tercampur.`, field, row[field]);
       }
+      // Meta lists every ad for every day of the range, delivered or not, and
+      // leaves its counters blank when nothing ran. With no spend there is no
+      // cost a missing counter could distort, so those blanks are not notes.
+      const spendField = result.type === 'ads' ? col.spend.find(name => fields.includes(name)) : '';
+      const spendValue = spendField ? strictNumber(row[spendField], { delimiter: result.delimiter }) : null;
+      const idle = !!(spendValue && spendValue.valid && spendValue.value === 0);
       for (const [field, key] of numeric) {
         const raw = row[field], number = strictNumber(raw, { delimiter: result.delimiter, percent: key === 'rate' || key === 'ctr' });
         const essential = key === 'spend' || key === 'comm' && field === col.comm.find(name => row[name] && !EMPTY_MARKERS.test(row[name]));
         if (number.empty) {
           if (essential && !excluded) rowIssue('error', 'missing_amount', `${field} kosong. Isi angka yang benar (0 jika benar-benar nol), lalu impor ulang.`, field, raw);
           else if (!excluded && (key === 'gmv' || key === 'price')) rowIssue('error', 'missing_amount', `${field} kosong. Isi 0 jika nilainya nol agar nilai uang tidak diasumsikan.`, field, raw);
-          else { row[field] = ''; rowIssue('warning', 'empty_optional_number', `${field} tidak tersedia${excluded ? '; pesanan tetap dicatat sebagai ' + row[col.status[0]] + ' dan dikecualikan dari ROI' : '; metrik terkait mungkin belum lengkap'}.`, field, raw); }
+          // CPM, CTR and Frequency are recomputed or unused, so a blank there changes nothing.
+          else if (idle || key === 'cpm' || key === 'ctr' || key === 'freq') row[field] = '';
+          // The engine reads a blank counter as 0; say that rather than "incomplete".
+          else { row[field] = ''; rowIssue('warning', 'empty_optional_number', result.type === 'ads' ? `${field} kosong pada baris berbiaya; dihitung 0.`
+            : `${field} tidak tersedia${excluded ? '; pesanan tetap dicatat sebagai ' + row[col.status[0]] + ' dan dikecualikan dari ROI' : '; metrik terkait mungkin belum lengkap'}.`, field, raw); }
         } else if (!number.valid || countKeys.has(key) && (!Number.isInteger(number.value) || number.value < 0) || !['comm', 'commNet'].includes(key) && number.value < 0) {
           rowIssue('error', 'invalid_number', `${field} berisi angka tidak valid "${raw}". Perbaiki nilainya; baris ini tidak dimasukkan.`, field, raw);
         } else {

@@ -19,6 +19,7 @@ function fixture(size = 100) {
       'Tag_link1': tag, 'Total Komisi per Produk(Rp)': '123456.78', 'Nilai Pembelian(Rp)': '987654.32',
       'Nama Barang': 'Produk pengujian ' + index + ': ' + tag, 'Nama Toko': 'Café Nusantara',
       'Platform': 'Facebook', 'L1 Kategori Global': 'Perlengkapan rumah', 'Content Type': 'Video',
+      'Tipe Penawaran': index % 2 ? 'Komisi XTRA' : '-',
       'Tipe Pesanan': index % 3 ? 'Pesanan dari Toko yang tidak Dipromosikan' : 'Pesanan Produk dari Toko yang Dipromosikan',
     });
     ads.push({ 'Ad name': 'Campaign ' + index + ' | Set A | ' + tag, 'Campaign name': 'Campaign ' + index,
@@ -158,17 +159,46 @@ async function main() {
       }
       assert.equal(report.charts[0].page, 2, 'Trend follows the main dashboard page');
       const front = report.labels.filter(label => label.page === 1).map(label => label.value);
-      for (const label of ['01  Dashboard utama', 'Komisi Total', 'Spend Iklan', 'Laba Bersih', 'ROAS Total',
-        'Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Biaya di Tag STOP', 'Total bisa dialihkan']) {
+      for (const label of ['01  Dashboard utama', 'Komisi Efektif', 'Spend Iklan', 'Laba Bersih', 'ROAS Gabungan',
+        'Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee', 'Rugi di Tag STOP', 'Potensi perbaikan laba', 'Tag belum cukup data']) {
         assert.ok(front.includes(label), 'Front page must include the main dashboard block: ' + label);
       }
-      assert.equal(report.cards.filter(card => card.page === 1).length, 15, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      assert.equal(report.cards.filter(card => card.page === 1).length, 16, 'All KPI, click, budget and decision cards must fit on the dashboard page');
+      // The headline is effective; the total sits in its note. The PPN used is on page 1 and every footer.
+      const at = (label, offset) => front[front.indexOf(label) + offset];
+      assert.match(at('Komisi Efektif', 2), /^Total Rp [\d.]+,\d\d \| [\d.]+ pesanan$/);
+      assert.equal(at('Spend Iklan', 2), 'Termasuk PPN 11%');
+      assert.equal(at('Laba Bersih', 2), 'Komisi efektif - (biaya + PPN 11%)');
+      assert.ok(front.some(label => label.startsWith('Periode ') && label.endsWith('|  PPN biaya iklan 11%')), 'header names the PPN');
+      for (let page = 1; page <= report.pages; page++) assert.ok(report.labels.some(label => label.page === page
+        && label.value.endsWith(' | PPN biaya iklan 11% | Semua nilai uang dalam IDR')), mode + ': footer of page ' + page + ' names the PPN');
+      // Page 2: completed commission, its floor ROAS and the cancellation rate, untruncated in 4 columns.
+      const second = report.labels.filter(label => label.page === 2).map(label => label.value);
+      for (const [label, note] of [['Komisi organik efektif', 'Termasuk Komisi Efektif'], ['Komisi tertunda', '20,00% dari komisi laporan'],
+        ['Komisi selesai', 'ROAS hanya selesai 1,19x'], ['Pesanan batal', 'Menurut nilai 0,00%']]) {
+        const at = second.indexOf(label);
+        assert.ok(at >= 0, 'Page 2 must include ' + label);
+        assert.equal(second[at + 2], note, label + ' note must fit its card');
+      }
+      // The offer row is the whole product commission, not the XTRA component.
+      const offerRow = report.bounds.some(cell => cell.kind === 'body' && cell.text.includes('Tipe penawaran (seluruh komisi produk)'));
+      const pageText = report.labels.map(label => label.value).join(' ');
+      assert.equal(offerRow, mode === 'lengkap', mode + ': offer-type rows belong to the complete report only');
+      assert.equal(pageText.includes('bukan besar komisi XTRA'), mode === 'lengkap', mode + ': the offer note travels with its rows');
       for (const card of report.cards) assert.ok(card.x >= 14 && card.x + card.width <= 196.01 && card.y >= 18 && card.y + card.height <= 279,
         'Dashboard cards must remain within page bounds');
       const trend = report.charts[0].box.rows;
       assert.ok(trend.some(row => row.comm != null));
-      assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) - result.kpi.commEff) < 0.0001,
-        'Trend must use effective commission matching the summary');
+      // The trend is by click date; with what sits before the start or has no
+      // click date it adds up to the summary's effective commission.
+      assert.ok(Math.abs(trend.reduce((sum, row) => sum + (row.comm || 0), 0) + result.byClick.beforeEff + result.byClick.missingEff
+        - result.kpi.commEff) < 0.0001, 'Trend must use effective commission matching the summary');
+      assert.ok(second.includes('Komisi efektif (tanggal klik)'), mode + ': the trend legend names its date basis');
+      // Concentration: a Pareto table of spend share vs paid effective commission share.
+      assert.ok(pageText.includes('Konsentrasi biaya vs komisi'), mode + ': concentration section');
+      assert.ok(report.bounds.some(cell => cell.kind === 'head' && cell.text === 'Porsi komisi efektif'));
+      assert.ok(report.bounds.some(cell => cell.kind === 'body' && cell.text === '90 tag di luar 10 teratas'), mode + ': the complement row');
+      assert.ok(!pageText.includes('Risiko konsentrasi anggaran'), mode + ': the old two-number grid is replaced');
       assert.equal(report.charts[1].box.items.reduce((sum, item) => sum + item.count, 0), result.tags.length);
       for (const cell of report.bounds) {
         assert.ok(cell.x >= 13.99 && cell.x + cell.width <= 196.01, 'Table cell must stay inside horizontal page bounds');
@@ -227,16 +257,38 @@ async function main() {
         return results.map(result => {
           labels = [];
           DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' });
-          return ['Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1]);
+          // The last entry is the Klik Hilang note, which names the per-tag sum and the net.
+          return ['Klik Meta', 'Klik Masuk Shopee', 'Klik Hilang', '% Klik Masuk Shopee'].map(label => labels[labels.indexOf(label) + 1])
+            .concat([labels[labels.indexOf('Klik Hilang') + 2]]);
         });
       } finally { window.jspdf.jsPDF = OriginalPDF; }
     }, [clickSource, { ...clickSource, clicks: [] }, { ...clickSource, ads: [] }]
       .map(source => Engine.analyze(source, { ppn: 0, lagDays: 0 })));
-    assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%'],
+    assert.deepEqual(clickReports[0], ['30', '30', '5', '100,00%', 'Per tag; bersih 0'],
       'Dashboard compares matched tags in the click window; gains on one tag must not offset lost clicks on another');
-    assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
-    assert.deepEqual(clickReports[2], ['-', '-', '-', '-'], 'Without ads, a click comparison must remain unavailable');
+    assert.deepEqual(clickReports[1], ['3.030', '-', '-', '-', 'Jumlah per tag'], 'Without a click report, show full-period Meta clicks and unavailable comparison metrics');
+    assert.deepEqual(clickReports[2], ['-', '-', '-', '-', 'Jumlah per tag'], 'Without ads, a click comparison must remain unavailable');
     console.log('PASS PDF dashboard click scope, per-tag losses and unavailable comparisons');
+    // 3 of 40 clicks arrive (7,5%): the dashboard note says "hanya 8%", so the lost share prints 92%, not 93%.
+    // 58 of 400 is 14,499…% in floating point: "hanya 14%", so 86%, not 85%.
+    const lostLabels = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, labels = [];
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { labels.push(String(value)); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); return labels; }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+    }, Engine.analyze({
+      affiliate: ['A', 'B'].map(tag => ({ 'ID Pemesanan': tag, 'Status Pesanan': 'Selesai', 'Waktu Pemesanan': '2026-09-01 10:00:00', 'Tag_link1': tag, 'Total Komisi per Produk(Rp)': '100' })),
+      ads: [['A', 40], ['B', 400]].map(([tag, clicks]) => ({ 'Ad name': tag, 'Amount spent (IDR)': '50', 'Reporting starts': '2026-09-01', 'Reporting ends': '2026-09-01', 'Link clicks': String(clicks) })),
+      clicks: [['A', 3], ['B', 58]].flatMap(([tag, n]) => Array.from({ length: n }, (_, i) => ({ 'Waktu Klik': '2026-09-01 09:00:' + String(i).padStart(2, '0'), 'Tag_link': tag }))), tagMap: { A: 'A', B: 'B' },
+    }, { ppn: 0, lagDays: 0 }));
+    assert.ok(lostLabels.includes('92%') && lostLabels.includes('86%'), 'per-tag Klik hilang rounds from the arriving share');
+    assert.ok(!lostLabels.includes('93%') && !lostLabels.includes('85%'));
+    console.log('PASS PDF per-tag lost clicks round like the dashboard link note');
     const partialSources = Engine.analyze({
       affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'coverage-' + day, 'Status Pesanan': 'Selesai',
         'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Tag_link1': 'Coverage',
@@ -260,6 +312,74 @@ async function main() {
     assert.deepEqual(coverageRows[2].slice(1), ['-', 'Rp 100,00', '-', '-', '1'], 'Affiliate-only day must not imply zero ad spend');
     assert.deepEqual(coverageRows[3].slice(1), ['Rp 0,00', 'Rp 0,00', 'Rp 0,00', '-', '1'], 'Source rows containing zero must retain their real zero values');
     console.log('PASS PDF daily table distinguishes missing sources from real zero values');
+    // Click-date twin: the gap still means "no source row", and commission the
+    // trend cannot place is named instead of dropped.
+    const clickCoverage = Engine.analyze({
+      affiliate: [1, 3, 4].map(day => ({ 'ID Pemesanan': 'click-' + day, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-0' + day + ' 10:00:00', 'Waktu Klik': '2026-09-0' + day + ' 09:00:00', 'Tag_link1': 'Coverage',
+        'Total Komisi per Produk(Rp)': day === 4 ? '0' : '100' })).concat([{ 'ID Pemesanan': 'click-none', 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': '2026-09-03 11:00:00', 'Tag_link1': 'Coverage', 'Total Komisi per Produk(Rp)': '40' }]),
+      ads: [1, 2, 4].map(day => ({ 'Ad name': 'Coverage', 'Amount spent (IDR)': day === 4 ? '0' : '50',
+        'Reporting starts': '2026-09-0' + day, 'Reporting ends': '2026-09-0' + day })), clicks: [],
+    }, { ppn: 0, lagDays: 0 });
+    const clickTrend = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, originalCharts = DashboardPDFCharts.create, labels = [];
+      let trend;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 2) labels.push(String(value));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      DashboardPDFCharts.create = function (doc, options) {
+        return Object.fromEntries(Object.entries(originalCharts(doc, options)).map(([name, draw]) => [name, box => {
+          if (name === 'trend') trend = box; return draw(box);
+        }]));
+      };
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; DashboardPDFCharts.create = originalCharts; }
+      return { rows: trend.rows.map(row => [row.date, row.comm]), label: trend.commLabel, text: labels.join(' ') };
+    }, clickCoverage);
+    assert.deepEqual(clickTrend.rows, [['2026-09-01', 100], ['2026-09-02', null], ['2026-09-03', 100], ['2026-09-04', 0]],
+      'An ad-only day without click commission stays a gap; a real zero stays a point');
+    assert.equal(clickTrend.label, 'Komisi efektif (tanggal klik)');
+    assert.match(clickTrend.text, /tanggal klik/);
+    assert.match(clickTrend.text, /Rp 40,00 tanpa tanggal klik tidak tampil\./);
+    console.log('PASS PDF click-date trend keeps gaps for missing sources and names commission it cannot place');
+    // Orders clicked on 09-06 and 09-07 land days later and are still Tertunda: by click date the
+    // trend's unripe band starts two days before the order-date lag cut-off.
+    const ripeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+    const ripeOrder = (id, clicked, placed, status) => ({ 'ID Pemesanan': 'ripe-' + id, 'Status Pesanan': status,
+      'Waktu Pemesanan': placed + ' 10:00:00', 'Waktu Klik': clicked + ' 09:00:00', 'Tag_link1': 'Ripe',
+      'Total Komisi per Produk(Rp)': '100' });
+    const ripeSource = {
+      affiliate: [...ripeDays.slice(0, 5).map((day, i) => ripeOrder(i, day, day, 'Selesai')),
+        ripeOrder(6, '2026-09-06', '2026-09-09', 'Tertunda'), ripeOrder(7, '2026-09-07', '2026-09-10', 'Tertunda')],
+      ads: ripeDays.map(day => ({ 'Ad name': 'Ripe', 'Amount spent (IDR)': '50', 'Reporting starts': day, 'Reporting ends': day })), clicks: [],
+    };
+    const noClickTime = rows => rows.map(row => { const copy = { ...row }; delete copy['Waktu Klik']; return copy; });
+    const ripeResults = [ripeSource, { ...ripeSource, affiliate: noClickTime(ripeSource.affiliate) }]
+      .map(source => Engine.analyze(source, { ppn: 0, lagDays: 3 }));
+    const ripeTrend = await page.evaluate(results => {
+      const originalCharts = DashboardPDFCharts.create;
+      let trend;
+      DashboardPDFCharts.create = function (doc, options) {
+        return Object.fromEntries(Object.entries(originalCharts(doc, options)).map(([name, draw]) => [name, box => {
+          if (name === 'trend') trend = box; return draw(box);
+        }]));
+      };
+      try { return results.map(result => { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-11' }); return trend.matureUntil; }); }
+      finally { DashboardPDFCharts.create = originalCharts; }
+    }, ripeResults);
+    assert.equal(ripeResults[0].range.matureUntil, '2026-09-07');
+    assert.equal(ripeResults[0].byClick.matureUntil, '2026-09-05', 'fixture: the click-date boundary sits before the order-date one');
+    assert.equal(ripeTrend[0], ripeResults[0].byClick.matureUntil, 'a click-date trend shades from the click-date boundary');
+    assert.equal(ripeResults[1].byClick.available, false);
+    assert.equal(ripeTrend[1], ripeResults[1].range.matureUntil, 'without Waktu Klik the trend keeps the order-date boundary');
+    console.log('PASS PDF trend shades unripe days from the boundary of its own date basis');
     const activity = Engine.analyze({
       affiliate: [['Organik tetap', 100, 'Selesai'], ['Refund tetap', -10, 'Selesai'], ['Pending tetap', 50, 'Tertunda']]
         .map(([tag, commission, status], index) => ({ 'ID Pemesanan': 'activity-' + index,
@@ -307,6 +427,146 @@ async function main() {
       assert.deepEqual(report.charts.pairedBars.rows.map(row => row.label).sort(), ['Biaya tetap', 'Organik tetap', 'Pending tetap', 'Refund tetap']);
     }
     console.log('PASS PDF all modes omit zero-activity tags consistently while retaining organic, loss, refund and pending commission');
+    // A Scale at 2,05x sits on its threshold; two paid tags are not judged yet.
+    const edgeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+    const edgeOrder = (tag, date, commission) => ({ 'ID Pemesanan': tag + date, 'Status Pesanan': 'Selesai',
+      'Waktu Pemesanan': date + ' 10:00:00', 'Tag_link1': tag, 'Total Komisi per Produk(Rp)': String(commission) });
+    const edgeAd = (tag, date, spend) => ({ 'Ad name': tag, 'Amount spent (IDR)': String(spend),
+      'Reporting starts': date, 'Reporting ends': date });
+    const edge = Engine.analyze({
+      affiliate: [...edgeDays.map(date => edgeOrder('Scale205', date, 41000)), edgeOrder('SmallPaid', '2026-09-01', 4000)],
+      ads: [...edgeDays.map(date => edgeAd('Scale205', date, 20000)), edgeAd('SmallPaid', '2026-09-01', 7500),
+        edgeAd('SmallPaid', '2026-09-02', 7500), edgeAd('NoSuchTag', '2026-09-02', 9000)], clicks: [],
+    }, { ppn: 0, lagDays: 3 });
+    const edgeReport = await page.evaluate(result => {
+      const api = window.jspdf.jsPDF.API, originalTable = api.autoTable, OriginalPDF = window.jspdf.jsPDF;
+      const tables = [], front = [];
+      api.autoTable = function (options) { tables.push(options.body); return originalTable.call(this, options); };
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 1) front.push([].concat(value).join(' '));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'lengkap', generatedAt: '2026-09-11' }); }
+      finally { api.autoTable = originalTable; window.jspdf.jsPDF = OriginalPDF; }
+      return { tables, front };
+    }, edge);
+    const verdictCells = edgeReport.tables.flat().filter(row => row.length === 6).map(row => row[0] + ' = ' + row[1]);
+    assert.ok(verdictCells.includes('Scale205 = Scale\ndi batas'), 'near-threshold verdict is marked: ' + verdictCells.join(' | '));
+    assert.ok(verdictCells.includes('SmallPaid = Belum cukup data'), 'the PDF names unjudged tags like the dashboard badge');
+    const card = edgeReport.front.indexOf('Tag belum cukup data');
+    assert.deepEqual(edgeReport.front.slice(card, card + 3), ['Tag belum cukup data', 'Rp -20.000,00', '2 tag | laba efektif']);
+    assert.ok(edgeReport.front.join(' ').includes('2 tag berbiaya belum cukup data (biaya Rp 24.000,00)'), 'page-1 note counts paid unjudged tags');
+    console.log('PASS PDF unjudged paid tags get their own card and near-threshold verdicts read "di batas"');
+    // Cancelled rows report the lost order value (refund + purchase value), not their zero commission.
+    const cancelOrder = (id, status, extra = {}) => ({ 'ID Pemesanan': id, 'Status Pesanan': status,
+      'Waktu Pemesanan': '2026-09-01 10:00:00', 'Tag_link1': 'Batal', 'Total Komisi per Produk(Rp)': status === 'Selesai' ? '100' : '0',
+      'Nilai Pembelian(Rp)': '1000', ...extra });
+    const cancelText = await page.evaluate(result => {
+      const OriginalPDF = window.jspdf.jsPDF, lines = [];
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { lines.push([].concat(value).join(' ')); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+      return lines.join(' ');
+    }, Engine.analyze({ affiliate: [cancelOrder('ok', 'Selesai'),
+      cancelOrder('c1', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '0', 'Jumlah Pengembalian Dana(Rp)': '80000' }),
+      cancelOrder('c2', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '20000' }), cancelOrder('c2', 'Dibatalkan', { 'Nilai Pembelian(Rp)': '5000' }),
+      cancelOrder('u1', 'Belum Dibayar')] }, { ppn: 0, lagDays: 0 }));
+    assert.ok(cancelText.includes('Dikecualikan: 3 baris batal (2 pesanan, nilai pesanan Rp 105.000,00; terbesar Rp 80.000,00) dan 1 baris belum dibayar.'), cancelText);
+    assert.ok(cancelText.includes('Pesanan batal 66,67% Menurut nilai 99,06%'), 'page 2 shows the cancellation rate by order and by value');
+    console.log('PASS PDF cancelled orders carry their order value and rate');
+    // adrian's Meta invoices carry no PPN, so there are no PPN what-if cards; at 0% the notes say so plainly.
+    const ppnText = await page.evaluate(results => {
+      const OriginalPDF = window.jspdf.jsPDF;
+      let lines;
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) { lines.push([].concat(value).join(' ')); return originalText.call(this, value, ...rest); };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { return results.map(result => { lines = []; DashboardPDF.create(result, { mode: 'ringkas', generatedAt: '2026-09-06' }); return lines; }); }
+      finally { window.jspdf.jsPDF = OriginalPDF; }
+    }, [{ ads: [] }, {}].map(extra => Engine.analyze({ ...clickSource, ...extra }, { ppn: 0, lagDays: 0 })));
+    for (const lines of ppnText) assert.ok(!lines.some(line => /Laba bila PPN|invoice Meta/.test(line)), 'no PPN what-if cards');
+    assert.ok(ppnText[1].includes('Tanpa PPN'));
+    assert.ok(ppnText[1].includes('Komisi efektif - biaya iklan'));
+    assert.ok(ppnText[1].some(line => line.endsWith(' | PPN biaya iklan 0% | Semua nilai uang dalam IDR')));
+    console.log('PASS PDF names the PPN on every page without a PPN what-if');
+    // Must-scale account: 54 STOP tags losing Rp 165.000 each (Rp 9,72 jt gross STOP spend), three
+    // overbid PANTAU tags and a leaking link inside and outside STOP. Tag names are short, so any
+    // '...' on page 1 is a card note that did not fit the 4-column grid.
+    const scaleDate = '2026-09-01';
+    // [tag, spend, commission, Meta link clicks, Shopee clicks]
+    const scaleSpecs = [
+      ...Array.from({ length: 53 }, (_, i) => ['Stop ' + String(i + 1).padStart(2, '0'), 180000, 15000, 0, 0]),
+      ['Stop Bocor', 180000, 15000, 400, 0],    // STOP; none of 400 clicks arrive
+      ['Scale Bocor', 250000, 750000, 500, 50], // SCALE; 10% of 500 clicks arrive
+      ['Sedikit', 100000, 300000, 120, 12],     // also 10%, but 120 clicks is under the 300-click floor
+      ...[1, 2, 3].map(i => ['Bid ' + i, 100000, 144000, 200, 190]), // ROAS 1,44: PANTAU paying above its ideal CPC
+    ];
+    const mustScale = Engine.analyze({
+      affiliate: scaleSpecs.map(([tag, , commission], index) => ({ 'ID Pemesanan': 'scale-' + index, 'Status Pesanan': 'Selesai',
+        'Waktu Pemesanan': scaleDate + ' 10:00:00', 'Waktu Klik': scaleDate + ' 09:00:00', 'Tag_link1': tag,
+        'Total Komisi per Produk(Rp)': String(commission) })),
+      ads: scaleSpecs.map(([tag, spend, , meta]) => ({ 'Ad name': tag, 'Amount spent (IDR)': String(spend),
+        'Reporting starts': scaleDate, 'Reporting ends': scaleDate, 'Link clicks': String(meta), 'Ad delivery': 'active' })),
+      clicks: scaleSpecs.flatMap(([tag, , , , shopee]) => Array.from({ length: shopee }, () => ({
+        'Waktu Klik': scaleDate + ' 09:00:00', 'Tag_link': tag }))),
+    }, { ppn: 0, lagDays: 0, minDays: 1 });
+    const act = mustScale.actions, scaleLeak = tag => mustScale.tags.find(t => t.tag === tag).leak;
+    assert.equal(act.stopCount, 54);
+    assert.equal(act.overbidCount, 3);
+    assert.deepEqual([act.stopLoss, act.stopSpend, act.bidSaving, act.maxGain, act.reclaimable], [8910000, 9720000, 60000, 8970000, 9780000],
+      'fixture: STOP tags still earn, so the loss (and maxGain) differ from the gross spend (and reclaimable)');
+    assert.deepEqual([act.leakStopCount, act.leakLiveCount, mustScale.kpi.leakTags], [1, 1, 2], 'fixture: one leaking link inside STOP, one outside');
+    assert.deepEqual([act.leakWasteLive, act.leakWaste], [225000, 405000]);
+    assert.deepEqual([scaleLeak('Sedikit').severity, scaleLeak('Sedikit').reliable], ['bad', false], 'fixture: under 25% but too few clicks to judge');
+    const scaleReport = await page.evaluate(result => {
+      const api = window.jspdf.jsPDF.API, originalTable = api.autoTable, OriginalPDF = window.jspdf.jsPDF;
+      const tables = [], front = [];
+      api.autoTable = function (options) { tables.push({ head: options.head[0], body: options.body }); return originalTable.call(this, options); };
+      window.jspdf.jsPDF = function (options) {
+        const doc = new OriginalPDF(options), originalText = doc.text;
+        doc.text = function (value, ...rest) {
+          if (doc.getCurrentPageInfo().pageNumber === 1) front.push([].concat(value).join(' '));
+          return originalText.call(this, value, ...rest);
+        };
+        return doc;
+      };
+      window.jspdf.jsPDF.API = OriginalPDF.API;
+      try { DashboardPDF.create(result, { mode: 'lengkap', generatedAt: '2026-09-02' }); }
+      finally { api.autoTable = originalTable; window.jspdf.jsPDF = OriginalPDF; }
+      return { tables, front };
+    }, mustScale);
+    const cutOff = scaleReport.front.filter(label => label.endsWith('...'));
+    assert.deepEqual(cutOff, [], 'page-1 cards must not be truncated at 54 STOP tags and Rp 9,72 jt: ' + cutOff.join(' | '));
+    const scaleCard = label => scaleReport.front.slice(scaleReport.front.indexOf(label) + 1, scaleReport.front.indexOf(label) + 3);
+    assert.deepEqual(scaleCard('Rugi di Tag STOP'), ['Rp 8.910.000,00', '54 tag'], 'the STOP card quotes actions.stopLoss, not the gross stopSpend');
+    assert.deepEqual(scaleCard('Potensi perbaikan laba'), ['Rp 8.970.000,00', 'Batas atas: bid + rugi STOP'],
+      'the card quotes actions.maxGain, not the legacy reclaimable budget');
+    const priority = Object.fromEntries(scaleReport.tables.find(t => t.head[0] === 'Periksa').body.map(row => [row[0], row.slice(1)]));
+    assert.equal(priority['Tag berstatus Stop'][0], '54');
+    assert.ok(priority['Tag berstatus Stop'][1].startsWith('Rp 8.910.000,00 rugi | '), 'the Stop row leads with the loss: ' + priority['Tag berstatus Stop'][1]);
+    assert.ok(priority['Tag berstatus Stop'][1].includes('biaya Rp 9.720.000,00 | 1 tag cek link dulu'), 'gross STOP spend, off the page-1 card, stays in this row');
+    // The leaking STOP tag is already in the Stop row; this row claims only the live one.
+    assert.deepEqual(priority['Link perlu dicek (di luar Stop)'], ['1', 'Rp 225.000,00 biaya klik kurang (maks.)'],
+      'the link row uses leakLiveCount and leakWasteLive, not the all-tag totals');
+    const leakTable = scaleReport.tables.find(t => t.head.includes('Masuk')), masukAt = leakTable.head.indexOf('Masuk');
+    const masuk = Object.fromEntries(leakTable.body.map(row => [row[0], row[masukAt]]));
+    assert.equal(masuk['Sedikit'], '10,00%\ndata sedikit', 'under 300 Meta clicks a low arrival rate is not a link verdict');
+    assert.equal(masuk['Scale Bocor'], '10,00%\ncek link');
+    assert.equal(masuk['Stop Bocor'], '0,00%\ncek link');
+    console.log('PASS PDF must-scale cards fit page 1; STOP loss, maxGain and live link money match Prioritas tindakan and the leak table');
     // Large money values in the per-tag click table shrink to fit instead of wrapping:
     // "Rp 1.500.000" split over two lines reads as Rp1.500.
     const wide = await page.evaluate(result => {
@@ -370,6 +630,8 @@ async function main() {
       assert.deepEqual(platform.map(row => row[0]), ['Facebook', 'Instagram', 'Other', 'Total']);
       assert.equal(platform[2][4], '9', 'Other row carries its Shopee clicks');
       assert.equal(platform[2][5], '-', 'Other has no lost-click figure');
+      // 70 of 80 arrived is 87,5%: the dashboard shows 12% lost, so the PDF does too (not 13%).
+      assert.deepEqual(platform.map(row => row[5]), ['12%', '25%', '-', '6%']);
       const place = report.tables['Platform|Placement'][0];
       assert.deepEqual(place[place.length - 1].slice(0, 2), ['Other', 'Bukan placement Meta']);
       assert.equal(place[place.length - 1][8], 'Rp 55');

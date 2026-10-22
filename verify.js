@@ -41,7 +41,7 @@ console.log('impresi', k.impr.toLocaleString('id-ID'), '| reach', k.reach.toLoca
 console.log('CPM', rp(k.cpm), '| CPC', rp(k.cpc), '| CTR', k.ctr.toFixed(2)+'%',
             '| CR', k.convRate.toFixed(2)+'%', '| biaya/order', rp(k.costPerOrder));
 console.log('komisi rate', k.commRate.toFixed(2)+'%', '| avg order', rp(k.avgOrder), '| avg komisi', rp(k.avgComm));
-console.log('terbuang', rp(k.wasted), '| tag bocor', k.leakTags);
+console.log('biaya klik kurang', rp(k.wastedLow) + '–' + rp(k.wasted), '| tag cek link', k.leakTags);
 console.log('status', JSON.stringify(k.statusCount));
 console.log('vonis', JSON.stringify(k.counts));
 

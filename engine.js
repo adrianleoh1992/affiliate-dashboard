@@ -83,6 +83,13 @@ function diffDays(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 }
 function dict() { return Object.create(null); }
+/* Link health (README 5.6): under 25% of paid clicks arriving means the link or
+   sub_id is likely wrong; 25-70% is often just very cheap clicks; over 120% means
+   the tag also gets traffic from outside its ads, so its ROAS is an upper bound.
+   Judged only after enough paid clicks in the click window. */
+const LINK = { low: 25, warn: 70, over: 120, minClicks: 300 };
+// Comma decimals, matching the dashboard and PDF: 1,25x rather than 1.25x.
+function ratioText(n) { return n.toFixed(2).replace('.', ','); }
 function normalizeOptions(options) {
   const input = options || {}, out = Object.assign({}, DEFAULTS, input);
   const bounds = {
@@ -554,7 +561,10 @@ function analyze(data, options) {
 
   /* ── Filter source rows ─────────────────────────────────────────────── */
   const EXCLUDED = { 'Dibatalkan': 1, 'Belum Dibayar': 1 };
-  const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0 };
+  const fAff = [], excluded = { cancelled: 0, unpaid: 0, cancelledValue: 0, cancelledOrders: 0, cancelledMax: 0 };
+  // Shopee zeroes commission on cancelled rows; what was lost is the order
+  // value, which sits in the refund column or, for some rows, the purchase value.
+  const cancelledByOrder = new Map();
   const statusCount = dict();
   /* Status per day, counted in ORDERS not product rows — one order carrying
      eight products is one pending order, not eight. Cancelled and unpaid rows
@@ -579,12 +589,17 @@ function analyze(data, options) {
     sd.commBy[key] += c;
     if (key !== 'cancelled') { sd.comm += c; sd.qty += num(pick(r, COL.aff.qty)); }
     if (Object.prototype.hasOwnProperty.call(EXCLUDED, st)) {
-      if (st === 'Dibatalkan') { excluded.cancelled++; excluded.cancelledValue += num(pick(r, COL.aff.comm)); }
-      else excluded.unpaid++;
+      if (st === 'Dibatalkan') {
+        const value = num(pick(r, COL.aff.refund)) + num(pick(r, COL.aff.gmv));
+        excluded.cancelled++; excluded.cancelledValue += value;
+        if (id) cancelledByOrder.set(id, (cancelledByOrder.get(id) || 0) + value);
+      } else excluded.unpaid++;
       return;
     }
     fAff.push(r);
   });
+  excluded.cancelledOrders = cancelledByOrder.size;
+  cancelledByOrder.forEach(v => { if (v > excluded.cancelledMax) excluded.cancelledMax = v; });
   const fAds = ads.filter(r => inRange(dayOnly(pick(r, COL.ads.date))));
   const fClk = clk.filter(r => inRange(dayOnly(pick(r, COL.clk.time))));
 
@@ -635,6 +650,10 @@ function analyze(data, options) {
   }
 
   const dailyAll = dict();
+  // The same commission re-bucketed on Waktu Klik, the day the ad money bought
+  // it. What cannot sit on an in-range click day is counted, never dropped.
+  const byClick = { placed: 0, placedEff: 0, before: 0, beforeEff: 0, missing: 0, missingEff: 0 };
+  let clickRows = 0; // a row count, not a sum: zero-commission clicks still mean the column exists
   const platform = dict(), category = dict(), category2 = dict(), product = dict(), shop = dict();
   const hourly = new Array(24).fill(0), hourlyOrders = Array.from({ length: 24 }, () => new Set());
   const offerType = dict(), contentType = dict();
@@ -681,6 +700,19 @@ function analyze(data, options) {
     dailyAll[d].comm += c; dailyAll[d].gmv += g;
     dailyAll[d].commEff = (dailyAll[d].commEff || 0) + (st === 'Tertunda' ? c * o.pendingFactor : c);
     if (id) dailyAll[d].orders.add(id);
+
+    const ck = dayOnly(pick(r, COL.aff.clickAt));
+    const eff = st === 'Tertunda' ? c * o.pendingFactor : c;
+    if (isDate(ck) && ck < ds) { byClick.before += c; byClick.beforeEff += eff; clickRows++; }
+    else if (inRange(ck) && ck <= d) {
+      clickRows++;
+      if (!dailyAll[ck]) dailyAll[ck] = { date: ck, comm: 0, spend: 0, clicks: 0, gmv: 0, impr: 0, orders: new Set() };
+      const a = dailyAll[ck];
+      a.commByClick = (a.commByClick || 0) + c;
+      a.commEffByClick = (a.commEffByClick || 0) + eff;
+      if (st === 'Tertunda') a.pendingByClick = (a.pendingByClick || 0) + c;
+      byClick.placed += c; byClick.placedEff += eff;
+    } else { byClick.missing += c; byClick.missingEff += eff; }
 
     const h = hourOf(pick(r, COL.aff.orderAt));
     if (h != null) { hourly[h] += c; if (id) hourlyOrders[h].add(id); }
@@ -885,6 +917,27 @@ function analyze(data, options) {
   /* ── Attribution maturity ───────────────────────────────────────────── */
   const matureUntil = de ? addDays(de, -o.lagDays) : '';
   const isMature = d => !matureUntil || d <= matureUntil;
+  /* By click date the newest days are still filling in twice over: orders from
+     those clicks can still arrive after the export, and much of what arrived
+     is still Tertunda. The lag counts back from where the commission report
+     ends, not from the ads; click days after that end are unknown, not zero. */
+  const clickKnown = clickRows > 0;
+  const affEnd = Object.keys(statusDay).filter(isDate).sort().pop() || '';
+  const clickBase = affEnd && affEnd < de ? affEnd : de;
+  const clickLagUntil = clickBase ? addDays(clickBase, -o.lagDays) : '';
+  const PENDING_BAND = 0.5; // a click day with half or more of its commission Tertunda is not settled yet
+  let matureByClickUntil = clickLagUntil;
+  if (clickKnown && clickLagUntil) {
+    const dates = Object.keys(dailyAll).filter(isDate).sort();
+    for (let i = dates.length - 1; i >= 0; i--) {
+      const v = dailyAll[dates[i]], cc = v.commByClick || 0;
+      const heavy = cc > 0 && (v.pendingByClick || 0) / cc >= PENDING_BAND;
+      if (dates[i] > clickLagUntil || heavy) matureByClickUntil = addDays(dates[i], -1);
+      else break;
+    }
+    // A gap in the dates must not move the band's start past the lag cut-off.
+    if (matureByClickUntil > clickLagUntil) matureByClickUntil = clickLagUntil;
+  }
 
   const lagHist = dict(), lagOrders = new Set();
   let lagTotal = 0;
@@ -943,13 +996,21 @@ function analyze(data, options) {
   /* ── Per-tag verdicts ───────────────────────────────────────────────── */
   const targetMult = 1 + o.targetROI / 100;
 
-  function verdictFor(spend, commEff, daysProd, dailyRows, leak, hasPaidSpend) {
+  function verdictFor(spend, commEff, daysProd, dailyRows, hasPaidSpend) {
     let streak = 0;
     dailyRows.forEach(r => { if (r.roas < 1) streak++; else streak = 0; });
     const streakStop = streak >= o.streakDays;
     const roasEff = spend > 0 ? commEff / spend : (commEff > 0 ? Infinity : 0);
 
-    let status = 'evaluasi', label = 'Belum cukup data', reason = '';
+    let status = 'evaluasi', label = 'Belum cukup data', reason = '', borderAt = null;
+    /* "di batas": the ROAS that decided the verdict sits within ±10% of the
+       threshold it was compared with, so a few orders could flip it. Compared
+       on the 2-decimal value the reason prints (toFixed, like ratioText; 1.105
+       prints 1,10 but Math.round gives 1,11); the epsilon keeps 1,10x and 2,20x
+       inside the band despite binary floating point. */
+    const r2 = Number(roasEff.toFixed(2));
+    const nearest = ths => ths.filter(th => th > 0 && Math.abs(r2 - th) <= th * 0.1 + 1e-9)
+      .sort((x, y) => Math.abs(r2 - x) - Math.abs(r2 - y))[0] || null;
     const qualified = spend > 0 && spend >= o.minSpend && daysProd > 0 && daysProd >= o.minDays;
 
     if (!hasPaidSpend && commEff > 0) {
@@ -960,22 +1021,20 @@ function analyze(data, options) {
       if (daysProd <= 0 || daysProd < o.minDays) need.push(`baru ${daysProd} hari produksi matang`);
       reason = need.join(', ');
     } else if (streakStop) {
+      // The streak decided this STOP, not a threshold, so it is never "di batas".
       status = 'stop'; label = 'STOP';
       reason = `ROAS di bawah 1 selama ${streak} hari produksi berturut`;
     } else if (roasEff >= o.thScale) {
-      status = 'scale'; label = 'SCALE';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di atas target ${o.thScale}x`;
+      status = 'scale'; label = 'SCALE'; borderAt = nearest([o.thScale]);
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x di atas target ${String(o.thScale).replace('.', ',')}x`;
     } else if (roasEff >= o.thPantau) {
-      status = 'pantau'; label = 'PANTAU';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x, belum layak scale`;
+      status = 'pantau'; label = 'PANTAU'; borderAt = nearest([o.thPantau, o.thScale]);
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x, belum layak scale`;
     } else {
-      status = 'stop'; label = 'STOP';
-      reason = `ROAS efektif matang ${roasEff.toFixed(2)}x di bawah titik impas`;
+      status = 'stop'; label = 'STOP'; borderAt = nearest([o.thPantau]);
+      reason = `ROAS efektif matang ${ratioText(roasEff)}x di bawah titik impas`;
     }
-    if (leak && leak.severity === 'bad' && status === 'stop') {
-      reason = `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link sebelum dimatikan`;
-    }
-    return { status, label, reason, streak };
+    return { status, label, reason, streak, borderAt };
   }
 
   const tags = Object.keys(T).map(k => {
@@ -1013,11 +1072,16 @@ function analyze(data, options) {
       // Meta ad; shares (Others, WhatsApp, …) would otherwise hide a broken link.
       const shopee = hasClickSrc ? b.shopeeSrc.fb + b.shopeeSrc.ig : b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
+      // Too many arrivals is judged on every source: the tag's commission
+      // includes the orders shared and organic clicks bring, so its ROAS is an
+      // upper bound whichever referrer they came through.
+      const allPct = b.shopeeClicks / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
       const wasted = (winSpend / b.metaClicksWindow) * failed;
       leak = {
-        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
-        severity: pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'bad',
+        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, allPct, failed, wasted,
+        reliable: b.metaClicksWindow >= LINK.minClicks,
+        severity: pct < LINK.low ? 'bad' : pct < LINK.warn ? 'warn' : allPct > LINK.over ? 'over' : 'ok',
       };
     }
 
@@ -1062,7 +1126,7 @@ function analyze(data, options) {
       const sh = dd.shopeeClicks || 0;
       if (!dd.spend && !dd.comm && !dd.clicks && !dd.orders.size && !sh) return;
       byDate[d] = {
-        date: d, comm: dd.comm, spend: dd.spend, gmv: dd.gmv,
+        date: d, comm: dd.comm, commEff: dd.commEff || 0, spend: dd.spend, gmv: dd.gmv,
         orders: dd.orders.size, clicks: dd.clicks, shopeeClicks: sh,
       };
     });
@@ -1072,8 +1136,22 @@ function analyze(data, options) {
     const matureCommEff = Object.keys(b.daily).filter(isMature).reduce((sum, d) => sum + (b.daily[d].commEff || 0), 0);
     const matureRoasEff = matureSpend > 0 ? matureCommEff / matureSpend : 0;
     const v = spend > 0
-      ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, leak, true)
-      : verdictFor(spend, commEff, daysProd, dailyRows, leak, false);
+      ? verdictFor(matureSpend, matureCommEff, matureDaysProd, dailyRows, true)
+      : verdictFor(spend, commEff, daysProd, dailyRows, false);
+    /* Kept apart from reason, so the real STOP/SCALE reason stays visible. Not
+       stored in snapshots: validSnapshot accepts no extra string fields. */
+    /* Period totals (leak) can look healthy while the days the ad ran do not:
+       organic clicks on no-spend days fill the gap. capture counts only those
+       days, so its "Klik masuk rendah" also earns the cek-link note, ahead of
+       'over', which those same organic clicks would explain. Notes only; the
+       money on the action cards stays on leak. */
+    const checkFirst = v.status === 'stop' ? ' sebelum dimatikan' : '';
+    const linkTone = leak && leak.reliable && leak.severity === 'bad' || capture && capture.low ? 'bad'
+      : leak && leak.reliable && leak.severity === 'over' ? 'over' : '';
+    const linkNote = linkTone === 'over' ? `klik Shopee ${Math.round(leak.allPct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas`
+      : linkTone !== 'bad' ? ''
+      : leak && leak.reliable && leak.severity === 'bad' ? `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link${checkFirst}`
+      : `klik masuk rendah: hanya ${Math.round(capture.pct)}% klik iklan sampai Shopee selama iklan jalan — cek link${checkFirst}`;
 
     let bidHint = '';
     if (v.status !== 'organik' && v.status !== 'evaluasi' && b.clicks > 0) {
@@ -1102,14 +1180,15 @@ function analyze(data, options) {
 
     return {
       tag: k, comm: b.comm, commDone: b.commDone, commPending: b.commPending, commEff,
-      spend, net, netEff, roas, roasEff, roi, margin,
+      // Meta's amount before PPN, so a PPN what-if needs no second analysis.
+      spend, spendBase: b.spend, net, netEff, roas, roasEff, roi, margin,
       orders, doneOrders: b.doneOrders.size, pendingOrders: b.pendingOrders.size,
       qty: b.qty, gmv: b.gmv, refund: b.refund,
       clicks: b.clicks, impr: b.impr, reach: b.reach, lpv: b.lpv, lpvRate,
       shopeeClicks, shopeeFromMeta, shopeeSrc: hasClickSrc ? { ...b.shopeeSrc } : null, cpcShopee, winSpend, winClicks, cpLpv, lostTotal,
       daysProd, matureDaysProd, matureSpend, matureCommEff, matureRoasEff, cpc, cpm, ctr, freq, cpcIdeal, cpcGap, commPerClick,
       convRate, costPerOrder, avgComm, avgOrder, commRate,
-      leak, capture, status: v.status, label: v.label, reason: v.reason, streak: v.streak, bidHint,
+      leak, capture, status: v.status, label: v.label, reason: v.reason, linkNote, linkTone, streak: v.streak, borderAt: v.borderAt, bidHint,
       dailyRows, byDate, activeUnits, delivery: delivery ? delivery.name : '',
       topPlatform: topOf(b.platforms, 1)[0] || null,
       topShop: topOf(b.shops, 1)[0] || null,
@@ -1157,6 +1236,7 @@ function analyze(data, options) {
       byDate[d] = {
         date: d, spend: ud.spend, clicks: ud.clicks, impr: ud.impr,
         comm: pd ? pd.comm * dayShare : 0,
+        commEff: pd ? (pd.commEff || 0) * dayShare : 0,
         gmv: pd ? pd.gmv * dayShare : 0,
         orders: pd ? Math.round(pd.orders * dayShare) : 0,
         shopeeClicks: pd ? Math.round((pd.shopeeClicks || 0) * dayShare) : 0,
@@ -1200,18 +1280,41 @@ function analyze(data, options) {
   const totalClicks = sum(t => t.clicks);
   const allOrders = new Set();
   fAff.forEach(r => { const id = String(pick(r, COL.aff.orderId) || '').trim(); if (id) allOrders.add(id); });
+  // Cancellation rate over Selesai, Tertunda and Dibatalkan orders; unpaid
+  // orders never started, so they stay out of the base. An order with both kept
+  // and cancelled items counts once, as cancelled.
+  const cancelBase = new Set([...allOrders, ...cancelledByOrder.keys()]).size;
+  const gmvKept = sum(t => t.gmv);
 
   const paid = tags.filter(t => t.spend > 0);
   const paidSpend = paid.reduce((s, t) => s + t.spend, 0);
   const paidComm = paid.reduce((s, t) => s + t.commEff, 0);
   const organicComm = tags.filter(t => t.status === 'organik').reduce((s, t) => s + t.commEff, 0);
 
+  /* Per-tag shortfalls and surpluses on the click window. Part of one tag's
+     missing clicks can land on another tag (wrong sub_id); part of a surplus is
+     organic or other-account traffic. The data cannot tell which, so both ends
+     are kept: the per-tag sum and the net. */
+  const clickTags = tags.filter(t => t.leak);
+  const winMeta = clickTags.reduce((s, t) => s + t.leak.metaClicks, 0);
+  const winShopee = clickTags.reduce((s, t) => s + t.leak.shopeeClicks, 0);
+  const lostClicks = clickTags.reduce((s, t) => s + t.leak.failed, 0);
+  const gainClicks = clickTags.reduce((s, t) => s + Math.max(t.leak.shopeeClicks - t.leak.metaClicks, 0), 0);
+  const netLostClicks = Math.max(winMeta - winShopee, 0);
+  const wastedHigh = clickTags.reduce((s, t) => s + t.leak.wasted, 0);
+  // One rule for "check the link", shared by the banner count and the link money.
+  const linkBad = t => !!(t.leak && t.leak.reliable && t.leak.severity === 'bad');
+
   const kpi = {
     spend: totalSpend,
+    spendBase: sum(t => t.spendBase),
     comm: totalComm,
     commEff: totalEff,
     commPending: sum(t => t.commPending),
     pendingPct: totalComm > 0 ? sum(t => t.commPending) / totalComm * 100 : 0,
+    commDone: sum(t => t.commDone),
+    // Lower bound: as if every pending order were cancelled. Same spend (with PPN) as roasEff.
+    roasDone: totalSpend > 0 ? sum(t => t.commDone) / totalSpend : 0,
     net: totalComm - totalSpend,
     netEff: totalEff - totalSpend,
     roas: totalSpend > 0 ? totalComm / totalSpend : 0,
@@ -1239,9 +1342,16 @@ function analyze(data, options) {
     avgOrder: allOrders.size > 0 ? sum(t => t.gmv) / allOrders.size : 0,
     commRate: sum(t => t.gmv) > 0 ? totalComm / sum(t => t.gmv) * 100 : 0,
     shopeeClicks: fClk.length,
-    wasted: tags.reduce((s, t) => s + (t.leak ? t.leak.wasted : 0), 0),
-    leakTags: tags.filter(t => t.leak && t.leak.severity === 'bad').length,
+    wasted: wastedHigh, // upper end; same meaning as before, stored in snapshots
+    // Lower end: as if every surplus click were a misrouted paid click.
+    wastedLow: lostClicks > 0 ? wastedHigh * netLostClicks / lostClicks : 0,
+    lostClicks, gainClicks, netLostClicks,
+    leakTags: tags.filter(linkBad).length,
     excluded, statusCount,
+    cancelBase,
+    cancelRate: cancelBase ? cancelledByOrder.size / cancelBase * 100 : 0,
+    // Secondary: one large cancelled order moves this a lot, so it is shown next to the largest one.
+    cancelValueRate: gmvKept + excluded.cancelledValue > 0 ? excluded.cancelledValue / (gmvKept + excluded.cancelledValue) * 100 : 0,
     counts: { scale: 0, pantau: 0, stop: 0, organik: 0, evaluasi: 0 },
   };
   tags.forEach(t => { kpi.counts[t.status] = (kpi.counts[t.status] || 0) + 1; });
@@ -1249,6 +1359,9 @@ function analyze(data, options) {
   const daily = Object.keys(dailyAll).filter(isDate).sort().map(d => {
     const v = dailyAll[d];
     const commEff = v.commEff || 0;
+    // Null means unknown: no Waktu Klik at all, or a day after the commission report ends.
+    const known = clickKnown && !(affEnd && d > affEnd);
+    const ce = known ? (v.commEffByClick || 0) : null;
     return {
       date: d, comm: v.comm, spend: v.spend, gmv: v.gmv, clicks: v.clicks, impr: v.impr,
       commEff, netEff: commEff - v.spend,
@@ -1263,6 +1376,12 @@ function analyze(data, options) {
       cpc: v.clicks > 0 ? v.spend / v.clicks : 0,
       convRate: v.clicks > 0 ? v.orders.size / v.clicks * 100 : 0,
       mature: isMature(d),
+      commByClick: known ? (v.commByClick || 0) : null,
+      commEffByClick: ce,
+      netEffByClick: known ? ce - v.spend : null,
+      roasEffByClick: known ? (v.spend > 0 ? ce / v.spend : 0) : null,
+      pendingPctByClick: known && v.commByClick > 0 ? (v.pendingByClick || 0) / v.commByClick * 100 : null,
+      matureByClick: clickKnown ? (!matureByClickUntil || d <= matureByClickUntil) : null,
     };
   });
 
@@ -1274,7 +1393,23 @@ function analyze(data, options) {
   const stopTags = tags.filter(t => t.status === 'stop');
   const stopSpend = stopTags.reduce((s, t) => s + t.spend, 0);
   const stopLoss = Math.abs(stopTags.reduce((s, t) => s + Math.min(t.netEff, 0), 0));
-  const leakWaste = tags.reduce((s, t) => s + (t.leak && t.leak.severity === 'bad' ? t.leak.wasted : 0), 0);
+  const stopComm = stopTags.reduce((s, t) => s + t.commEff, 0);
+  const stopProfitCount = stopTags.filter(t => t.netEff > 0).length;
+  /* Most STOP tags are already off when the report is exported, so their loss
+     is history rather than a saving still to make. Null without a delivery column. */
+  const hasDelivery = adUnits.some(u => u.delivery);
+  const liveTags = new Set(adUnits.filter(u => u.active).map(u => u.tag));
+  const stopLiveCount = hasDelivery ? stopTags.filter(t => liveTags.has(t.tag)).length : null;
+  /* A leaking STOP tag's spend is already inside stopSpend. Split the link money
+     so the link card only claims tags where fixing the link is the action. */
+  const leakWaste = tags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
+  const leakWasteStop = stopTags.reduce((s, t) => s + (linkBad(t) ? t.leak.wasted : 0), 0);
+  const leakStopCount = stopTags.filter(linkBad).length;
+  /* Paid tags not judged yet are not neutral: their net is real money. Only
+     tags with spend count, so click-only sub_ids and idle ad names (also
+     evaluasi, nothing at stake) do not inflate it. Same netEff as the table's
+     Laba column, so the filtered table adds up to evalNet. */
+  const evalTags = tags.filter(t => t.status === 'evaluasi' && t.spend > 0);
 
   /* Organic tags earn with zero ad spend — the strongest ad candidates in the
      account, previously shown only as a purple badge with no suggestion. */
@@ -1292,24 +1427,57 @@ function analyze(data, options) {
   /* Concentration: one product carrying most of the budget is a risk even when
      its ROAS looks acceptable. */
   const paidSorted = paid.slice().sort((a, b) => b.spend - a.spend);
+  /* Pareto by spend: what the top N tags take of paid spend and earn of paid
+     effective commission (the ROAS Iklan base; organic stays out). The largest
+     tag alone rarely looks risky while a long tail quietly loses money. */
+  const paretoShare = top => {
+    const sp = top.reduce((s, t) => s + t.spend, 0), cm = top.reduce((s, t) => s + t.commEff, 0);
+    return { spend: sp, commEff: cm, spendShare: paidSpend > 0 ? sp / paidSpend * 100 : 0,
+      commShare: paidComm > 0 ? cm / paidComm * 100 : 0, roasEff: sp > 0 ? cm / sp : 0 };
+  };
+  // Paid ad names absent from the commission report count as commission 0;
+  // some are naming mismatches, so the tail ROAS is a lower bound. commTags,
+  // not affiliateTags: a sub_id seen only in the click report has no commission.
+  const affSet = new Set(commTags);
+  const noCommTags = paidSorted.filter(t => !affSet.has(t.tag));
+  const noCommSpend = noCommTags.reduce((s, t) => s + t.spend, 0);
   const concentration = paidSorted.length ? {
     topTag: paidSorted[0].tag,
     topShare: paidSpend > 0 ? paidSorted[0].spend / paidSpend * 100 : 0,
     topRoas: paidSorted[0].roasEff,
     top2Share: paidSpend > 0 ? paidSorted.slice(0, 2).reduce((s, t) => s + t.spend, 0) / paidSpend * 100 : 0,
     count: paidSorted.length,
+    paidComm,
+    groups: [1, 3, 5, 10].filter(n => n < paidSorted.length)
+      .map(n => ({ n, tags: paidSorted.slice(0, n).map(t => t.tag), ...paretoShare(paidSorted.slice(0, n)) })),
+    noComm: { n: noCommTags.length, spend: noCommSpend, spendShare: paidSpend > 0 ? noCommSpend / paidSpend * 100 : 0 },
   } : null;
+  // The complement of the last group, so nobody adds up the cumulative rows.
+  if (concentration && concentration.groups.length) {
+    const last = concentration.groups[concentration.groups.length - 1];
+    concentration.rest = { n: paidSorted.length - last.n, ...paretoShare(paidSorted.slice(last.n)) };
+  }
 
   const actions = {
     bidSaving, overbidCount: overbid.length,
-    stopSpend, stopLoss, stopCount: stopTags.length,
-    leakWaste, reclaimable: bidSaving + stopSpend,
+    stopSpend, stopLoss, stopComm, stopProfitCount, stopLiveCount, stopCount: stopTags.length,
+    evalCount: evalTags.length,
+    evalSpend: evalTags.reduce((s, t) => s + t.spend, 0),
+    evalComm: evalTags.reduce((s, t) => s + t.commEff, 0),
+    evalNet: evalTags.reduce((s, t) => s + t.netEff, 0),
+    leakWaste, leakWasteStop, leakWasteLive: leakWaste - leakWasteStop,
+    leakStopCount, leakLiveCount: kpi.leakTags - leakStopCount,
+    // Profit changes only: the bid gap plus this period's loss on STOP tags.
+    maxGain: bidSaving + stopLoss,
+    reclaimable: bidSaving + stopSpend, // legacy: gross budget, not savings; kept for JSON export readers
     organicCandidates, concentration,
   };
 
   return {
     range: { start: ds, end: de, matureUntil, clickStart: clkStart, clickEnd: clkEnd },
     options: o,
+    // Outside range on purpose: toSnapshot copies range whole, and saved snapshots keep their shape.
+    byClick: { ...byClick, available: clickKnown, matureUntil: clickKnown ? matureByClickUntil : '', dataEnd: affEnd },
     attribution: { column: attrCol, total: attrOut(attrAll), unknownValues: topOf(attrValues, 5).map(x => ({ value: x.name, rows: x.value })) },
     kpi, tags, adUnits, daily, matchLog, learnedIds, forgetIds, lagProfile, lagCal, settlement, actions,
     statusDaily: Object.keys(statusDay).filter(isDate).sort().map(d => {
@@ -1429,6 +1597,8 @@ function buildTrend(snapshots, account) {
       period: s.range && s.range.end ? s.range.end : s.saved, saved: s.saved,
       start: s.range ? s.range.start : '', end: s.range ? s.range.end : '',
       spend: s.kpi.spend || 0,
+      // Strict check: Number(null) is 0, which would print a false "PPN 0%".
+      ppn: s.options && Number.isFinite(s.options.ppn) ? s.options.ppn : null,
       commEff: s.kpi.commEff || 0,
       netEff: s.kpi.netEff || 0,
       roasEff: s.kpi.roasEff || 0,
@@ -1487,5 +1657,6 @@ return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
   cleanTag, attrKind, attrColumn, resolveClickTag, strictKey, tagLookup, intactAdId, idAgrees, COL, pick, topOf, variantOf, variantClash, overlapScore,
+  LINK,
 };
 });

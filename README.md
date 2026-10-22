@@ -16,7 +16,7 @@ npm start
 # http://127.0.0.1:8899
 ```
 
-Pustaka PapaParse, Chart.js, jsPDF, dan AutoTable tersedia di `vendor/`; halaman aplikasi tidak
+Pustaka PapaParse, Chart.js, jsPDF, AutoTable, serta font Plus Jakarta Sans (OFL) tersedia di `vendor/`; halaman aplikasi tidak
 meminta skrip, font, atau data dari pihak ketiga, kecuali `graph.facebook.com` saat Anda
 sendiri menekan **Tarik dari Ads Manager**. `index-daily.html` mengarah ke
 halaman utama yang sudah memuat fitur harian. `legacy-v1.html` disimpan sebagai

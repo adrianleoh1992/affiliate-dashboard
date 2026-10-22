@@ -164,12 +164,172 @@ assert.equal(saving.tags[0].status, 'stop');
 assert.equal(saving.actions.bidSaving, 0);
 near(saving.actions.reclaimable, 100);
 assert.ok(saving.actions.reclaimable <= saving.kpi.spend);
+// The STOP headline is the loss, not the gross spend: the tag still earned 10.
+near(saving.actions.stopComm, 10);
+near(saving.actions.stopLoss, 90);
+near(saving.actions.maxGain, 90);
+assert.ok(saving.actions.stopLoss <= saving.actions.stopSpend);
+assert.equal(saving.actions.stopLiveCount, 1, 'the fixture ad is still delivering');
+const noDelivery = analyze({ affiliate: [aff('1', 10)], ads: [ad('2026-08-01', 100, { 'Ad delivery': '' })] });
+assert.equal(noDelivery.tags[0].status, 'stop');
+assert.equal(noDelivery.actions.stopLiveCount, null, 'without a delivery column the live count is unknown, not zero');
 
 // An inactive latest row must override an older active delivery state.
 const inactive = analyze({ ads: [ad(), ad('2026-08-02', 100, { 'Ad delivery': 'inactive' })] });
 assert.equal(inactive.adUnits[0].active, false);
 assert.equal(inactive.adUnits[0].delivery, 'inactive');
 assert.equal(analyze({ ads: [ad('2026-08-01', 100, { 'Ad delivery': 'tidak aktif' })] }).adUnits[0].active, false);
+
+// Link health and click-loss totals. One order and one ads row per tag per day;
+// spec values are per day, so 4 days of 160 Meta clicks make 640.
+function linkFixture(spec, days) {
+  const affiliate = [], ads = [], clicks = [];
+  // With `other` on any tag the clicks carry Perujuk: ad arrivals as Facebook.
+  const bySource = Object.values(spec).some(s => s.other);
+  for (let i = 1; i <= days; i++) {
+    const date = '2026-08-0' + i;
+    for (const [tag, s] of Object.entries(spec)) {
+      ads.push(ad(date, s.spend, { 'Ad name': tag, 'Link clicks': s.meta }));
+      for (let c = 0; c < s.shopee; c++) clicks.push(click(date, { 'Tag_link': tag, ...(bySource ? { Perujuk: 'Facebook' } : {}) }));
+      for (let c = 0; c < (s.other || 0); c++) clicks.push(click(date, { 'Tag_link': tag, Perujuk: 'Others' }));
+      const comm = typeof s.comm === 'function' ? s.comm(i) : s.comm;
+      if (comm) affiliate.push(aff(tag + i, comm, { 'Tag_link1': tag,
+        'Waktu Pemesanan': date + ' 10:00:00', 'Waktu Klik': date + ' 09:00:00' }));
+    }
+  }
+  return analyze({ affiliate, ads, clicks });
+}
+// A surplus on B is reported beside A's shortfall, never silently netted into it.
+const netting = linkFixture({ A: { spend: 100, meta: 10, shopee: 5, comm: 300 }, B: { spend: 100, meta: 20, shopee: 25, comm: 300 } }, 1);
+assert.equal(netting.kpi.lostClicks, 5);
+assert.equal(netting.kpi.gainClicks, 5);
+assert.equal(netting.kpi.netLostClicks, 0);
+near(netting.kpi.wastedLow, 0);
+near(netting.kpi.wasted, netting.tags.find(t => t.tag === 'A').leak.wasted);
+
+const health = linkFixture({
+  Broken: { spend: 1000, meta: 160, shopee: 0, comm: 100 },     // 0% of 640: STOP on its streak
+  LiveLeak: { spend: 1000, meta: 100, shopee: 10, comm: 5000 }, // 10% of 400 on a SCALE tag
+  Cheap: { spend: 1000, meta: 100, shopee: 38, comm: 1500 },    // 38%: amber, not a link verdict
+  Outside: { spend: 1000, meta: 100, shopee: 300, comm: 5000 }, // 300% of 400: outside traffic
+  Tiny: { spend: 1000, meta: 5, shopee: 1, comm: 3000 },        // 20% of 20: too few clicks
+  Faded: { spend: 1000, meta: 10, shopee: 10, comm: day => day === 1 ? 10000 : 0 }, // STOP, still net positive
+}, 4);
+const H = Object.fromEntries(health.tags.map(t => [t.tag, t]));
+assert.equal(H.Broken.status, 'stop');
+assert.equal(H.Broken.leak.severity, 'bad');
+assert.equal(H.Broken.leak.reliable, true);
+assert.match(H.Broken.reason, /^ROAS di bawah 1 selama 4 hari produksi berturut$/, 'the link warning must not replace the STOP reason');
+assert.equal(H.Broken.linkNote, 'hanya 0% klik sampai Shopee — cek link sebelum dimatikan');
+assert.equal(H.LiveLeak.status, 'scale');
+assert.equal(H.LiveLeak.linkNote, 'hanya 10% klik sampai Shopee — cek link');
+assert.equal(H.Cheap.leak.severity, 'warn');
+assert.equal(H.Cheap.linkNote, '');
+assert.equal(H.Outside.leak.severity, 'over');
+assert.equal(H.Outside.leak.reliable, true);
+assert.equal(H.Outside.status, 'scale', 'link health must not change verdicts');
+assert.match(H.Outside.linkNote, /ROAS memuat trafik lain, anggap batas atas$/);
+assert.equal(H.Tiny.leak.severity, 'bad');
+assert.equal(H.Tiny.leak.reliable, false);
+assert.equal(H.Tiny.linkNote, '');
+assert.equal(health.kpi.leakTags, 2, 'only reliable tags under 25% count as link problems');
+near(health.actions.leakWaste, H.Broken.leak.wasted + H.LiveLeak.leak.wasted);
+// A leaking STOP tag's spend is already in the STOP card; the link card keeps the rest.
+near(health.actions.leakWasteStop, H.Broken.leak.wasted);
+near(health.actions.leakWasteLive, H.LiveLeak.leak.wasted);
+assert.equal(health.actions.leakStopCount, 1);
+assert.equal(health.actions.leakLiveCount, 1);
+near(health.actions.leakWasteLive + health.actions.leakWasteStop, health.actions.leakWaste);
+// With a Perujuk column a broken link is judged on Facebook/Instagram arrivals,
+// so shares cannot hide it, but too many arrivals is judged on every source:
+// the orders shared clicks bring are in the tag's commission too.
+const sourced = linkFixture({
+  Shared: { spend: 1000, meta: 100, shopee: 95, other: 150, comm: 5000 }, // 95% from FB+IG, 245% in all
+  Hidden: { spend: 1000, meta: 100, shopee: 10, other: 200, comm: 5000 }, // 10% from FB+IG behind 200 shares
+}, 4);
+const S = Object.fromEntries(sourced.tags.map(t => [t.tag, t]));
+near(S.Shared.leak.pct, 95);
+near(S.Shared.leak.allPct, 245);
+assert.equal(S.Shared.leak.severity, 'over');
+assert.equal(S.Shared.linkNote, 'klik Shopee 245% dari klik iklan — ROAS memuat trafik lain, anggap batas atas');
+assert.equal(S.Hidden.leak.severity, 'bad');
+assert.equal(S.Hidden.linkNote, 'hanya 10% klik sampai Shopee — cek link');
+near(H.Outside.leak.allPct, H.Outside.leak.pct); // without Perujuk both shares are the same
+// STOP money: loss, commission and spend reported apart; the tail adds profit changes only.
+assert.equal(H.Faded.status, 'stop');
+assert.equal(health.actions.stopCount, 2);
+assert.equal(health.actions.stopProfitCount, 1);
+assert.equal(health.actions.stopLiveCount, 2);
+near(health.actions.stopSpend, 8000);
+near(health.actions.stopComm, 10400);
+near(health.actions.stopLoss, 3600);
+near(health.actions.maxGain, health.actions.bidSaving + 3600);
+// Snapshots keep the real reason and gain no string fields (validSnapshot rejects them).
+const healthSnap = E.toSnapshot(health, { id: 1, saved: '2026-08-05 00:00:00' });
+for (const t of healthSnap.tags) for (const [k, v] of Object.entries(t)) {
+  assert.ok(['tag', 'label', 'reason', 'status'].includes(k) || v === null || Number.isFinite(v), 'snapshot tag field ' + k);
+}
+assert.ok(!healthSnap.tags.some(t => /cek link/.test(t.reason)));
+assert.deepEqual(Object.keys(healthSnap.kpi).filter(k => /^(wastedLow|lostClicks|gainClicks|netLostClicks)$/.test(k)), [],
+  'new click totals stay out of snapshots so older trend points do not read as zero');
+
+// "di batas" marks only verdicts a ROAS threshold decided, on the 2-decimal
+// value the reason prints. 10 days x 20.000 spend, lag 3, so 7 mature days.
+const edgeDays = Array.from({ length: 10 }, (_, i) => '2026-09-' + String(i + 1).padStart(2, '0'));
+const edgeAff = [], edgeAds = [];
+const edgeTag = (tag, comms) => edgeDays.forEach((date, i) => {
+  edgeAds.push(ad(date, 20000, { 'Ad name': tag }));
+  const comm = Array.isArray(comms) ? comms[i] : comms;
+  if (comm) edgeAff.push(aff(tag + date, comm, { 'Tag_link1': tag, 'Waktu Pemesanan': date + ' 10:00:00', 'Waktu Klik': date + ' 09:00:00' }));
+});
+edgeTag('Scale205', 41000);
+edgeTag('Pantau190', 38000);
+edgeTag('Pantau150', 30000);
+edgeTag('Pantau110', 22000);
+edgeTag('Pantau105', 21000);
+// 1,105 and 1,795 print as 1,10x and 1,79x; the pill must follow the printed value.
+edgeTag('Pantau1105', 22100);
+edgeTag('Pantau1795', 35900);
+edgeTag('RoasStop095', [0, 0, 0, 0, 44333, 44333, 44334, 0, 0, 0]);
+edgeTag('StreakStop095', 19000);
+edgeTag('RoasStop089', [0, 0, 0, 0, 0, 62300, 62300, 0, 0, 0]);
+// Not judged: a small paid tag, an ad name matching no tag, an idle ad name
+// and a click-only sub_id. Only the first two have money at stake.
+edgeAds.push(ad('2026-09-01', 7500, { 'Ad name': 'SmallPaid' }), ad('2026-09-02', 7500, { 'Ad name': 'SmallPaid' }));
+edgeAff.push(aff('small-1', 4000, { 'Tag_link1': 'SmallPaid', 'Waktu Pemesanan': '2026-09-01 10:00:00' }));
+edgeAds.push(ad('2026-09-02', 9000, { 'Ad name': 'NoSuchTag' }));
+edgeDays.forEach(date => edgeAds.push(ad(date, 0, { 'Ad name': 'IdleAd', 'Link clicks': 0, 'Impressions': 0 })));
+const edgeClicks = Array.from({ length: 5 }, (_, i) => click('2026-09-03', { 'Tag_link': 'ClickOnly', 'Waktu Klik': '2026-09-03 09:0' + i + ':00' }));
+const edge = E.analyze({ affiliate: edgeAff, ads: edgeAds, clicks: edgeClicks }, { ppn: 0 });
+const E2 = Object.fromEntries(edge.tags.map(t => [t.tag, t]));
+for (const [tag, status, borderAt] of [
+  ['Scale205', 'scale', 2], ['Pantau190', 'pantau', 2], ['Pantau150', 'pantau', null],
+  ['Pantau110', 'pantau', 1], // exactly 1,10x: inside the band despite floating point
+  ['Pantau105', 'pantau', 1], ['RoasStop095', 'stop', 1],
+  ['Pantau1105', 'pantau', 1], ['Pantau1795', 'pantau', null],
+  ['StreakStop095', 'stop', null], // decided by the loss streak, not the threshold
+  ['RoasStop089', 'stop', null], ['SmallPaid', 'evaluasi', null], ['NoSuchTag', 'evaluasi', null],
+  ['IdleAd', 'evaluasi', null], ['ClickOnly', 'evaluasi', null],
+]) {
+  assert.equal(E2[tag].status, status, tag);
+  assert.equal(E2[tag].borderAt, borderAt, tag + ' borderAt');
+  assert.ok(!/batas/.test(E2[tag].reason), tag + ': the reason text is unchanged');
+}
+assert.match(E2.StreakStop095.reason, /berturut/);
+const edgeHigh = E.analyze({ affiliate: edgeAff, ads: edgeAds }, { ppn: 0, thScale: 3 });
+assert.equal(edgeHigh.tags.find(t => t.tag === 'Scale205').borderAt, null, 'the band follows the threshold setting');
+assert.equal(edgeHigh.tags.find(t => t.tag === 'Pantau190').borderAt, null);
+// Unjudged money counts paid tags only; kpi.counts keeps its old meaning.
+assert.equal(edge.kpi.counts.evaluasi, 4);
+assert.equal(edge.actions.evalCount, 2);
+near(edge.actions.evalSpend, 24000);
+near(edge.actions.evalComm, 4000);
+near(edge.actions.evalNet, -20000);
+near(edge.actions.evalNet, edge.tags.filter(t => t.status === 'evaluasi' && t.spend > 0).reduce((s, t) => s + t.netEff, 0));
+const edgeSnap = E.toSnapshot(edge, { id: 2, saved: '2026-09-11 00:00:00' });
+assert.ok(edgeSnap.tags.every(t => !('borderAt' in t)), 'borderAt stays out of snapshots');
+assert.deepEqual(Object.keys(edgeSnap.kpi).filter(k => /^eval/.test(k)), []);
+assert.deepEqual(edgeSnap.kpi.counts, edge.kpi.counts);
 
 // Click-only data and dates are meaningful even without affiliate/ads rows.
 const clicksOnly = analyze({ clicks: [click()] });
@@ -235,6 +395,149 @@ assert.equal(trend.movers[0].from, 2);
 assert.equal(trend.movers[0].delta, 1);
 assert.equal(E.buildTrend([first, { ...first, saved: '2026-08-12' }], 'a').series.length, 1);
 assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2);
+
+// Cancelled rows carry zero commission; their lost value is refund + purchase
+// value, summed per order. Rows outside the period add nothing.
+const cancelledRows = [aff('ok', 100),
+  aff('c1', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 0, 'Jumlah Pengembalian Dana(Rp)': 80000 }),
+  aff('c2', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 20000 }),
+  aff('c2', 0, { 'Status Pesanan': 'Dibatalkan', 'Nilai Pembelian(Rp)': 5000 })];
+const cancelled = analyze({ affiliate: cancelledRows });
+assert.equal(cancelled.kpi.excluded.cancelledValue, 105000);
+assert.equal(cancelled.kpi.excluded.cancelledOrders, 2);
+assert.equal(cancelled.kpi.excluded.cancelledMax, 80000);
+assert.equal(cancelled.kpi.excluded.cancelled, 3);
+assert.equal(cancelled.kpi.cancelBase, 3);
+near(cancelled.kpi.cancelRate, 2 / 3 * 100);
+near(cancelled.kpi.cancelValueRate, 105000 / (1000 + 105000) * 100);
+const outside = analyze({ affiliate: [...cancelledRows, aff('late', 0, { 'Status Pesanan': 'Dibatalkan',
+  'Waktu Pemesanan': '2026-08-09 10:00:00', 'Nilai Pembelian(Rp)': 900000 })] },
+{ dateStart: '2026-08-01', dateEnd: '2026-08-01' });
+assert.equal(outside.kpi.excluded.cancelledValue, 105000);
+assert.equal(outside.kpi.excluded.cancelledOrders, 2);
+assert.equal(outside.kpi.cancelBase, 3);
+// An order with one kept and one cancelled item counts once, as cancelled.
+const partial = analyze({ affiliate: [aff('X', 100), aff('X', 0, { 'Status Pesanan': 'Dibatalkan' }), aff('Y', 50)] });
+assert.equal(partial.kpi.cancelBase, 2);
+assert.equal(partial.kpi.cancelRate, 50);
+const noOrders = analyze({ affiliate: [] });
+assert.deepEqual([noOrders.kpi.cancelBase, noOrders.kpi.cancelRate, noOrders.kpi.cancelValueRate,
+  noOrders.kpi.excluded.cancelledValue, noOrders.kpi.excluded.cancelledMax], [0, 0, 0, 0, 0]);
+
+// Completed-only ROAS shares the PPN-inclusive spend of roasEff and is 0 without ads.
+const doneOnly = analyze({ affiliate: [aff('d', 300), aff('p', 100, { 'Status Pesanan': 'Tertunda' })],
+  ads: [ad('2026-08-01', 200)] }, { ppn: 11 });
+assert.equal(doneOnly.kpi.commDone, 300);
+near(doneOnly.kpi.roasDone, 300 / 222);
+near(doneOnly.kpi.commDone + doneOnly.kpi.commPending, doneOnly.kpi.comm);
+assert.equal(analyze({ affiliate: [aff('d', 300)] }).kpi.roasDone, 0);
+
+// Pre-PPN spend does not depend on the rate, so a PPN what-if needs no second
+// analysis. It is not stored: snapshot.options.ppn already lets it be derived.
+const ppnRows = { affiliate: [aff('p1', 300)], ads: [ad('2026-08-01', 200), ad('2026-08-02', 100)] };
+const at0 = analyze(ppnRows, { ppn: 0 }), at11 = analyze(ppnRows, { ppn: 11 });
+assert.equal(at0.kpi.spendBase, 300);
+assert.equal(at11.kpi.spendBase, 300);
+near(at11.kpi.spend, at11.kpi.spendBase * 1.11);
+near(at11.tags[0].spend, at11.tags[0].spendBase * 1.11);
+assert.equal(E.toSnapshot(at11).kpi.spendBase, undefined);
+
+// Day rows carry effective commission, so Harian and the KPI cards share one definition.
+const effData = { affiliate: [aff('e1', 300), aff('e2', 100, { 'Status Pesanan': 'Tertunda', 'Waktu Pemesanan': '2026-08-02 10:00:00' })],
+  ads: [ad('2026-08-01', 100, { 'Ad name': 'Iklan satu' }), ad('2026-08-01', 300, { 'Ad name': 'Iklan dua' }),
+    ad('2026-08-02', 200, { 'Ad name': 'Iklan satu' })],
+  tagMap: { [E.normalize('Iklan satu')]: 'A', [E.normalize('Iklan dua')]: 'A' } };
+const eff = analyze(effData, { pendingFactor: 0.5, ppn: 11 });
+const effTag = eff.tags.find(t => t.tag === 'A');
+near(effTag.commEff, 350);
+near(Object.values(effTag.byDate).reduce((sum, d) => sum + d.commEff, 0), effTag.commEff);
+near(eff.daily.reduce((sum, d) => sum + d.netEff, 0), eff.kpi.netEff);
+// A unit's day follows its tag's day by that day's spend share. The unit's
+// period total uses the period share instead, so its days need not add up to it.
+assert.equal(eff.adUnits.length, 2);
+for (const unit of eff.adUnits) for (const d of Object.keys(unit.byDate)) {
+  const day = effTag.byDate[d];
+  near(unit.byDate[d].commEff, day.commEff * unit.byDate[d].spend / day.spend);
+}
+
+// Each trend point names its PPN; one missing from a snapshot is unknown, not 0%.
+const snapAt = (ppn, end, extra = {}) => ({ ...E.toSnapshot(analyze({ affiliate: [aff('t1')], ads: [ad()] }, { ppn }),
+  { id: Date.parse(end), account: 'default', saved: end + ' 12:00:00' }), range: { start: '2026-08-01', end }, ...extra });
+assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01'), snapAt(11, '2026-08-02')], 'default').series.map(s => s.ppn), [0, 11]);
+assert.deepEqual(E.buildTrend([snapAt(0, '2026-08-01', { options: undefined }), snapAt(0, '2026-08-02', { options: { ppn: null } })],
+  'default').series.map(s => s.ppn), [null, null]);
+
+// Harian charts put commission on its click day (Waktu Klik). By order date a
+// cheap day collects orders from earlier clicks: must 30 Sep read 4,14x.
+const clickAff = (id, order, clicked, comm, status = 'Selesai') => aff(id, comm, {
+  'Status Pesanan': status, 'Waktu Pemesanan': order + ' 10:00:00', 'Waktu Klik': clicked ? clicked + ' 09:00:00' : '' });
+const clickDays = n => Array.from({ length: n }, (_, i) => ad('2026-08-' + String(i + 1).padStart(2, '0'), 100));
+const clickData = {
+  affiliate: [
+    clickAff('late', '2026-08-05', '2026-08-02', 1000),
+    clickAff('before', '2026-08-01', '2026-07-30', 500),
+    clickAff('noclick', '2026-08-03', '', 300),
+    clickAff('d6', '2026-08-06', '2026-08-06', 200),
+    clickAff('d7', '2026-08-07', '2026-08-07', 100),
+    clickAff('p7', '2026-08-09', '2026-08-07', 300, 'Tertunda'),
+    clickAff('p8', '2026-08-08', '2026-08-08', 800, 'Tertunda'),
+    clickAff('p9', '2026-08-09', '2026-08-09', 700, 'Tertunda'),
+    clickAff('gone', '2026-08-04', '2026-08-04', 999, 'Dibatalkan'),
+  ],
+  ads: clickDays(9),
+};
+const byDay = res => Object.fromEntries(res.daily.map(day => [day.date, day]));
+const clicked = analyze(clickData, { dateStart: '2026-08-01', pendingFactor: 0.5 });
+const cd = byDay(clicked);
+near(cd['2026-08-02'].commEffByClick, 1000);
+near(cd['2026-08-05'].commEffByClick, 0);
+near(cd['2026-08-05'].commEff, 1000); // the order-date series is unchanged
+near(cd['2026-08-07'].commEffByClick, 100 + 300 * 0.5);
+near(cd['2026-08-07'].roasEffByClick, 250 / 100);
+near(cd['2026-08-07'].netEffByClick, 150);
+near(cd['2026-08-07'].pendingPctByClick, 75);
+assert.equal(clicked.byClick.available, true);
+near(clicked.byClick.before, 500); near(clicked.byClick.beforeEff, 500);
+near(clicked.byClick.missing, 300); near(clicked.byClick.missingEff, 300);
+assert.ok(clicked.daily.every(day => day.date >= '2026-08-01'), 'a click before the start opens no day of its own');
+assert.equal(cd['2026-08-04'].commByClick, 0, 'cancelled rows stay out of the click series');
+for (const factor of [0, 0.25, 1]) {
+  const res = analyze(clickData, { dateStart: '2026-08-01', pendingFactor: factor });
+  const placed = field => res.daily.reduce((sum, day) => sum + (day[field] == null ? 0 : day[field]), 0);
+  // Series plus the named remainders add up to the KPI: nothing is dropped silently.
+  near(placed('commEffByClick') + res.byClick.beforeEff + res.byClick.missingEff, res.kpi.commEff);
+  near(placed('commByClick') + res.byClick.before + res.byClick.missing, res.kpi.comm);
+}
+// Trailing click days with half or more still Tertunda are not mature, even inside the lag.
+assert.deepEqual(clicked.daily.slice(-4).map(day => [day.date, day.matureByClick]),
+  [['2026-08-06', true], ['2026-08-07', false], ['2026-08-08', false], ['2026-08-09', false]]);
+assert.equal(clicked.byClick.matureUntil, '2026-08-06');
+assert.ok(clicked.byClick.matureUntil <= clicked.range.matureUntil);
+assert.equal(clicked.range.matureUntil, '2026-08-09', 'the verdict cut-off keeps its order-date meaning');
+// The band date lives outside range, so saved snapshots keep their shape.
+assert.deepEqual(Object.keys(E.toSnapshot(clicked).range), ['start', 'end', 'matureUntil', 'clickStart', 'clickEnd']);
+assert.equal(E.toSnapshot(clicked).byClick, undefined);
+
+// A commission report that ends before the ads: later click days are unknown,
+// and the lag counts back from where the commission report ends.
+const shortAff = analyze({ affiliate: [clickAff('s1', '2026-08-03', '2026-08-02', 400), clickAff('s2', '2026-08-09', '2026-08-09', 600)],
+  ads: clickDays(12) }, { lagDays: 2 });
+const sd = byDay(shortAff);
+assert.equal(shortAff.byClick.dataEnd, '2026-08-09');
+assert.deepEqual(['2026-08-10', '2026-08-11', '2026-08-12'].map(d => [sd[d].commEffByClick, sd[d].netEffByClick, sd[d].roasEffByClick, sd[d].matureByClick]),
+  [[null, null, null, false], [null, null, null, false], [null, null, null, false]]);
+assert.ok(shortAff.byClick.matureUntil <= '2026-08-07', shortAff.byClick.matureUntil);
+assert.equal(sd['2026-08-09'].commEffByClick, 600);
+assert.equal(sd['2026-08-07'].matureByClick, true);
+assert.equal(sd['2026-08-08'].matureByClick, false);
+
+// Without Waktu Klik the click series is unknown everywhere, not a row of zeros.
+const noClick = analyze({ affiliate: [clickAff('n1', '2026-08-01', '', 100), clickAff('n2', '2026-08-02', '', 50)], ads: clickDays(2) });
+assert.equal(noClick.byClick.available, false);
+assert.equal(noClick.byClick.matureUntil, '');
+for (const field of ['commByClick', 'commEffByClick', 'netEffByClick', 'roasEffByClick', 'pendingPctByClick', 'matureByClick'])
+  assert.ok(noClick.daily.every(day => day[field] === null), field);
+near(noClick.byClick.missingEff, 150);
 
 /* ── Matching follows the Analisis findings on the September data ──────────
    Exact names decide, case included; near names only suggest; tags come from
@@ -362,6 +665,24 @@ assert.equal(E.buildTrend([first, { ...first, account: 'b' }]).series.length, 2)
     clicks: days.flatMap(d => clicksOn(60, d, 'Varo')) });
   assert.equal(healthy.tags.find(t => t.tag === 'Varo').capture.low, false);
   assert.equal(analyze({ affiliate: [aff('o1')], ads }).tags.find(t => t.tag === 'A').capture, null, 'no click report, no verdict');
+  // The period total looks fine (organic clicks on the no-spend day), yet the
+  // tag row still says to check the link, with capture's number.
+  const lowTag = low.tags.find(t => t.tag === 'Varo');
+  assert.equal(lowTag.leak.severity, 'ok');
+  assert.match(lowTag.linkNote, /^klik masuk rendah: hanya 10% klik iklan sampai Shopee selama iklan jalan — cek link/);
+  assert.equal(lowTag.linkTone, 'bad', 'shown as a warning, not as extra traffic');
+  assert.equal(low.kpi.leakTags, 0, 'the money on the action cards stays on leak');
+  assert.equal(healthy.tags.find(t => t.tag === 'Varo').linkNote, '');
+}
+{
+  // A paid tag the click report knows but the commission report does not
+  // still counts as "not in the commission report".
+  const data = { affiliate: [aff('o1', 3000, { 'Tag_link1': 'Alpha' })],
+    ads: [ad('2026-08-01', 1000, { 'Ad name': 'Alpha' }), ad('2026-08-01', 500, { 'Ad name': 'Bravo' }), ad('2026-08-01', 300, { 'Ad name': 'Charlie' })] };
+  const without = analyze(data).actions.concentration.noComm;
+  const withClicks = analyze({ ...data, clicks: [click('2026-08-01', { 'Tag_link': 'Bravo----' })] }).actions.concentration.noComm;
+  assert.deepEqual([without.n, without.spend], [2, 800]);
+  assert.deepEqual([withClicks.n, withClicks.spend], [2, 800]);
 }
 
 /* ── Review round 1 ────────────────────────────────────────────────────── */

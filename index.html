@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="styles.css">
 <script src="vendor/papaparse.min.js"></script>
 <script src="vendor/chart.umd.js"></script>
+<script src="chart-theme.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#workspace">Langsung ke analisis</a>
@@ -26,14 +27,18 @@
       <select id="account" title="Akun aktif" aria-label="Akun aktif"></select>
       <button class="btn sm" id="btnNewAcct" title="Tambah akun">+</button>
     </div>
-    <button class="btn ghost" id="btnMap">Kelola Tag<span class="badge-dot hidden" id="mapAlert"></span></button>
-    <button class="btn ghost" id="btnHist">Snapshot</button>
-    <button class="btn" id="btnStored">Data Tersimpan</button>
-    <button class="btn ghost" id="btnSet">Setelan</button>
-    <button class="btn ghost" id="btnTheme">Mode Gelap</button>
-    <button class="btn" id="btnExport">Ekspor data</button>
-    <button class="btn" id="btnPdf">Unduh PDF</button>
-    <button class="btn primary" id="btnSave">Simpan Snapshot</button>
+    <nav class="hdr-nav" aria-label="Kelola akun">
+      <button class="btn ghost" id="btnMap">Kelola Tag<span class="badge-dot hidden" id="mapAlert"></span></button>
+      <button class="btn ghost" id="btnStored">Data Tersimpan</button>
+      <button class="btn ghost" id="btnHist">Snapshot</button>
+      <button class="btn ghost" id="btnSet">Setelan</button>
+      <button class="btn ghost" id="btnTheme" aria-pressed="false">Mode Gelap</button>
+    </nav>
+    <div class="hdr-actions" role="group" aria-label="Hasil analisis">
+      <button class="btn" id="btnExport">Ekspor data</button>
+      <button class="btn" id="btnPdf">Unduh PDF</button>
+      <button class="btn primary" id="btnSave">Simpan Snapshot</button>
+    </div>
   </div>
 </header>
 
@@ -141,20 +146,20 @@
     <div class="kpis" id="kpis"></div>
     <div class="kpis kpis-sub" id="clickKpis"></div>
     <p class="lagnote" id="lagNote"></p>
-    <h3 class="print-sec">Yang Bisa Dialihkan</h3>
+    <h3 class="print-sec">Potensi Perbaikan Laba</h3>
     <div class="action-grid" id="actionGrid"></div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="iklan">Iklan</button>
-      <button class="tab" data-tab="klik">Klik</button>
-      <button class="tab" data-tab="harian">Harian</button>
-      <button class="tab" data-tab="produk">Produk</button>
-      <button class="tab" data-tab="status">Status Order</button>
-      <button class="tab" data-tab="tersimpan">Tersimpan</button>
-      <button class="tab" data-tab="rincian">Rincian</button>
+    <div class="tabs" role="tablist" aria-label="Bagian analisis">
+      <button class="tab active" data-tab="iklan" role="tab" id="tab-iklan" aria-controls="panel-iklan" aria-selected="true">Iklan</button>
+      <button class="tab" data-tab="klik" role="tab" id="tab-klik" aria-controls="panel-klik" aria-selected="false" tabindex="-1">Klik</button>
+      <button class="tab" data-tab="harian" role="tab" id="tab-harian" aria-controls="panel-harian" aria-selected="false" tabindex="-1">Harian</button>
+      <button class="tab" data-tab="produk" role="tab" id="tab-produk" aria-controls="panel-produk" aria-selected="false" tabindex="-1">Produk</button>
+      <button class="tab" data-tab="status" role="tab" id="tab-status" aria-controls="panel-status" aria-selected="false" tabindex="-1">Status Order</button>
+      <button class="tab" data-tab="tersimpan" role="tab" id="tab-tersimpan" aria-controls="panel-tersimpan" aria-selected="false" tabindex="-1">Tersimpan</button>
+      <button class="tab" data-tab="rincian" role="tab" id="tab-rincian" aria-controls="panel-rincian" aria-selected="false" tabindex="-1">Rincian</button>
     </div>
 
-    <div class="panel active" data-panel="iklan">
+    <div class="panel active" data-panel="iklan" role="tabpanel" id="panel-iklan" aria-labelledby="tab-iklan">
       <div class="calibration" id="lagCal"></div>
       <h3 class="print-sec">Keputusan per Tag</h3>
       <div class="dgrid" id="dgrid"></div>
@@ -191,7 +196,7 @@
       <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
           <span class="sub" id="adunitNote"></span></div>
-        <p class="hint">Satu baris per iklan di Meta, lengkap dengan CPM, CTR, reach, dan CPC ideal.
+        <p class="hint">Satu baris per iklan di Meta, lengkap dengan CPM, CTR, dan CPC ideal.
           Komisi <b>dan klik Shopee</b> dibagi proporsional dari tag induknya sesuai porsi biaya, karena Shopee
           hanya melaporkan keduanya per tag. Dua iklan pada satu tag karena itu punya CPC Shopee yang sama —
           tidak ada apa pun di data yang bisa membedakannya.</p>
@@ -204,18 +209,18 @@
         <div class="tscroll"><table id="tblOrganic"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-print="peluang">
-        <div class="card-head"><h2>Risiko Konsentrasi Anggaran</h2></div>
+        <div class="card-head"><h2>Konsentrasi Biaya vs Komisi</h2></div>
         <div id="concentration"></div>
       </div>
     </div>
 
-    <div class="panel" data-panel="klik">
+    <div class="panel" data-panel="klik" role="tabpanel" id="panel-klik" aria-labelledby="tab-klik">
       <h3 class="print-sec">Klik Meta vs Klik Shopee</h3>
       <div class="card">
         <div class="card-head"><h2>Klik Meta vs Klik Shopee</h2><span class="sub" id="leakRange"></span></div>
-        <p class="hint">Kolom <b>± Share</b> bertanda dua arah. <b>Positif</b> berarti klik yang masuk Shopee lebih banyak
-          daripada yang Anda bayar — kontennya dibagikan orang, dan itu bagus. <b>Negatif</b> berarti klik yang sudah
-          dibayar tidak sampai ke Shopee — di situ baru ada kebocoran link.</p>
+        <p class="hint">Kolom <b>± Klik</b> bertanda dua arah. <b>Negatif</b> berarti klik yang sudah dibayar tidak sampai ke tag ini;
+          di bawah 25% biasanya link atau sub_id salah. <b>Positif</b> berarti tag menerima klik dari luar iklannya — posting organik,
+          akun lain, atau iklan lain yang salah tag; di atas 120% ROAS tag itu batas atas. Penilaian dipakai setelah sekitar 300 klik.</p>
         <div class="tscroll"><table id="tblLeak"><thead></thead><tbody></tbody></table></div>
       </div>
       <div class="grid2">
@@ -230,7 +235,7 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="harian">
+    <div class="panel" data-panel="harian" role="tabpanel" id="panel-harian" aria-labelledby="tab-harian">
       <h3 class="print-sec">Rincian Harian</h3>
       <div class="strip" id="dailyStrip"></div>
       <div class="card" data-print="kalender">
@@ -247,10 +252,11 @@
       <div class="card">
         <div class="card-head"><h2>Komisi vs Biaya Iklan</h2><span class="sub" id="matureNote"></span></div>
         <div class="chartbox tall"><canvas id="chDaily"></canvas></div>
+        <p class="hint daily-basis" id="dailyBasis"></p>
       </div>
       <div class="grid2">
         <div class="card">
-          <div class="card-head"><h2>ROAS Harian</h2></div>
+          <div class="card-head"><h2>ROAS Harian</h2><span class="sub" id="roasNote"></span></div>
           <div class="chartbox"><canvas id="chRoas"></canvas></div>
         </div>
         <div class="card">
@@ -259,7 +265,7 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Rincian Harian</h2></div>
+        <div class="card-head"><h2>Rincian Harian</h2><span class="sub">menurut tanggal pesanan · komisi efektif</span></div>
         <div class="tscroll"><table id="tblDaily"><thead></thead><tbody></tbody></table></div>
       </div>
       <h3 class="sec-split">Perkembangan antar snapshot</h3>
@@ -295,7 +301,7 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="produk">
+    <div class="panel" data-panel="produk" role="tabpanel" id="panel-produk" aria-labelledby="tab-produk">
       <h3 class="print-sec">Produk dan Toko</h3>
       <div class="ptabs" id="prodTabs">
         <button class="ptab active" data-prod="comm">Komisi Terbesar</button>
@@ -318,7 +324,7 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="status">
+    <div class="panel" data-panel="status" role="tabpanel" id="panel-status" aria-labelledby="tab-status">
       <h3 class="print-sec">Status Order</h3>
       <div class="card" data-print="statsum">
         <div class="card-head"><h2>Laporan Status Order</h2>
@@ -338,7 +344,7 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="tersimpan">
+    <div class="panel" data-panel="tersimpan" role="tabpanel" id="panel-tersimpan" aria-labelledby="tab-tersimpan">
       <div class="card">
         <div class="card-head"><h2>Riwayat Harian Tersimpan</h2>
           <span class="sub" id="storedNote"></span>
@@ -351,13 +357,14 @@
           <div class="field"><label>&nbsp;</label><button class="btn" id="btnRange">Terapkan</button></div>
         </div>
         <div class="strip" id="storedStrip"></div>
+        <p class="hint">Riwayat menyimpan komisi per tanggal pesanan, jadi ROAS hari-hari terakhir bisa terlalu tinggi atau terlalu rendah. Grafik di tab Harian memakai tanggal klik bila laporan komisi punya kolom Waktu Klik.</p>
       </div>
       <div class="card">
-        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2></div>
+        <div class="card-head"><h2>Komisi vs Biaya Tersimpan</h2><span class="sub">Komisi menurut tanggal pesanan · area hijau = laba, merah = rugi</span></div>
         <div class="chartbox tall"><canvas id="chStored"></canvas></div>
       </div>
       <div class="grid2">
-        <div class="card"><div class="card-head"><h2>ROAS per Hari</h2></div>
+        <div class="card"><div class="card-head"><h2>ROAS per Hari (tanggal pesanan)</h2></div>
           <div class="chartbox"><canvas id="chStoredRoas"></canvas></div></div>
         <div class="card"><div class="card-head"><h2>Klik Meta vs Shopee</h2></div>
           <div class="chartbox"><canvas id="chStoredClk"></canvas></div></div>
@@ -388,7 +395,7 @@
       </div>
     </div>
 
-    <div class="panel" data-panel="rincian">
+    <div class="panel" data-panel="rincian" role="tabpanel" id="panel-rincian" aria-labelledby="tab-rincian">
       <div class="card">
         <div class="card-head"><h2>Komisi per Platform</h2></div>
         <div class="chartbox"><canvas id="chPlat"></canvas></div>
@@ -468,9 +475,9 @@
     <div class="field"><label for="pdfTitle">Judul laporan</label><input id="pdfTitle" maxlength="100" value="Laporan kinerja affiliate"></div>
     <p class="hint pdf-intro">Dashboard utama menjadi halaman pembuka: komisi, spend, laba, ROAS, klik, prioritas anggaran, dan kartu keputusan. Dilanjutkan grafik, diagram, dan tabel. Tag dengan biaya dan komisi sama-sama nol tidak disertakan.</p>
     <div class="pdfopts">
-      <button class="pdfopt" data-pdf="ringkas"><b>Ringkas</b><span>Gambaran visual</span><em>Dashboard utama, grafik, tabel keputusan, peluang organik, dan catatan data.</em></button>
-      <button class="pdfopt" data-pdf="standar"><b>Standar</b><span>Evaluasi berkala</span><em>Ringkasan visual ditambah tabel efisiensi, iklan, dan kinerja harian.</em></button>
-      <button class="pdfopt" data-pdf="lengkap"><b>Lengkap</b><span>Arsip analisis</span><em>Standar ditambah alasan keputusan, matching, produk, dan rincian sumber.</em></button>
+      <button class="pdfopt" data-pdf="ringkas"><b>Ringkas</b><span>Gambaran visual</span><em>Dashboard utama, grafik, tabel keputusan, pesanan langsung/tidak langsung, klik dan komisi per tag, peluang organik, dan catatan data.</em></button>
+      <button class="pdfopt" data-pdf="standar"><b>Standar</b><span>Evaluasi berkala</span><em>Ringkas ditambah rincian per iklan dan kinerja harian.</em></button>
+      <button class="pdfopt" data-pdf="lengkap"><b>Lengkap</b><span>Arsip analisis</span><em>Standar ditambah produk per tag, alasan keputusan, matching, produk terlaris, dan rincian sumber.</em></button>
     </div>
     <p class="hint">Jumlah halaman menyesuaikan banyaknya data. Baris tidak dipotong untuk mengejar jumlah halaman tertentu.</p>
     <p class="pdf-busy hidden" id="pdfBusy" role="status">Menyiapkan PDF…</p><p class="inline-error hidden" id="pdfError" role="alert"></p>
@@ -528,7 +535,7 @@
           <option value="11">11%</option>
           <option value="12">12%</option>
         </select>
-        <div class="tip">sesuai tagihan Meta</div></div>
+        <div class="tip">sesuai tagihan Meta; akun iklan luar negeri tanpa PPN</div></div>
       <div class="field"><label>Target ROI %</label><input type="number" id="targetROI" value="80" min="0" step="5">
         <div class="tip">dasar CPC ideal</div></div>
       <div class="field"><label>ROAS Scale</label><input type="number" id="thScale" value="2" step="0.1"></div>
