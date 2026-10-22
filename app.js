@@ -939,14 +939,19 @@ function renderLeak(){
   $('leakRange').textContent=r.clickStart?`Klik report ${r.clickStart} s/d ${r.clickEnd}`:'Click report belum dimuat';
   const rows=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
   const bySrc=RESULT.tags.some(t=>t.shopeeSrc);
-  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta',bySrc?'Klik Shopee FB+IG':'Klik Shopee','± Klik','% Masuk','Biaya Klik Kurang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
+  // Spend, commission and profit on the click report's days, so a tag reads
+  // as profitable or not beside its clicks without opening it.
+  const win=t=>Object.values(t.byDate||{}).filter(x=>x.date>=r.clickStart&&x.date<=r.clickEnd)
+    .reduce((a,x)=>(a.spend+=x.spend,a.commEff+=x.commEff,a),{spend:0,commEff:0});
+  const per=`Tanggal laporan klik ${r.clickStart} s/d ${r.clickEnd}`;
+  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta',bySrc?'Klik Shopee FB+IG':'Klik Shopee','± Klik','% Masuk','Biaya Klik Kurang','Biaya','Komisi Efektif','Laba','Catatan'].map((h,i)=>`<th class="${i&&i<9?'num':''}"${i>5&&i<9?` title="${per}"`:''}>${h}</th>`).join('')+'</tr>';
   $('tblLeak').querySelector('tbody').innerHTML=rows.length?rows.sort((a,b)=>a.leak.pct-b.leak.pct).map(t=>{
     const L=t.leak;
     // Signed, because the two directions mean different things: missing clicks
     // point at the link, extra clicks are outside traffic that inflates ROAS.
     // Small samples are not judged. The note cell keeps a floor width so phones
     // scroll the table sideways instead of growing very tall rows.
-    const d=L.shopeeClicks-L.metaClicks;
+    const d=L.shopeeClicks-L.metaClicks,w=win(t),net=w.commEff-w.spend;
     const note=!L.reliable?`Belum bisa dinilai: ${nf(L.metaClicks)} klik iklan (perlu ±300)`
       : L.severity==='bad'?'Kurang dari 25% klik sampai — periksa link'
       : L.severity==='warn'?'Sebagian klik tidak sampai; wajar bila klik sangat murah'
@@ -957,13 +962,15 @@ function renderLeak(){
       <td class="num ${d<0?'neg':d>0?'pos':''}">${d>0?'+':''}${nf(d)}</td>
       <td class="num ${L.reliable?'leak-'+L.severity:''}">${dec(L.pct,1)}%</td>
       <td class="num ${L.wasted>0?'neg':''}">${L.wasted>0?rp(L.wasted):'—'}</td>
+      <td class="num">${w.spend?rp(w.spend):'—'}</td><td class="num">${w.commEff?rp(w.commEff):'—'}</td>
+      <td class="num ${net>0?'pos':net<0?'neg':''}">${w.spend||w.commEff?rp(net):'—'}</td>
       <td style="white-space:normal;min-width:220px;font-size:11px;color:var(--text-dim)">${note}</td></tr>`
-      +(open?`<tr class="daydetail"><td colspan="7">${leakPlcDetail(t)}</td></tr>`:'');
-  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat perbandingan klik.</td></tr>`;
+      +(open?`<tr class="daydetail"><td colspan="10">${leakPlcDetail(t)}</td></tr>`:'');
+  }).join(''):`<tr><td colspan="10" style="text-align:center;color:var(--text-mute);padding:24px">Muat Website Click Report untuk melihat perbandingan klik.</td></tr>`;
   // Opened in place, so focus and the chosen sort order stay put.
   $('tblLeak').querySelectorAll('button[data-leak-tag]').forEach(b=>b.onclick=()=>{
     const tag=b.dataset.leakTag,tr=b.closest('tr'),next=tr.nextElementSibling,open=!LEAK_OPEN.has(tag);
-    if(open){LEAK_OPEN.add(tag);tr.insertAdjacentHTML('afterend',`<tr class="daydetail"><td colspan="7">${leakPlcDetail(RESULT.tags.find(x=>x.tag===tag))}</td></tr>`)}
+    if(open){LEAK_OPEN.add(tag);tr.insertAdjacentHTML('afterend',`<tr class="daydetail"><td colspan="10">${leakPlcDetail(RESULT.tags.find(x=>x.tag===tag))}</td></tr>`)}
     else{LEAK_OPEN.delete(tag);if(next&&next.classList.contains('daydetail'))next.remove()}
     b.classList.toggle('open',open);b.setAttribute('aria-expanded',String(open))});
 }

@@ -504,6 +504,12 @@ async function main() {
         plc('Audience Network', 'Native, banner and interstitial', 5000, 150, 30000)] },
       { name: 'clicks.csv', rows: shopee.map((p, i) => from(i, p)) }]);
     await page.locator('[data-tab="klik"]').click();
+    // Spend, commission and profit sit on the tag row, so it reads without opening.
+    const head = (await page.locator('#tblLeak > thead th').allInnerTexts()).map(s => s.trim().toUpperCase());
+    assert.deepEqual(head.slice(6, 9), ['BIAYA', 'KOMISI EFEKTIF', 'LABA']);
+    const tagRow = page.locator('#tblLeak > tbody > tr').first().locator('td');
+    assert.deepEqual((await tagRow.allInnerTexts()).slice(6, 9).map(s => s.trim()), ['Rp130rb', 'Rp1rb', '-Rp129rb']);
+    assert.match(await tagRow.nth(8).getAttribute('class'), /neg/);
     const button = page.locator('#tblLeak button[data-leak-tag="Alpha"]');
     assert.equal(await button.getAttribute('aria-expanded'), 'false');
     await button.click();
@@ -582,6 +588,9 @@ async function main() {
     await page.locator('#tblLeak button[data-leak-tag="Alpha"]').click();
     // The click report holds 1 Aug only: the tag row and its placements both count that day.
     assert.equal(await page.locator('#tblLeak > tbody > tr').first().locator('td').nth(1).innerText(), '10');
+    // 31 Jul spend is outside the click report: the row's profit counts 1 Aug only.
+    const money = (await page.locator('#tblLeak > tbody > tr').first().locator('td').allInnerTexts()).slice(6, 9).map(s => s.trim());
+    assert.deepEqual(money, ['Rp100', 'Rp200', 'Rp100']);
     const fb = (await page.locator('#tblLeak tr.daydetail tr.plc-plat').first().locator('td').allInnerTexts()).map(s => s.trim());
     assert.deepEqual(fb.slice(0, 3).concat(fb.slice(6, 8)), ['Facebook', 'Rp100', '10', '5', '50,0%']);
     assert.match(await page.locator('#tblLeak tr.daydetail .dayhead').innerText(), /2026-08-01 s\/d 2026-08-01/);
@@ -1266,7 +1275,7 @@ async function main() {
     const rows = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#tblLeak tbody tr')].map(tr => {
       const cells = tr.querySelectorAll('td');
       return [cells[0].querySelector('b').textContent, { pct: [...cells[4].classList], marked: tr.querySelectorAll('[class*="leak-"]').length,
-        note: cells[6].textContent }];
+        note: cells[9].textContent }];
     })));
     // Tiny is under 25% like Broken; only the sample size keeps it unjudged.
     assert.deepEqual(rows.Tiny, { pct: ['num'], marked: 0, note: 'Belum bisa dinilai: 299 klik iklan (perlu ±300)' });
