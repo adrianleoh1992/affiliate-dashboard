@@ -813,7 +813,7 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
     +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};bindBreakdown('tblMain',tag=>{const t=RESULT.tags.find(x=>x.tag===tag);return t?{byDate:t.byDate}:null},MC.length);
   $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();e.click()}})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
-const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
+const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 /* One name can belong to several ads (copies in other campaigns). Only then
    does the row say which one it is. */
 function repeatedNames(list){const seen=new Set(),twin=new Set();list.forEach(x=>{seen.has(x.adName)?twin.add(x.adName):seen.add(x.adName)});return twin}
@@ -839,6 +839,8 @@ function renderUnit(){
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.cpm)}</td>
     <td class="num">${nf(x.impr)}</td><td class="num">${nf(x.clicks)}</td>
     <td class="num">${full(x.cpc)}</td>
+    <td class="num">${x.lpv?nf(x.lpv):'—'}</td>
+    <td class="num"${x.lpv?` title="${full(x.spend)} biaya ÷ ${nf(x.lpv)} LP view"`:''}>${x.lpv?full(x.spend/x.lpv):'—'}</td>
     <td class="num"${x.shopeeClicks?' title="Jendela laporan klik, dibagi proporsional dari tag induk"':''}>${x.shopeeClicks?nf(x.shopeeClicks):'—'}</td>
     <td class="num"${x.cpcShopee?' title="Biaya pada jendela klik ÷ klik masuk, di tingkat tag"':''}>${x.cpcShopee?full(x.cpcShopee):'—'}</td>
     <td class="num col-ideal"><b>${full(x.cpcIdeal)}</b></td>
@@ -1490,3 +1492,66 @@ document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click'
 loadOpts();
 updateAnalysisAvailability();
 renderHistory();
+/* Click any column header to sort a table; click again to reverse. The
+   decision table and the direct/indirect table keep their own sorting. The
+   chosen order survives re-renders, and an opened detail row moves with
+   the row above it. */
+const TABLE_SORT={},OWN_SORT=new Set(['tblMain','tblAttr']);
+function cellValue(td){
+  const s=(td?td.innerText||td.textContent:'').trim().split('\n')[0].trim();
+  if(!s||s==='—'||s==='-')return null;
+  let t=s.replace(/^Rp\s*/i,'').replace(/^−/,'-'),k=1;
+  const neg=/^-/.test(t)||/\blebih\b/.test(t);
+  t=t.replace(/^[+-]/,'').replace(/\s*(lebih|lain)\b.*$/,'').replace(/[%x×]$/,'').trim();
+  const unit=t.match(/(rb|jt|m)$/i);if(unit){k={rb:1e3,jt:1e6,m:1e9}[unit[1].toLowerCase()];t=t.slice(0,-unit[1].length).trim()}
+  // Indonesian numbers: dots group thousands, a comma marks decimals; a dot
+  // not followed by exactly three digits is a decimal point (2.50x, 6.02%).
+  if(t.includes(','))t=t.replace(/\./g,'').replace(',','.');
+  else if(/^\d{1,3}(\.\d{3})+$/.test(t))t=t.replace(/\./g,'');
+  if(!/^\d+(\.\d+)?$/.test(t))return s.toLocaleLowerCase('id');
+  return (neg?-1:1)*parseFloat(t)*k;
+}
+function cellAt(tr,col){let i=0;for(const td of tr.cells){if(i===col)return td;i+=td.colSpan||1}return null}
+function applyTableSort(table){
+  const st=TABLE_SORT[table.id],tb=table.tBodies[0];if(!st||!tb)return;
+  const rows=[...tb.rows];
+  if(!rows.length||rows.some(r=>r.cells.length===1&&r.cells[0].colSpan>1&&!r.classList.contains('daydetail')))return;
+  const groups=[],tail=[];
+  rows.forEach(r=>{if(r.classList.contains('daydetail')&&groups.length)groups[groups.length-1].push(r);else if(r.classList.contains('total'))tail.push(r);else groups.push([r])});
+  const val=g=>cellValue(cellAt(g[0],st.col));
+  const sorted=groups.map((g,i)=>({g,i,v:val(g)})).sort((a,b)=>{
+    if(a.v==null||b.v==null)return a.v==null&&b.v==null?a.i-b.i:a.v==null?1:-1;
+    if(typeof a.v!==typeof b.v)return typeof a.v==='number'?-1:1;
+    return (typeof a.v==='number'?a.v-b.v:a.v.localeCompare(b.v,'id'))*st.dir||a.i-b.i;
+  });
+  const frag=document.createDocumentFragment();sorted.forEach(x=>x.g.forEach(r=>frag.append(r)));tail.forEach(r=>frag.append(r));
+  tb.append(frag);
+}
+function markSortHeader(table){
+  const st=TABLE_SORT[table.id],head=table.tHead&&table.tHead.rows[0];if(!head)return;
+  let i=0;for(const th of head.cells){
+    th.classList.toggle('sorted',!!st&&st.col===i);
+    th.setAttribute('aria-sort',st&&st.col===i?(st.dir<0?'descending':'ascending'):'none');
+    i+=th.colSpan||1;
+  }
+}
+document.querySelectorAll('.tscroll>table[id]').forEach(table=>{
+  if(OWN_SORT.has(table.id))return;
+  let busy=false;
+  const resort=()=>{if(busy||!TABLE_SORT[table.id])return;busy=true;applyTableSort(table);markSortHeader(table);obs.takeRecords();busy=false};
+  const obs=new MutationObserver(resort);
+  obs.observe(table,{childList:true,subtree:false});
+  if(table.tHead)obs.observe(table.tHead,{childList:true});
+  if(table.tBodies[0])obs.observe(table.tBodies[0],{childList:true});
+  const pick=th=>{
+    if(th.closest('table')!==table||!th.closest('thead')||th.colSpan>1)return;
+    let col=0;for(const c of th.parentElement.cells){if(c===th)break;col+=c.colSpan||1}
+    const cur=TABLE_SORT[table.id],first=[...table.tBodies[0]?.rows||[]].map(r=>cellValue(cellAt(r,col))).find(v=>v!=null);
+    TABLE_SORT[table.id]=cur&&cur.col===col?{col,dir:-cur.dir}:{col,dir:typeof first==='number'?-1:1};
+    resort();
+  };
+  table.addEventListener('click',e=>{const th=e.target.closest('th');if(th)pick(th)});
+  table.addEventListener('keydown',e=>{const th=e.target.closest('th');if(th&&(e.key==='Enter'||e.key===' ')){e.preventDefault();pick(th)}});
+  const tabbable=()=>table.tHead&&[...table.tHead.querySelectorAll('th')].forEach(th=>{if(!th.hasAttribute('tabindex'))th.tabIndex=0});
+  new MutationObserver(tabbable).observe(table.tHead||table,{childList:true,subtree:true});tabbable();
+});

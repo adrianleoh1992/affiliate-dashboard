@@ -301,6 +301,16 @@ details[open] .settings-summary::before{transform:rotate(90deg)}
 
 /* Tables */
 .tscroll{overflow-x:auto;border:1px solid var(--border);border-radius:11px;background:var(--surface)}
+/* A long table scrolls inside its own box so its header row stays in view;
+   the page header is sticky too, so the box stops below it. Tables nested
+   in an opened row keep a plain header. */
+@media screen{
+  .tscroll{overflow:auto;max-height:max(320px,calc(100vh - 150px))}
+  .tscroll .tscroll{max-height:none}
+  td th{position:static}
+}
+th.sorted{color:var(--accent)}
+th.sorted[aria-sort=ascending]::after{content:' ▴'}th.sorted[aria-sort=descending]::after{content:' ▾'}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{text-align:left;font-size:9.5px;font-weight:700;color:var(--text-mute);text-transform:uppercase;
   letter-spacing:.4px;padding:10px 11px;border-bottom:1px solid var(--border);white-space:nowrap;
@@ -619,7 +629,7 @@ tbody tr:hover{background:var(--surface-2)}
   .kdrill{display:block!important;margin-top:7px;padding-top:6px}
   .krow{font-size:9px;padding:2px 0}
   table{font-size:8.5px}th,td{padding:4px 6px!important}
-  .tscroll{overflow:visible!important}
+  .tscroll{overflow:visible!important;max-height:none!important}
   .daydetail{display:none!important}     /* opened rows are screen-only */
   .chartbox{height:190px!important;break-inside:avoid}
   .chartbox.tall{height:230px!important}
