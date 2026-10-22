@@ -180,6 +180,38 @@ async function main() {
     assert.equal((await tags()).length, 3);
   });
 
+  test('ad units show LP views; any table sorts by a header and keeps its header in view', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Beta')] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 100), 'Landing page views': '4' }, { ...ad('Beta', 300), 'Landing page views': '20' }, { ...ad('Gamma', 50), 'Landing page views': '0' }] }]);
+    const unit = page.locator('#tblUnit');
+    const head = await unit.locator('thead th').allInnerTexts();
+    const lp = head.findIndex(h => /^LP View$/i.test(h.trim()));
+    assert.ok(lp > head.findIndex(h => /CPC Meta/i.test(h)) && lp < head.findIndex(h => /Klik Shopee/i.test(h)), 'LP View sits between Meta and Shopee');
+    assert.match(head[lp + 1], /Biaya\/LP View/i);
+    const col = async i => (await unit.locator('tbody tr.dayrow').evaluateAll((rows, i) => rows.map(r => r.cells[i].innerText.trim()), i));
+    assert.deepEqual(await col(lp + 1), ['Rp15', 'Rp25', '—']); // biggest spend first by default
+    // Open Beta's daily rows, then sort by LP View: the detail row moves with Beta.
+    await unit.locator('tbody tr.dayrow', { hasText: 'Beta' }).click();
+    await unit.locator('thead th').nth(lp).click();
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Beta', 'Alpha', 'Gamma'], 'largest first, empty last');
+    assert.equal(await unit.locator('tbody tr.dayrow').first().evaluate(r => r.nextElementSibling.classList.contains('daydetail')), true);
+    assert.equal(await unit.locator('thead th').nth(lp).getAttribute('aria-sort'), 'descending');
+    await unit.locator('thead th').nth(lp).click();
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Alpha', 'Beta', 'Gamma']);
+    assert.equal(await unit.locator('tbody tr.dayrow').nth(1).evaluate(r => r.nextElementSibling.classList.contains('daydetail')), true, 'detail row follows Beta');
+    // A re-render keeps the chosen order.
+    await page.evaluate(() => recalc());
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Alpha', 'Beta', 'Gamma']);
+    // The decision table keeps its own sorting.
+    assert.equal(await page.locator('#tblMain th[data-sort="spend"]').getAttribute('aria-sort') !== null, true);
+    // Long tables scroll inside their box, so the sticky header stays in view.
+    const box = await page.locator('#tblUnit').evaluate(t => { const s = getComputedStyle(t.parentElement); return { overflowY: s.overflowY, maxHeight: s.maxHeight, th: getComputedStyle(t.tHead.rows[0].cells[0]).position }; });
+    assert.equal(box.overflowY, 'auto');
+    assert.notEqual(box.maxHeight, 'none');
+    assert.equal(box.th, 'sticky');
+  });
+
   test('a placement export feeds the platform card without doubling spend', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
