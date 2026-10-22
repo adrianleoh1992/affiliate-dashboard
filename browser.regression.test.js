@@ -1402,28 +1402,34 @@ async function main() {
     assert.match(await page.locator('#tblMain .daydetail').textContent(), /Komisi Efektif[\s\S]+Rp144rb\s*-Rp11rb\s*0,93\s*10\s*Rp15\.540/);
   });
 
-  test('the Klik Shopee card walks the report total down to the number compared with Meta', async page => {
+  test('Klik Shopee counts every click but Shopee Video, which gets its own tag', async page => {
     const date = '2026-08-01';
     const at = i => `${date} 09:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
     let n = 0;
     const clicks = (tag, count, src) => Array.from({ length: count }, () => ({ ...click(tag, date), 'Waktu Klik': at(n++), Perujuk: src }));
     await upload(page, [
-      { name: 'affiliate.csv', rows: [aff('1', 'Alpha', date)] },
+      { name: 'affiliate.csv', rows: [aff('1', 'Alpha', date), { ...aff('2', '', date), Platform: 'Shopeevideo-Shopee' }] },
       { name: 'ads.csv', rows: [{ ...ad('Alpha', 100, date), 'Link clicks': '100' }] },
       { name: 'clicks.csv', rows: [...clicks('Alpha', 60, 'Facebook'), ...clicks('Alpha', 10, 'Instagram'),
-        ...clicks('Alpha', 5, 'Others'), ...clicks('Organik', 7, 'Facebook'), ...clicks('Organik', 3, 'Websites')] }]);
+        ...clicks('Alpha', 5, 'Others'), ...clicks('Boosted', 7, 'Facebook'), ...clicks('Boosted', 3, 'Websites'),
+        ...clicks('', 4, 'Shopeevideo-Shopee')] }]);
     const card = await page.evaluate(() => {
       const el = [...document.querySelectorAll('#clickKpis .kpi')].find(e => e.querySelector('.lbl').textContent.startsWith('Klik Shopee'));
       const pct = [...document.querySelectorAll('#clickKpis .kpi')].find(e => e.querySelector('.lbl').textContent.startsWith('% Klik Masuk'));
+      const sv = RESULT.tags.find(t => t.tag === 'Shopee Video');
       return { val: el.querySelector('.val').textContent, sub: el.querySelector('.sub').textContent,
-        rows: [...el.querySelectorAll('.krow')].slice(0, 5).map(r => [...r.children].map(c => c.textContent)),
-        pct: pct.querySelector('.val').textContent, pctSub: pct.querySelector('.sub').textContent };
+        rows: [...el.querySelectorAll('.krow')].slice(0, 6).map(r => [...r.children].map(c => c.textContent)),
+        pct: pct.querySelector('.val').textContent, pctSub: pct.querySelector('.sub').textContent,
+        sv: sv && [sv.shopeeClicks, sv.orders], untagged: RESULT.tags.some(t => t.tag === '(tanpa tag)') };
     });
-    assert.equal(card.val, '70');
-    assert.match(card.sub, /FB\+IG ke tag beriklan$/);
-    assert.deepEqual(card.rows, [['Semua klik di laporan Shopee', '85'], ['Bukan dari Facebook/Instagram', '−8'],
-      ['FB/IG ke tag tanpa klik Meta', '−7'], ['terbesar: Organik 7', ''], ['Dibandingkan dengan Klik Meta', '70']]);
-    assert.equal(card.pct, '70,0%');
+    assert.equal(card.val, '85');
+    assert.match(card.sub, /tanpa Shopee Video$/);
+    assert.deepEqual(card.rows, [['Semua klik di laporan Shopee', '89'], ['Shopee Video (dipisah)', '−4'],
+      ['FB+IG ke tag beriklan', '70'], ['FB+IG ke tag tanpa iklan Meta', '7'],
+      ['boost Shopee atau organik: Boosted 7', ''], ['Perujuk lain (Others, Websites, …)', '8']]);
+    assert.deepEqual(card.sv, [4, 1], 'untagged Shopee Video clicks and orders land on one named tag');
+    assert.equal(card.untagged, false);
+    assert.equal(card.pct, '70,0%', '% masuk still compares FB+IG on advertised tags with Meta');
     assert.match(card.pctSub, /^70 ÷ 100 · /);
   });
 
