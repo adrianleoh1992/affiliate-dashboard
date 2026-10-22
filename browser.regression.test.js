@@ -1402,6 +1402,31 @@ async function main() {
     assert.match(await page.locator('#tblMain .daydetail').textContent(), /Komisi Efektif[\s\S]+Rp144rb\s*-Rp11rb\s*0,93\s*10\s*Rp15\.540/);
   });
 
+  test('the Klik Shopee card walks the report total down to the number compared with Meta', async page => {
+    const date = '2026-08-01';
+    const at = i => `${date} 09:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+    let n = 0;
+    const clicks = (tag, count, src) => Array.from({ length: count }, () => ({ ...click(tag, date), 'Waktu Klik': at(n++), Perujuk: src }));
+    await upload(page, [
+      { name: 'affiliate.csv', rows: [aff('1', 'Alpha', date)] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 100, date), 'Link clicks': '100' }] },
+      { name: 'clicks.csv', rows: [...clicks('Alpha', 60, 'Facebook'), ...clicks('Alpha', 10, 'Instagram'),
+        ...clicks('Alpha', 5, 'Others'), ...clicks('Organik', 7, 'Facebook'), ...clicks('Organik', 3, 'Websites')] }]);
+    const card = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('#clickKpis .kpi')].find(e => e.querySelector('.lbl').textContent.startsWith('Klik Shopee'));
+      const pct = [...document.querySelectorAll('#clickKpis .kpi')].find(e => e.querySelector('.lbl').textContent.startsWith('% Klik Masuk'));
+      return { val: el.querySelector('.val').textContent, sub: el.querySelector('.sub').textContent,
+        rows: [...el.querySelectorAll('.krow')].slice(0, 5).map(r => [...r.children].map(c => c.textContent)),
+        pct: pct.querySelector('.val').textContent, pctSub: pct.querySelector('.sub').textContent };
+    });
+    assert.equal(card.val, '70');
+    assert.match(card.sub, /FB\+IG ke tag beriklan$/);
+    assert.deepEqual(card.rows, [['Semua klik di laporan Shopee', '85'], ['Bukan dari Facebook/Instagram', '−8'],
+      ['FB/IG ke tag tanpa klik Meta', '−7'], ['terbesar: Organik 7', ''], ['Dibandingkan dengan Klik Meta', '70']]);
+    assert.equal(card.pct, '70,0%');
+    assert.match(card.pctSub, /^70 ÷ 100 · /);
+  });
+
   test('placement rows under Spend Iklan include PPN and add up to the headline', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     await upload(page, [{ name: 'affiliate.csv', rows: [aff()] }, { name: 'ads.csv', rows: [
