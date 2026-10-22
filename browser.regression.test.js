@@ -526,9 +526,11 @@ async function main() {
     // The opened box moves with its row when the table is sorted, and closes again.
     await page.locator('#tblLeak > thead th', { hasText: 'Klik Meta' }).click();
     assert.equal(await page.evaluate(() => document.querySelector('#tblLeak button[data-leak-tag="Alpha"]').closest('tr').nextElementSibling.className), 'daydetail');
-    await button.click();
+    await button.focus();
+    await page.keyboard.press('Enter');
     assert.equal(await detail.count(), 0);
     assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.leakTag), 'Alpha', 'a sorted table keeps focus on the tag');
     // Biaya carries PPN like every other spend figure, and stays open across a recalculation.
     await button.click();
     await setPpn(page, '11');
@@ -548,6 +550,25 @@ async function main() {
     assert.match(text, /Facebook\tRp700\t70\t100%/);
     assert.match(text, /Total tag\tRp700\t70\t100%\t[^\t]+\tRp10\t—\t—/);
     assert.match(text, /2026-07-25 s\/d 2026-07-31 tidak berada di dalam periode laporan klik \(2026-08-01 s\/d 2026-08-01\)/);
+  });
+
+  test('without Perujuk the placement box compares arrivals for the whole tag only', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, clicks) => ({ ...ad('Alpha', clicks * 100), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const { Platform, ...noPlatform } = aff('1');
+    await upload(page, [{ name: 'affiliate.csv', rows: [noPlatform] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 50000), 'Link clicks': '500' }] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 300), plc('Instagram', 'Instagram Stories', 200)] },
+      { name: 'clicks.csv', rows: Array.from({ length: 460 }, (_, i) => { const { Perujuk, ...c } = click(); return { ...c, 'Klik ID': 'k' + i }; }) }]);
+    await page.locator('[data-tab="klik"]').click();
+    await page.locator('#tblLeak button[data-leak-tag="Alpha"]').click();
+    const box = page.locator('#tblLeak tr.daydetail');
+    const fb = (await box.locator('tr.plc-plat').first().locator('td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(fb.slice(6), ['—', '—', '—', '—'], 'no platform arrivals, and no ROAS without a Platform column');
+    assert.equal(await box.locator('tr.plc-other').count(), 0);
+    const total = (await box.locator('tfoot td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(total.slice(6, 8), ['460', '92,0%'], 'the total matches the tag row');
+    assert.match(await box.innerText(), /Laporan klik tanpa kolom Perujuk/);
   });
 
   test('placements under a tag in the click table cover only the click report days', async page => {

@@ -978,8 +978,9 @@ function leakPlcDetail(t){
   const T=P&&P.tags.find(x=>x.tag===t.tag);
   if(!T)return box(`<p class="hint">${P?`Tag ini tidak ada di file placement (${P.range.start} s/d ${P.range.end}).`:`File placement tidak mencakup periode laporan klik (${r.clickStart} s/d ${r.clickEnd}).`}</p>`);
   // A whole-period file that reaches outside the click report would count
-  // clicks Shopee never had a chance to record.
-  const same=P.hasClicks&&P.range.start>=r.clickStart&&P.range.end<=r.clickEnd;
+  // clicks Shopee never had a chance to record. Without "Perujuk" no click
+  // has a platform, so arrivals are compared for the whole tag only.
+  const inWin=P.hasClicks&&P.range.start>=r.clickStart&&P.range.end<=r.clickEnd,same=inWin&&P.hasClickSrc;
   const k=1+(RESULT.options.ppn||0)/100,num=(v,c)=>`<td class="num${c?' '+c:''}">${v}</td>`,dash=num('—');
   // Placement spend is Meta's, without PPN; costs here carry it like every other Biaya.
   const cost=v=>v?full(v*k):'—',money=v=>v?full(v):'—',count=v=>v?nf(v):'—',ctr=v=>v==null||!isFinite(v)?'—':dec(v,2)+'%';
@@ -990,8 +991,8 @@ function leakPlcDetail(t){
   // Same verdict and 300-click floor as the tag row. "Lainnya" (Messenger,
   // Audience Network, Threads) mostly arrives under Shopee's Other, so its
   // share would read as lost clicks it is not: counted, not turned into a %.
-  const arrived=(meta,shopee,judge)=>{
-    if(!same)return dash+dash;
+  const arrived=(meta,shopee,judge,ok=same)=>{
+    if(!ok)return dash+dash;
     if(!judge)return num(count(shopee))+'<td class="num" title="Klik Messenger, Audience Network, dan Threads biasanya tercatat di Shopee sebagai Other">—</td>';
     if(!meta)return num(count(shopee))+dash;
     const L=platformLeak({lost:100-shopee/meta*100,clicks:meta}).leak;
@@ -1000,18 +1001,19 @@ function leakPlcDetail(t){
   const body=plats.map(x=>{
     const p=T.platforms[x];
     const places=(T.placements||[]).filter(q=>q.platform===x&&(q.spend||q.clicks)).sort((a,b)=>b.clicks-a.clicks||b.spend-a.spend);
-    return`<tr class="plc-plat"><td>${esc(x)}</td>${num(cost(p.spend))}${num(count(p.clicks))}${num(share(p.clicks))}${num(ctr(p.ctr))}${num(p.cpc==null?'—':full(p.cpc*k))}${arrived(p.clicks,p.shopeeClicks,x!=='Lainnya')}${num(money(p.comm))}${num(roas(p.spend?p.comm/(p.spend*k):null))}</tr>`
-      +places.map(q=>`<tr class="plc-place"><td>${esc(q.placement)}</td>${num(cost(q.spend))}${num(count(q.clicks))}${num(share(q.clicks))}${num(ctr(q.ctr))}${num(q.cpc==null?'—':full(q.cpc*k))}<td class="num" title="Shopee tidak mencatat placement">—</td><td class="num" title="Shopee tidak mencatat placement">—</td>${num(money(q.estComm),'est')}${num(roas(q.spend?q.estComm/(q.spend*k):null),'est')}</tr>`).join('');
+    return`<tr class="plc-plat"><td>${esc(x)}</td>${num(cost(p.spend))}${num(count(p.clicks))}${num(share(p.clicks))}${num(ctr(p.ctr))}${num(p.cpc==null?'—':full(p.cpc*k))}${arrived(p.clicks,p.shopeeClicks,x!=='Lainnya')}${num(money(p.comm))}${num(roas(P.hasOrderPlatform&&p.spend?p.comm/(p.spend*k):null))}</tr>`
+      +places.map(q=>`<tr class="plc-place"><td>${esc(q.placement)}</td>${num(cost(q.spend))}${num(count(q.clicks))}${num(share(q.clicks))}${num(ctr(q.ctr))}${num(q.cpc==null?'—':full(q.cpc*k))}<td class="num" title="Shopee tidak mencatat placement">—</td><td class="num" title="Shopee tidak mencatat placement">—</td>${num(money(q.estComm),'est')}${num(P.hasOrderPlatform&&q.spend?rx(q.estComm/(q.spend*k)):'—','est')}</tr>`).join('');
   }).join('');
   const o=T.platforms[Placement.OTHER];
-  const other=o&&(o.shopeeClicks||o.comm)?`<tr class="plc-other"><td>Other (bukan FB/IG)</td><td colspan="5"><small class="src-other">Bukan klik iklan Meta</small></td>${num(same?count(o.shopeeClicks):'—')}${dash}${num(money(o.comm))}${dash}</tr>`:'';
-  const meta=['Facebook','Instagram'].reduce((s,x)=>s+(T.platforms[x]?T.platforms[x].shopeeClicks:0),0);
+  const other=P.hasClickSrc&&o&&(o.shopeeClicks||o.comm)?`<tr class="plc-other"><td>Other (bukan FB/IG)</td><td colspan="5"><small class="src-other">Bukan klik iklan Meta</small></td>${num(same?count(o.shopeeClicks):'—')}${dash}${num(money(o.comm))}${dash}</tr>`:'';
+  const meta=P.hasClickSrc?['Facebook','Instagram'].reduce((s,x)=>s+(T.platforms[x]?T.platforms[x].shopeeClicks:0),0):Object.values(T.platforms).reduce((s,p)=>s+(p.shopeeClicks||0),0);
   const head=['Platform / placement','Biaya','Klik Meta','Porsi klik','CTR','CPC Meta','Klik Shopee','% Masuk','Komisi','ROAS'];
   return box(`<div class="dayhead">Placement · ${esc(t.tag)} <span>${P.range.start} s/d ${P.range.end}</span></div>
     <div class="tscroll"><table class="daytbl"><thead><tr>${head.map((h,i)=>`<th class="${i?'num':''}">${h}</th>`).join('')}</tr></thead><tbody>${body}${other}</tbody>
-    <tfoot><tr><td>Total tag</td>${num(cost(spend))}${num(count(clicks))}${num(clicks?'100%':'—')}${num(ctr(impr?clicks/impr*100:null))}${num(clicks?full(spend*k/clicks):'—')}${arrived(clicks,meta,true)}${num(money(T.comm))}${num(roas(spend?T.comm/(spend*k):null))}</tr></tfoot></table></div>
-    <p class="hint">Shopee hanya mencatat asal klik per platform (Facebook atau Instagram), bukan per placement. Jadi % masuk dihitung per platform; untuk placement, bandingkan porsi klik, CTR, dan CPC-nya. Komisi placement (miring) adalah estimasi: komisi platform dibagi menurut porsi klik.`
-    +(same?'':` File placement ${P.range.start} s/d ${P.range.end} tidak berada di dalam periode laporan klik (${r.clickStart} s/d ${r.clickEnd}), jadi klik masuk tidak dihitung.`)
+    <tfoot><tr><td>Total tag</td>${num(cost(spend))}${num(count(clicks))}${num(clicks?'100%':'—')}${num(ctr(impr?clicks/impr*100:null))}${num(clicks?full(spend*k/clicks):'—')}${arrived(clicks,meta,true,inWin)}${num(money(T.comm))}${num(roas(spend?T.comm/(spend*k):null))}</tr></tfoot></table></div>
+    <p class="hint">Shopee hanya mencatat asal klik per platform (Facebook atau Instagram), bukan per placement. Jadi % masuk dihitung per platform, dan kebocoran per placement (misalnya Stories) tidak bisa diukur di sini. Komisi dan ROAS placement (miring) adalah estimasi: komisi platform dibagi menurut porsi klik, seolah klik semua placement sama-sama sampai ke Shopee. Untuk menguji Stories, pisahkan Stories ke iklan dengan tag sendiri, lalu bandingkan % masuk-nya.`
+    +(inWin?'':` File placement ${P.range.start} s/d ${P.range.end} tidak berada di dalam periode laporan klik (${r.clickStart} s/d ${r.clickEnd}), jadi klik masuk tidak dihitung.`)
+    +(!inWin||P.hasClickSrc?'':' Laporan klik tanpa kolom Perujuk, jadi klik Shopee tidak bisa dibagi per platform; klik masuk hanya dihitung untuk total tag.')
     +(P.hasOrderPlatform?'':' Laporan komisi tanpa kolom Platform, jadi komisi per platform kosong.')+'</p>');
 }
 function renderDaily(){
@@ -1724,8 +1726,9 @@ function applyTableSort(table){
     if(typeof a.v!==typeof b.v)return typeof a.v==='number'?-1:1;
     return (typeof a.v==='number'?a.v-b.v:a.v.localeCompare(b.v,'id'))*st.dir||a.i-b.i;
   });
-  const frag=document.createDocumentFragment();sorted.forEach(x=>x.g.forEach(r=>frag.append(r)));tail.forEach(r=>frag.append(r));
-  tb.append(frag);
+  // Moving rows drops focus from a button inside them; give it back.
+  const focus=document.activeElement,frag=document.createDocumentFragment();sorted.forEach(x=>x.g.forEach(r=>frag.append(r)));tail.forEach(r=>frag.append(r));
+  tb.append(frag);if(focus&&focus!==document.activeElement&&table.contains(focus))focus.focus({preventScroll:true});
 }
 function markSortHeader(table){
   const st=TABLE_SORT[table.id],head=table.tHead&&table.tHead.rows[0];if(!head)return;

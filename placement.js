@@ -30,7 +30,8 @@
   // Shopee's "Others", "Websites", "Google Search", … cannot be tied to a Meta
   // platform; they stay visible but are never split onto placements.
   const OTHER = 'Other (bukan FB/IG)';
-  const SHOPEE_META = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Lainnya', whatsapp: 'Lainnya', messenger: 'Lainnya' };
+  // WhatsApp is a share, not a Meta ad placement: it stays Other, as in the engine.
+  const SHOPEE_META = { facebook: 'Facebook', instagram: 'Instagram', threads: 'Lainnya', messenger: 'Lainnya' };
   function shopeePlatform(v) {
     return SHOPEE_META[String(v || '').trim().toLowerCase()] || OTHER;
   }
@@ -41,16 +42,22 @@
     return (fields || []).includes('Placement');
   }
 
-  // matchLog has one entry per ad unit; a name shared by several ads takes the
-  // tag that carries most of its spend.
-  function tagByAdName(matchLog) {
-    const best = new Map();
+  // matchLog has one entry per ad unit. A placement row joins its unit by Ad
+  // ID; without a usable ID, by name — but only when that name maps to one
+  // tag, so ads sharing a name never hand their clicks to the wrong tag.
+  function tagOfRow(matchLog) {
+    const byId = new Map(), byName = new Map();
     for (const u of matchLog || []) {
-      if (!u || !u.adName || !u.tag) continue;
-      const prev = best.get(u.adName);
-      if (!prev || (u.spend || 0) > prev.spend) best.set(u.adName, { tag: u.tag, spend: u.spend || 0 });
+      if (!u || !u.tag) continue;
+      if (u.adId) byId.set(String(u.adId), u.tag);
+      if (u.adName) { const set = byName.get(u.adName) || new Set(); set.add(u.tag); byName.set(u.adName, set); }
     }
-    return name => (best.get(name) || {}).tag || '';
+    return r => {
+      const id = E.intactAdId(E.pick(r, E.COL.ads.id));
+      if (id && byId.has(id)) return byId.get(id);
+      const set = byName.get(String(r['Ad name'] || '').trim());
+      return set && set.size === 1 ? [...set][0] : '';
+    };
   }
 
   function blank() {
@@ -66,7 +73,7 @@
       return s !== e || !want.start || !want.end || (s >= want.start && s <= want.end);
     });
     if (!rows.length) return null;
-    const tagOf = tagByAdName(input.matchLog);
+    const tagOf = tagOfRow(input.matchLog);
     let start = '', end = '';
     for (const r of rows) {
       const s = E.dayOnly(r['Reporting starts']), e = E.dayOnly(r['Reporting ends'] || r['Reporting starts']);
@@ -79,8 +86,7 @@
     const tp = new Map(), tpp = new Map(), adTags = new Set();
     const cell = (map, key) => { if (!map.has(key)) map.set(key, blank()); return map.get(key); };
     for (const r of rows) {
-      const name = String(r['Ad name'] || '').trim();
-      const tag = tagOf(name) || UNMATCHED;
+      const tag = tagOf(r) || UNMATCHED;
       const plat = metaPlatform(r.Platform);
       const place = String(r.Placement || '').trim() || 'Tanpa placement';
       const spend = E.num(E.pick(r, E.COL.ads.spend)), impr = E.num(r.Impressions), clicks = E.num(r['Link clicks']);
@@ -96,6 +102,9 @@
     for (const r of input.affiliate || []) { const t = E.cleanTag(E.pick(r, E.COL.aff.tag)); if (t) affTags.add(t); }
     const known = E.tagLookup([...affTags]);
     const shopee = new Map();
+    // Without a "Perujuk" column every click reads as Other; callers then
+    // compare arrivals per tag only, as the engine does.
+    const hasClickSrc = (input.clicks || []).some(r => E.pick(r, E.COL.clk.src));
     // Each source behind the Other row, by the name Shopee gave it.
     const others = new Map();
     // …and by tag, so the Other row can be opened to show where it went.
@@ -228,7 +237,7 @@
       range: { start, end }, platforms, total, placements, tags, avgCpc, otherSources, otherTags,
       unmatchedSpend: tags.filter(t => t.tag === UNMATCHED).reduce((s, t) => s + t.spend, 0),
       daily: rows.every(r => E.dayOnly(r['Reporting starts']) === E.dayOnly(r['Reporting ends'] || r['Reporting starts'])),
-      hasClicks: (input.clicks || []).length > 0, hasOrderPlatform,
+      hasClicks: (input.clicks || []).length > 0, hasClickSrc, hasOrderPlatform,
     };
   }
 
