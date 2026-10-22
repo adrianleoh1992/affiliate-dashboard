@@ -1484,9 +1484,9 @@ function runPrint(mode){
 }
 
 /* Tag map modal */
-function mapRow(k,v){return `<div class="maprow"><input placeholder="nama iklan" value="${esc(k)}" data-k>
-  <span style="color:var(--text-mute)">→</span><input placeholder="tag affiliate" value="${esc(v)}" data-v>
-  <button class="btn ghost" data-del>×</button></div>`}
+function mapRow(k,v){return `<div class="maprow"><input placeholder="nama iklan di Meta" aria-label="Nama iklan (Meta Ads)" value="${esc(k)}" data-k>
+  <span class="maparrow" aria-hidden="true">→</span><input placeholder="tag Shopee" aria-label="Tag Shopee (sub_id)" value="${esc(v)}" data-v>
+  <button class="btn ghost" data-del aria-label="Hapus baris" title="Hapus baris">×</button></div>`}
 function bindDel(){$('mapRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>b.closest('.maprow').remove())}
 function openMap(){const m=map();$('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');openModal('mapModal');bindDel()}
 $('btnMap').onclick=openMap;

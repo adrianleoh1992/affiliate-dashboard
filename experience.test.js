@@ -116,6 +116,26 @@ async function main() {
     assert.equal(await page.evaluate(id => RESULT.matchLog.find(m => m.adId === id).method, id2), 'Manual', 'Simpan keeps the per-Ad-ID choice');
   });
 
+  for (const width of [1280, 360]) {
+    test(`manual map rows say which side is the ad name and which is the tag at ${width}px`, async page => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => localStorage.setItem('adash_map_v3_default', JSON.stringify({ '#18TasWanita': '19TasWanita' })));
+      await prepare(page);
+      await page.locator('#btnMap').click();
+      const head = page.locator('#mapModal .maphead > span');
+      assert.deepEqual((await head.allInnerTexts()).map(s => s.trim()), ['Nama iklan (Meta Ads)', '', 'Tag Shopee (sub_id)', '']);
+      const row = page.locator('#mapRows .maprow').first(), name = row.locator('[data-k]'), tag = row.locator('[data-v]');
+      assert.equal(await name.inputValue(), '#18TasWanita');
+      assert.equal(await tag.inputValue(), '19TasWanita');
+      assert.equal(await name.getAttribute('aria-label'), 'Nama iklan (Meta Ads)');
+      assert.equal(await tag.getAttribute('aria-label'), 'Tag Shopee (sub_id)');
+      const lefts = await head.evaluateAll(els => els.map(e => e.getBoundingClientRect().left));
+      assert.ok(Math.abs(lefts[0] - (await name.boundingBox()).x) <= 1, 'the ad-name label sits over the ad-name input');
+      assert.ok(Math.abs(lefts[2] - (await tag.boundingBox()).x) <= 1, 'the tag label sits over the tag input');
+      assert.ok(await page.evaluate(() => { const b = document.querySelector('#mapModal .modal-box'); return b.scrollWidth <= b.clientWidth + 1; }), 'the rows fit the dialog');
+    });
+  }
+
   test('partial import waits for an explicit decision and exports its quality caveat', async page => {
     await upload(page, [{ name: 'existing.csv', rows: [aff('1')] }]);
     await upload(page, [{ name: 'mixed.csv', rows: [aff('2'), { ...aff('3'), 'Total Komisi per Pesanan(Rp)': 'Rp oops' }] }]);

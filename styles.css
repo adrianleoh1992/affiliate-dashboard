@@ -451,7 +451,11 @@ tbody tr:hover{background:var(--surface-2)}
 .modal.show{display:flex}
 .modal-box{background:var(--surface);border-radius:var(--radius);padding:20px;max-width:660px;width:100%;
   max-height:84vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-.maprow{display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:center;margin-bottom:8px}
+/* Fixed arrow and delete columns so the .maphead labels sit over their inputs. */
+.maprow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 34px;gap:8px;align-items:center;margin-bottom:8px}
+.maprow [data-del]{width:34px;padding-left:0;padding-right:0;justify-content:center}
+.maparrow{color:var(--text-mute);text-align:center}
+.maphead{align-items:end;margin-bottom:5px;font-size:12px;font-weight:700;color:var(--text-dim)}
 .maprow input{font-family:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--border-strong);
   border-radius:7px;background:var(--surface);color:var(--text);width:100%}
 .snaprow{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);
