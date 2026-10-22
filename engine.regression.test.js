@@ -63,6 +63,15 @@ const lp = analyze({ affiliate: [aff('1')], ads: [ad('2026-08-01', 100, { 'Landi
 near(lp.cpLpv, 25);
 near(lp.lostTotal, -20); // Shopee counted 12 clicks for 10 Meta clicks
 assert.equal(analyze({ affiliate: [aff('1')], ads: [ad()] }).tags[0].lostTotal, null, 'no click report, no loss figure');
+// With a Perujuk column, only Facebook/Instagram clicks count as arrived from
+// the ad; shared clicks (Others, WhatsApp) no longer hide a broken link.
+const src = p => click('2026-08-01', { Perujuk: p });
+const bySrc = analyze({ affiliate: [aff('1')], ads: [ad()], clicks: [src('Facebook'), src('Facebook'), src('Instagram'), src('Others'), src('WhatsApp'), src('Others')] }).tags[0];
+assert.equal(bySrc.shopeeClicks, 6);
+assert.equal(bySrc.shopeeFromMeta, 3);
+assert.deepEqual(bySrc.shopeeSrc, { fb: 2, ig: 1, other: 3 });
+near(bySrc.lostTotal, 70); // 10 Meta clicks, 3 arrived from Facebook/Instagram
+assert.equal(lp.shopeeFromMeta, null, 'no Perujuk column, no split');
 near(taxed.daily.reduce((sum, day) => sum + day.spend, 0), taxed.kpi.spend);
 near(taxed.daily[1].commEff, 0);
 near(taxed.daily[1].netEff, -999);

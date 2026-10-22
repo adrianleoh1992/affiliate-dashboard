@@ -232,6 +232,36 @@ test('blank counters on undelivered ad rows and unread CPM/CTR/Frequency stay qu
   }
 });
 
+test('export without Link clicks reads Meta clicks from link_click Results', () => {
+  const base = changes => { const row = ads(changes); delete row['Link clicks']; return row; };
+  const r = parse([
+    base({ 'Results': '42', 'Result indicator': 'actions:link_click', 'Unique link clicks': '40' }),
+    base({ 'Ad name': 'quiet', 'Results': '', 'Result indicator': '', 'Unique link clicks': '' }),
+    base({ 'Ad name': 'lpv', 'Results': '7', 'Result indicator': 'actions:landing_page_view', 'Unique link clicks': '9' }),
+  ]);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.rows.map(row => row['Link clicks']), [42, 0, '']);
+  assert.ok(hasIssue(r, 'link_clicks_from_results'));
+  assert.ok(hasIssue(r, 'link_clicks_unknown'));
+  assert.ok(!hasIssue(r, 'optional_columns_missing') || !r.issues.find(i => i.code === 'optional_columns_missing').message.includes('Link clicks'));
+  const result = E.analyze({ affiliate: [], ads: r.rows, clicks: [] });
+  assert.equal(result.tags.reduce((sum, tag) => sum + tag.clicks, 0), 42);
+  const days = A.aggregate('ads', r.rows);
+  assert.equal(days.reduce((sum, day) => sum + day.clicks, 0), 42);
+});
+
+test('placement exports are their own type and may span the whole period', () => {
+  const row = changes => ads({ Platform: 'Facebook', Placement: 'Feed', ...changes });
+  const period = parse([row({ 'Reporting ends': '2026-08-07' }), row({ Placement: 'Facebook Reels', 'Reporting ends': '2026-08-07' })]);
+  assert.equal(period.ok, true);
+  assert.equal(period.type, 'placement');
+  assert.ok(!hasIssue(period, 'non_daily_ads'));
+  const daily = parse([row()]);
+  assert.equal(daily.type, 'placement');
+  assert.equal(daily.rows[0]['Amount spent (IDR)'], 1000);
+  assert.equal(parse([ads()]).type, 'ads', 'plain exports stay ads');
+});
+
 test('Shopee optional blank refunds and double-dash completion markers keep valid orders readable', () => {
   const rows = [
     aff({ 'Jumlah Pengembalian Dana(Rp)': '', 'Waktu Terselesaikan': '' }),

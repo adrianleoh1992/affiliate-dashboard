@@ -177,6 +177,104 @@ async function main() {
       'focus follows to the redrawn button');
   });
 
+  test('the direct/indirect table filters by tag search and keeps the account total', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const typed = (id, tag, kind) => ({ ...aff(id, tag), 'Tipe Pesanan': kind });
+    await upload(page, [{ name: 'affiliate.csv', rows: [typed('1', 'Alpha', 'Pesanan Produk dari Toko yang Dipromosikan'),
+      typed('2', 'Bravo', 'Pesanan dari Toko yang tidak Dipromosikan'), typed('3', 'Charlie', 'Pesanan dari Toko yang tidak Dipromosikan')] }]);
+    const tags = () => page.locator('#tblAttr tbody tr[data-attr]').evaluateAll(rows => rows.map(r => r.dataset.attr).sort());
+    assert.deepEqual(await tags(), ['Alpha', 'Bravo', 'Charlie']);
+    await page.fill('#attrSearch', 'brav');
+    assert.deepEqual(await tags(), ['Bravo']);
+    assert.match(await page.locator('#attrSearchCount').innerText(), /1 dari 3 tag/);
+    assert.match(await page.locator('#tblAttr tfoot').innerText(), /Total akun/);
+    await page.fill('#attrSearch', 'zzz');
+    assert.match(await page.locator('#tblAttr tbody').innerText(), /Tidak ada tag yang cocok/);
+    await page.fill('#attrSearch', '');
+    assert.equal((await tags()).length, 3);
+  });
+
+  test('ad units show LP views; any table sorts by a header and keeps its header in view', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Beta')] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 100), 'Landing page views': '4' }, { ...ad('Beta', 300), 'Landing page views': '20' }, { ...ad('Gamma', 50), 'Landing page views': '0' }] }]);
+    const unit = page.locator('#tblUnit');
+    const head = await unit.locator('thead th').allInnerTexts();
+    const lp = head.findIndex(h => /^LP View$/i.test(h.trim()));
+    assert.ok(lp > head.findIndex(h => /CPC Meta/i.test(h)) && lp < head.findIndex(h => /Klik Shopee/i.test(h)), 'LP View sits between Meta and Shopee');
+    assert.match(head[lp + 1], /Biaya\/LP View/i);
+    const col = async i => (await unit.locator('tbody tr.dayrow').evaluateAll((rows, i) => rows.map(r => r.cells[i].innerText.trim()), i));
+    assert.deepEqual(await col(lp + 1), ['Rp15', 'Rp25', '—']); // biggest spend first by default
+    // Open Beta's daily rows, then sort by LP View: the detail row moves with Beta.
+    await unit.locator('tbody tr.dayrow', { hasText: 'Beta' }).click();
+    await unit.locator('thead th').nth(lp).click();
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Beta', 'Alpha', 'Gamma'], 'largest first, empty last');
+    assert.equal(await unit.locator('tbody tr.dayrow').first().evaluate(r => r.nextElementSibling.classList.contains('daydetail')), true);
+    assert.equal(await unit.locator('thead th').nth(lp).getAttribute('aria-sort'), 'descending');
+    await unit.locator('thead th').nth(lp).click();
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Alpha', 'Beta', 'Gamma']);
+    assert.equal(await unit.locator('tbody tr.dayrow').nth(1).evaluate(r => r.nextElementSibling.classList.contains('daydetail')), true, 'detail row follows Beta');
+    // A re-render keeps the chosen order.
+    await page.evaluate(() => recalc());
+    assert.deepEqual((await col(0)).map(t => t.split(/\s/)[0]), ['Alpha', 'Beta', 'Gamma']);
+    // The decision table keeps its own sorting.
+    assert.equal(await page.locator('#tblMain th[data-sort="spend"]').getAttribute('aria-sort') !== null, true);
+    // Long tables scroll inside their box, so the sticky header stays in view.
+    const box = await page.locator('#tblUnit').evaluate(t => { const s = getComputedStyle(t.parentElement); return { overflowY: s.overflowY, maxHeight: s.maxHeight, th: getComputedStyle(t.tHead.rows[0].cells[0]).position }; });
+    assert.equal(box.overflowY, 'auto');
+    assert.notEqual(box.maxHeight, 'none');
+    assert.equal(box.th, 'sticky');
+  });
+
+  test('a placement export feeds the platform card without doubling spend', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const placements = [plc('Facebook', 'Feed', 60, 6), plc('Facebook', 'Facebook Reels', 20, 2), plc('Instagram', 'Instagram Reels', 20, 2)];
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), { ...aff('2', 'Alpha'), Platform: 'Instagram' }] },
+      { name: 'placement.csv', rows: placements }]);
+    assert.equal(await page.locator('#plcCard').isVisible(), true);
+    // Daily placement rows stand in for the missing plain ads export.
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100);
+    const plat = await page.locator('#tblPlcPlat tbody').innerText();
+    assert.match(plat, /Facebook\tRp80\t80%[\s\S]*2,50x/, 'ROAS uses the decimal comma like every other ratio');
+    assert.match(plat, /Instagram\tRp20\t20%[\s\S]*10,00x/);
+    assert.ok(!/100%/.test(plat.split('\n')[0].split('\t')[7]), 'no click report means no lost-click figure');
+    // Clicking a tag opens its own placements with estimated commission.
+    await page.locator('#tblPlcTag tr[data-plc-tag="Alpha"] .attr-open').click();
+    const detail = await page.locator('#tblPlcTag tr.daydetail').innerText();
+    assert.match(detail, /Feed[\s\S]*Rp60[\s\S]*Rp150/);
+    assert.match(detail, /Instagram Reels[\s\S]*Rp20[\s\S]*Rp200/);
+    await upload(page, [{ name: 'ads.csv', rows: [ad('Alpha', 100)] }]);
+    assert.equal(await page.evaluate(() => RESULT.kpi.spend), 100, 'plain ads and placement rows are never added together');
+    assert.match(await page.locator('#uploadStatus').innerText(), /Placement 3/);
+  });
+
+  test('an ad no tag claims raises a notice and can be matched by hand', async page => {
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), aff('2', 'Bravo')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100), ad('Zulu', 300)] }]);
+    assert.match(await page.locator('#banners').innerText(), /1 iklan belum cocok ke tag Shopee/);
+    await page.locator('#btnFixMatch').click();
+    // Bravo has commission and no ad: it is listed as an unpaired tag and offered first.
+    assert.match(await page.locator('#tblOrphan tbody').innerText(), /Bravo/);
+    assert.equal(await page.locator('#tagOptions option').first().getAttribute('value'), 'Bravo');
+    await page.check('#matchOnlyOpen');
+    assert.deepEqual(await page.locator('#tblMatch tbody tr b').allInnerTexts(), ['Zulu']);
+    await page.uncheck('#matchOnlyOpen');
+    await page.fill('#matchSearch', 'alp');
+    assert.deepEqual(await page.locator('#tblMatch tbody tr b').allInnerTexts(), ['Alpha']);
+    assert.match(await page.locator('#tblOrphan tbody').innerText(), /Tidak ada tag yang cocok/);
+    await page.fill('#matchSearch', '');
+    const pick = page.locator('#tblMatch input[data-pick-ad="Zulu"]');
+    await pick.fill('Nope');
+    await pick.press('Enter');
+    assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), false, 'an unknown tag is refused');
+    await pick.fill('Bravo');
+    await page.locator('#tblMatch [data-pick-go]').first().click();
+    await page.waitForFunction(() => !RESULT.matchLog.some(m => m.adName === 'Zulu' && m.confidence < .5));
+    assert.equal(await page.evaluate(() => RESULT.tags.find(t => t.tag === 'Bravo').spend > 0), true);
+    assert.doesNotMatch(await page.locator('#banners').innerText(), /belum cocok/);
+  });
+
   test('a commission report without an attribution column says so instead of showing zeros', async page => {
     await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] }]);
     assert.match(await page.locator('#tblAttr tbody').innerText(), /tidak punya kolom tipe atribusi/);
@@ -217,7 +315,7 @@ async function main() {
       { name: 'ads.csv', rows: [ad('Alpha', 100)] },
       { name: 'clicks.csv', rows: [1, 2, 3, 4].map(i => ({ ...click(), 'Klik ID': 'k' + i })) }]);
     const head = await page.locator('#tblMain thead').innerText();
-    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
+    for (const h of [/LP View/i, /Biaya\/LP View/i, /Klik Masuk Shopee/i, /CPC Shopee/i, /Klik Hilang/i]) assert.match(head, h);
     const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
     const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
     assert.equal(cells[await col('lpv')], '8');
@@ -334,6 +432,45 @@ async function main() {
     assert.equal(await page.locator('#tblAttr tr.daydetail tbody tr').count(), 40);
     assert.ok(Math.abs(await page.evaluate(() => scrollY) - before) <= 2, 'product 6 onward stays in view instead of scrolling to the list end');
     assert.match(await page.evaluate(() => document.activeElement.className), /attr-more/);
+  });
+
+  test('arrived clicks show every source; Klik Hilang counts Facebook and Instagram', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100)] },
+      { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Instagram'), from(3, 'Others'), from(4, 'WhatsApp')] }]);
+    const head = await page.locator('#tblMain thead').innerText();
+    assert.match(head, /Klik Masuk Shopee/i);
+    assert.doesNotMatch(head, /FB\+IG/i);
+    const cells = await page.locator('#tblMain tbody tr').first().locator('td').allInnerTexts();
+    const col = key => page.evaluate(k => MC.findIndex(c => c[0] === k), key);
+    assert.equal(cells[await col('shopeeClicks')], '4');
+    assert.equal(cells[await col('clicks')], '10');
+    assert.equal(cells[await col('lostTotal')], '80%'); // 10 Meta clicks, 2 from Facebook/Instagram
+  });
+
+  test('the platform card lists Other sources under Facebook and Instagram', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha'), { ...aff('2', 'Alpha'), Platform: 'Others' }] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 80, 8), plc('Instagram', 'Instagram Reels', 20, 2)] },
+      { name: 'clicks.csv', rows: [from(1, 'Facebook'), from(2, 'Others'), from(3, 'Others'), from(4, 'Websites')] }]);
+    const plat = await page.locator('#tblPlcPlat tbody').innerText();
+    assert.match(plat, /Other \(bukan FB\/IG\)\s*▸?\s*Others 2 · Websites 1/);
+    const place = await page.locator('#tblPlcPlace tbody tr.plc-other').innerText();
+    assert.match(place, /^Other\s*▸?\s*Bukan placement Meta\s*3 klik Shopee · 1 pesanan · Others 2 · Websites 1\s*Rp200\s*—$/);
+    await page.locator('#tblPlcTag tr[data-plc-tag="Alpha"] .attr-open').click();
+    assert.match(await page.locator('#tblPlcTag tr.daydetail tr.plc-other').innerText(), /3 klik Shopee · 1 pesanan/);
+    // Opening Other lists the tags its clicks landed on.
+    await page.locator('#tblPlcPlat button[data-other="plat"]').click();
+    const tagsOther = await page.locator('#tblPlcPlat tr.daydetail').innerText();
+    assert.match(tagsOther, /Alpha\s*3\s*1\s*Rp200\s*Others 2 · Websites 1/);
+    await page.locator('#tblPlcPlace button[data-other="place"]').click();
+    assert.equal(await page.locator('#tblPlcPlace tr.daydetail').count(), 1);
+    await page.locator('#tblPlcPlat button[data-other="plat"]').click();
+    assert.equal(await page.locator('#tblPlcPlat tr.daydetail').count(), 0);
   });
 
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {

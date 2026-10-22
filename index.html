@@ -20,7 +20,7 @@
       <div class="logo">BD</div>
       <div>
         <h1>Affiliate Decision Dashboard</h1>
-        <p>Meta Ads × Shopee Affiliate</p>
+        <p>Meta Ads × Shopee Affiliate <span class="ver" id="appVersion" title="Versi yang sedang dibuka">· versi lokal</span></p>
       </div>
     </div>
     <div class="acct">
@@ -78,6 +78,13 @@
           <button class="btn ghost sm zone-del hidden" data-zdel="clicks">Hapus</button></div>
         <div class="zone-body"><div class="chips" data-zchips="clicks"></div>
           <button class="btn sm zone-pick" data-zpick="clicks" type="button">+ Pilih file</button></div>
+      </div>
+      <div class="zone" data-zone="placement">
+        <div class="zone-head"><span class="zn">4</span>
+          <div><b>Meta Ads per placement</b><small>Opsional · breakdown Platform &amp; placement, per hari atau satu periode</small></div>
+          <button class="btn ghost sm zone-del hidden" data-zdel="placement">Hapus</button></div>
+        <div class="zone-body"><div class="chips" data-zchips="placement"></div>
+          <button class="btn sm zone-pick" data-zpick="placement" type="button">+ Pilih file</button></div>
       </div>
     </div>
     <p class="drop-hint" id="dropHint">Bisa juga menarik file ke mana saja di kartu ini — jenisnya dikenali dari isi file, bukan dari kotak tujuan.</p>
@@ -171,7 +178,20 @@
         <p class="hint">Dari kolom "Tipe Pesanan" Shopee. Langsung: pesanan produk dari toko yang dipromosikan di link. Tidak langsung: setelah klik link tag ini, pembeli belanja di toko lain.
           Komisi = yang dilaporkan Shopee (Selesai + Tertunda), tanpa pesanan batal dan belum dibayar. <b>Klik angka pesanan</b> (langsung atau tidak langsung) untuk melihat produk yang terjual.</p>
         <div id="attrStrip" class="strip"></div>
+        <div class="table-tools" id="attrTools"><label for="attrSearch">Cari tag</label><input id="attrSearch" type="search" placeholder="Ketik nama tag…" autocomplete="off"><span id="attrSearchCount" class="hint"></span></div>
         <div class="tscroll"><table id="tblAttr"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+      </div>
+      <div class="card hidden" data-print="tags" id="plcCard">
+        <div class="card-head"><h2>Platform &amp; placement</h2><span class="sub" id="plcNote"></span></div>
+        <p class="hint">Per platform angkanya nyata: biaya dan klik dari Meta, klik Shopee dari kolom Perujuk, pesanan dan komisi dari kolom Platform laporan komisi. Hanya tag yang punya iklan di file placement yang dihitung.
+          Shopee tidak tahu placement Meta, jadi <b>komisi per placement adalah estimasi</b>: komisi tiap tag di platform itu dibagi menurut porsi klik Meta tiap placement. "Other" = klik/pesanan dengan perujuk selain Facebook/Instagram (Others, Websites, dan sejenisnya); sumbernya tertulis di bawahnya.</p>
+        <div class="tscroll"><table id="tblPlcPlat"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+        <h3 class="sub-head">Per placement</h3>
+        <div class="tscroll"><table id="tblPlcPlace"><thead></thead><tbody></tbody></table></div>
+        <button class="btn sm hidden" id="btnPlcAll" type="button"></button>
+        <h3 class="sub-head">Per tag: Facebook vs Instagram</h3>
+        <div class="tscroll"><table id="tblPlcTag"><thead></thead><tbody></tbody></table></div>
+        <button class="btn sm hidden" id="btnPlcTags" type="button"></button>
       </div>
       <div class="card" data-print="units">
         <div class="card-head"><h2>Performa Per Ad Unit</h2>
@@ -421,7 +441,13 @@
     <p class="hint">Baris dengan keyakinan di bawah 50% belum tersambung ke tag mana pun: klik tag yang
       disarankan untuk menyambungkannya. Baris bertanda <b>klik masuk rendah</b> sudah tersambung, tapi
       sebagian besar kliknya tercatat di sub_id lain, jadi cek link iklannya.</p>
+    <div class="table-tools"><label for="matchSearch">Cari</label><input id="matchSearch" type="search" placeholder="Nama iklan atau tag…" autocomplete="off">
+      <label class="check-row"><input type="checkbox" id="matchOnlyOpen"> Hanya yang belum dipasangkan</label><span id="matchCount" class="hint"></span></div>
     <div class="tscroll"><table id="tblMatch"><thead></thead><tbody></tbody></table></div>
+    <datalist id="tagOptions"></datalist>
+    <h3 class="sec-split">Tag Shopee tanpa iklan <span class="hint" id="orphanCount"></span></h3>
+    <p class="hint">Tag yang punya klik atau komisi tapi tidak ada iklan yang terpasang. Bisa organik, atau pasangan iklan yang namanya salah ketik. Pasangkan lewat "Pilih tag manual" di tabel atas.</p>
+    <div class="tscroll"><table id="tblOrphan"><thead></thead><tbody></tbody></table></div>
     <h3 class="sec-split">Perbaiki manual</h3>
     <div id="mapRows"></div>
     <button class="btn" id="btnAddMap" style="margin-top:8px">Tambah Baris</button>
@@ -543,6 +569,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="engine.js"></script>
+<script src="placement.js"></script>
 <script src="daily-agg.js"></script>
 <script src="daily-store.js"></script>
 <script src="supabase-config.js"></script>

@@ -1,8 +1,8 @@
 'use strict';
 const E=window.Engine,$=id=>document.getElementById(id);
-let DATA={affiliate:[],ads:[],clicks:[]},FILES=[],RESULT=null,CHARTS={},SORT={key:'spend',dir:-1},FILTER=null,STAB=null;
+let DATA={affiliate:[],ads:[],clicks:[],placement:[]},FILES=[],RESULT=null,CHARTS={},SORT={key:'spend',dir:-1},FILTER=null,STAB=null;
 let IMPORT_EPOCH=0, IMPORT_QUEUE=Promise.resolve(), PENDING_IMPORTS=0;
-let ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};
+let ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set(),placement:new Set()};
 let IMPORT_REPORTS=[],IMPORT_SEQUENCE=0,TAG_QUERY='',PDF_BUSY=false;
 const ACTIVE_READERS=new Set();
 const LS={accounts:'adash_accounts_v3',active:'adash_active_v3',map:'adash_map_v3',snaps:'adash_snaps_v3',opts:'adash_opts_v3',theme:'adash_theme_v3'};
@@ -135,8 +135,8 @@ function commitImport(report){
 }
 function rowKey(row){return JSON.stringify(Object.keys(row).sort().map(k=>[k,row[k]]))}
 function rebuildData(){
-  DATA={affiliate:[],ads:[],clicks:[]};
-  ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};
+  DATA={affiliate:[],ads:[],clicks:[],placement:[]};
+  ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set(),placement:new Set()};
   FILES.forEach(f=>appendRows(f));
 }
 function appendRows(f,keys){f.duplicates=0;(f.rowsData||[]).forEach((row,i)=>{const key=keys?keys[i]:rowKey(row);if(ROW_KEYS[f.type].has(key)){f.duplicates++;return}ROW_KEYS[f.type].add(key);DATA[f.type].push(row)})}
@@ -172,7 +172,7 @@ $('btnCancelImport').onclick=()=>{invalidateImports();toast('Pembacaan dibatalka
 $('btnClearFeedback').onclick=()=>{IMPORT_REPORTS=IMPORT_REPORTS.filter(x=>x.state==='review');renderImportReports()};
 function updateDates(){
   let min='',max='';
-  for(const [kind,col] of [['affiliate','Waktu Pemesanan'],['ads','Reporting starts'],['clicks','Waktu Klik']]){
+  for(const [kind,col] of [['affiliate','Waktu Pemesanan'],['ads','Reporting starts'],['clicks','Waktu Klik'],['placement','Reporting starts']]){
     for(const row of DATA[kind]){const d=E.dayOnly(row[col]);if(E.isDate(d)){if(!min||d<min)min=d;if(!max||d>max)max=d}}
   }
   const oldStart=$('dateStart').value,oldEnd=$('dateEnd').value,wasAll=(!oldStart&&!oldEnd)||(oldStart===DATES.min&&oldEnd===DATES.max);
@@ -192,11 +192,11 @@ function finish(){
   if(!DATA.affiliate.length){clearResult();notifyData();return toast('Laporan affiliate belum dimuat')}
   $('emptyState').classList.add('hidden');$('main').classList.remove('hidden');recalc();notifyData();toast('Data dimuat untuk '+active());
 }
-const ZONE_EMPTY={affiliate:'Belum ada file',ads:'Belum ada file',clicks:'Belum ada file'};
+const ZONE_EMPTY={affiliate:'Belum ada file',ads:'Belum ada file',clicks:'Belum ada file',placement:'Opsional'};
 // One box per report instead of one pile. Deleting a whole report used to mean
 // hunting its files inside a single list of chips.
 function renderChips(){
-  ['affiliate','ads','clicks'].forEach(z=>{
+  ['affiliate','ads','clicks','placement'].forEach(z=>{
     const box=document.querySelector(`[data-zchips="${z}"]`);
     const mine=FILES.map((f,i)=>({f,i})).filter(x=>x.f.type===z);
     box.innerHTML=mine.length?mine.map(({f,i})=>`<span class="chip ${f.type}"><span class="file-row">
@@ -206,7 +206,7 @@ function renderChips(){
     document.querySelector(`[data-zone="${z}"]`).classList.toggle('filled',mine.length>0);
     document.querySelector(`[data-zdel="${z}"]`).classList.toggle('hidden',!mine.length);
   });
-  let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));$('uploadStatus').textContent=p.join(' · ');
+  let p=[];if(DATA.affiliate.length)p.push('Affiliate '+nf(DATA.affiliate.length));if(DATA.ads.length)p.push('Ads '+nf(DATA.ads.length));if(DATA.clicks.length)p.push('Klik '+nf(DATA.clicks.length));if(DATA.placement.length)p.push('Placement '+nf(DATA.placement.length));$('uploadStatus').textContent=p.join(' · ');
   // Removing one file rebuilds from the survivors, so a mis-drop no longer
   // forces clearing everything and re-uploading all three reports.
   $('zones').querySelectorAll('[data-rm]').forEach(b=>b.onclick=e=>{e.stopPropagation();rmFile(+b.dataset.rm)});
@@ -222,7 +222,7 @@ function rmFile(i){
   invalidateImports();FILES.splice(i,1);rebuildData();finish();toast('File dihapus: '+f.name);
 }
 function reset(){
-  invalidateImports();DATA={affiliate:[],ads:[],clicks:[]};ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set()};FILES=[];clearResult();
+  invalidateImports();DATA={affiliate:[],ads:[],clicks:[],placement:[]};ROW_KEYS={affiliate:new Set(),ads:new Set(),clicks:new Set(),placement:new Set()};FILES=[];clearResult();
   DATES.min='';DATES.max='';$('dateStart').value='';$('dateEnd').value='';IMPORT_REPORTS=[];TAG_QUERY='';$('tagSearch').value='';renderImportReports();renderChips();updateImportUI();$('uploadStatus').textContent='';notifyData();
 }
 // Clearing is destructive and used to fire on a single click.
@@ -261,8 +261,8 @@ function renderPeriod(){
 }
 document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>applyPreset(+b.dataset.days));
 $('btnCustomDate').onclick=()=>openModal('setModal');
-function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,tagMap:map(),adIdMap:adIdMap()},o);rememberAdIds(RESULT.learnedIds,RESULT.forgetIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
-function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderAttr();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
+function recalc(){const o=opts();O.forEach(k=>$(k).value=o[k]);if(o.dateStart&&o.dateEnd&&o.dateStart>o.dateEnd){if(RESULT){$('dateStart').value=RESULT.range.start;$('dateEnd').value=RESULT.range.end}toast('Tanggal mulai harus sebelum tanggal akhir');return}if(!DATA.affiliate.length)return;try{RESULT=E.analyze({...DATA,ads:adsRows(),tagMap:map(),adIdMap:adIdMap()},o);RESULT.placement=window.Placement?Placement.analyze({placement:DATA.placement,affiliate:DATA.affiliate,clicks:DATA.clicks,matchLog:RESULT.matchLog,range:RESULT.range}):null;rememberAdIds(RESULT.learnedIds,RESULT.forgetIds);STAB=null;updateAnalysisAvailability();render()}catch(e){clearResult();toast('Analisis gagal: '+e.message)}}
+function render(){if(!RESULT)return;updateImportUI();let r=RESULT,k=r.kpi; if($('settingsPeek'))$('settingsPeek').textContent=`${r.range.start} — ${r.range.end} · PPN ${r.options.ppn}% · target ROI ${r.options.targetROI}%`;renderPeriod();renderGaps();renderBanner();renderKpi();renderClickKpi();renderActions();renderCalibration();renderSynth();renderDecisions();renderMain();renderAttr();renderPlacement();renderUnit();renderLeak();renderDaily();renderCalendar();renderStatus();renderTrend();renderOpportunity();renderDetails();renderMatch();renderCharts()}
 function renderActions(){
   const A=RESULT.actions;
   // The advice used to be scattered across rows and never added up. These are
@@ -293,7 +293,7 @@ function renderCalibration(){
   // Lag is the single most decision-changing setting, so show whether the
   // current value actually matches this account's observed behaviour.
   let unstable=0;
-  try{if(!STAB)STAB=E.stability({...DATA,tagMap:map(),adIdMap:adIdMap()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
+  try{if(!STAB)STAB=E.stability({...DATA,ads:adsRows(),tagMap:map(),adIdMap:adIdMap()},RESULT.options,[0,3,5,7]);unstable=STAB.unstable}catch(e){STAB=null}
   const warn=!L.matches||unstable>0;
   el.className='calibration'+(warn?' warn':'');
   const parts=[];
@@ -348,7 +348,7 @@ function renderOpportunity(){
    is computed against clicks that were never uploaded. */
 const SRC={
   affiliate:{label:'Laporan Komisi',col:'Waktu Pemesanan',get:()=>DATA.affiliate},
-  ads:{label:'Meta Ads',col:'Reporting starts',get:()=>DATA.ads},
+  ads:{label:'Meta Ads',col:'Reporting starts',get:()=>adsRows()},
   clicks:{label:'Laporan Klik',col:'Waktu Klik',get:()=>DATA.clicks,chunk:7},
 };
 function datesOf(k){
@@ -410,7 +410,7 @@ function renderGaps(){
       <div class="gap-runs">${r.runs.map(x=>`<span class="gap-chip">${x.start}${x.n>1?' → '+x.end:''}<em>${x.n} hari</em></span>`).join('')}</div>
     </div>`).join('');
 }
-function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag: kurang dari 25% klik sampai Shopee.</b> Biaya klik yang tak sampai di tag itu maks. ${rp(r.actions.leakWaste)} — periksa link.`]);$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
+function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!adsRows().length)b.push(['warn','⚠','Laporan Meta Ads belum dimuat.']);if(!DATA.clicks.length)b.push(['info','ℹ','Website Click Report belum dimuat — kebocoran tidak dihitung.']);if(k.leakTags)b.push(['bad','🚨',`<b>${k.leakTags} tag: kurang dari 25% klik sampai Shopee.</b> Biaya klik yang tak sampai di tag itu maks. ${rp(r.actions.leakWaste)} — periksa link.`]);const um=unmatchedAds();if(um.length){const sp=um.reduce((s,m)=>s+m.spend,0);b.push(['warn','🔗',`<b>${um.length} iklan belum cocok ke tag Shopee</b> (biaya ${rp(sp)}): ${um.slice(0,3).map(m=>esc(m.adName)).join(', ')}${um.length>3?` dan ${um.length-3} lainnya`:''}. Biasanya nama iklan berbeda dari tag di link. <button class="btn sm" type="button" id="btnFixMatch">Cocokkan sekarang</button>`])}$('banners').innerHTML=b.map(x=>`<div class="banner ${x[0]}"><span>${x[1]}</span><div>${x[2]}</div></div>`).join('');if($('btnFixMatch'))$('btnFixMatch').onclick=openMap;$('lagNote').innerHTML=r.range.matureUntil&&r.range.matureUntil<r.range.end?`Pesanan menyusul setelah klik; vonis STOP dihitung sampai <b>${r.range.matureUntil}</b>.`:''}
 // Four cards, matching the mind map. Every number that used to sit in its own
 // KPI tile is still here — it moved one level down, into the card it belongs to.
 // Eight tiles of equal weight meant nothing stood out; these four have a
@@ -419,10 +419,10 @@ function renderBanner(){let r=RESULT,k=r.kpi,b=[];if(!DATA.ads.length)b.push(['w
 // breakdown chosen at export time. Returning null (rather than a single
 // "Lainnya · 100%" row) lets the caller say so instead of faking a split.
 function placementSplit(){
-  if(!DATA.ads.length)return null;
-  if(!Object.prototype.hasOwnProperty.call(DATA.ads[0],'Placement'))return null;
+  if(!adsRows().length)return null;
+  if(!Object.prototype.hasOwnProperty.call(adsRows()[0],'Placement'))return null;
   const r=RESULT.range,out={};
-  DATA.ads.forEach(a=>{
+  adsRows().forEach(a=>{
     const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<r.start||d>r.end)return;
     // "Feed" exists on both Facebook and Instagram, so the platform has to be
     // part of the label or the two silently merge into one meaningless row.
@@ -467,7 +467,7 @@ function renderKpi(){
       ['Produk terjual',nf(k.qty)]]),
     // One PPN row, so the placement rows stay the only list that adds up to the headline.
     kpiCard('','Spend Iklan',rp(k.spend),o.ppn?`termasuk PPN ${o.ppn}%`:'tanpa PPN',
-      [k.spend&&o.ppn?[`Meta (sebelum PPN) + PPN ${o.ppn}%`,`${rp(base)} + ${rp(k.spend-base)}`]:null].concat(pl||(DATA.ads.length?[
+      [k.spend&&o.ppn?[`Meta (sebelum PPN) + PPN ${o.ppn}%`,`${rp(base)} + ${rp(k.spend-base)}`]:null].concat(pl||(adsRows().length?[
         ['Klik Meta',nf(k.clicks)],
         ['CPM',rp(k.cpm)],
         ['CPC',k.clicks?full(k.cpc):'—'],
@@ -527,7 +527,7 @@ $('btnAllDetail').onclick=()=>{
 function metaBySource(){
   const r=RESULT.range,out={};
   const from=r.clickStart||r.start,to=r.clickEnd||r.end;
-  DATA.ads.forEach(a=>{
+  adsRows().forEach(a=>{
     const d=E.dayOnly(a['Reporting starts']); if(!E.isDate(d)||d<from||d>to)return;
     const p=(a.Platform||'').trim()||'Lainnya';
     out[p]=(out[p]||0)+(parseInt(a['Link clicks']||0,10)||0);
@@ -555,7 +555,7 @@ function renderClickKpi(){
   // compare against Shopee need the click report, so deleting it should not
   // take the Meta side down with it.
   const hasClicks=leaks.length>0;
-  if(!DATA.ads.length&&!hasClicks){el.innerHTML='';return}
+  if(!adsRows().length&&!hasClicks){el.innerHTML='';return}
   // Window-matched totals: the click report covers its own date span, so the
   // ratio has to compare like with like or it is meaningless.
   const adMeta=leaks.reduce((s,t)=>s+t.leak.metaClicks,0);
@@ -580,7 +580,7 @@ function renderClickKpi(){
   const pc=(n,d)=>d?dec(n/d*100,2)+'%':'—';
 
   const out=[];
-  if(DATA.ads.length)out.push(
+  if(adsRows().length)out.push(
     kpiCard('','Klik Meta',nf(mC),hasClicks?win:`${r.start} s/d ${r.end}`,[
       ['Impresi',nf(im)],['CPM',per1k(sp,im)],['CPC',per(sp,mC)],
       ['CTR',pc(mC,im)],['CR',pc(od,mC)],
@@ -595,7 +595,8 @@ function renderClickKpi(){
       ['Impresi','—',1],['CPM','—',1],['CPC',per(sp,sC)],
       ['CTR',pc(sC,im)],['CR',pc(od,sC)],
       ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
-      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
+      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1],
+      ...(RESULT.tags.some(t=>t.shopeeSrc)?[['Hanya perujuk Facebook/Instagram','dipakai untuk klik hilang',1]]:[])]),
     // Per-tag sum as the headline, the net beside it, and the money as a range:
     // the data cannot tell a misrouted click from outside traffic.
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
@@ -667,15 +668,16 @@ function bindBreakdown(tableId,lookup,cols){
     tr.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
 }
-const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
+const MC=[['tag','Tag / Keputusan',0],['spend','Biaya',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roasEff','ROAS',1],['roi','ROI %',1],['cpm','CPM',1],['clicks','Klik Meta',1],['shopeeClicks','Klik Masuk Shopee',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['cpcShopee','CPC Shopee',1],['lostTotal','Klik Hilang',1],['cpcIdeal','CPC Ideal',1],['orders','Order',1],['convRate','CR %',1],['costPerOrder','Biaya/Order',1],['daysProd','Hari',1]];
 // The evaluasi filter keeps paid tags only, so the name says so.
 function filterName(f){return{evaluasi:'belum cukup data (berbiaya)'}[f]||f}
 function visibleTags(){return RESULT?RESULT.tags.filter(t=>(!FILTER||t.status===FILTER&&(FILTER!=='evaluasi'||t.spend>0))&&(!TAG_QUERY||[t.tag,t.label,t.reason,t.linkNote,t.borderAt!=null?'di batas':''].some(x=>String(x||'').toLocaleLowerCase().includes(TAG_QUERY)))):[]}
 $('btnMetrics').onclick=()=>{const compact=$('tblMain').classList.toggle('compact-columns');$('btnMetrics').textContent=compact?'Semua metrik':'Metrik utama';$('btnMetrics').setAttribute('aria-pressed',String(!compact))};
+$('attrSearch').oninput=()=>{ATTR_QUERY=$('attrSearch').value.trim().toLocaleLowerCase();if(RESULT)renderAttr()};
 $('tagSearch').oninput=()=>{TAG_QUERY=$('tagSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMain()};
 /* Direct vs indirect orders per tag. Shopee's report decides which is which;
    rows it does not label clearly are shown as unknown, never split by guess. */
-let ATTR_ALL=false,ATTR_SORT=null;const ATTR_OPEN=new Map(); // tag → {kind, all}
+let ATTR_ALL=false,ATTR_SORT=null,ATTR_QUERY='';const ATTR_OPEN=new Map(); // tag → {kind, all}
 const ATTR_KIND={direct:'Terjual langsung',indirect:'Terjual tidak langsung',unknown:'Tipe tidak diketahui'},ATTR_TOP=5;
 /* Products behind one kind of a tag's orders: the direct list is what the
    link sold, the indirect list is what buyers chose instead. Five first, the
@@ -689,15 +691,102 @@ function attrProductsHTML(t,kind,all){
     +shown.map(p=>`<tr><td><div class="nm">${esc(p.name)}</div>${p.shop?`<div class="rs">${esc(p.shop)}</div>`:''}</td><td class="num">${nf(p.orders)}</td><td class="num">${nf(p.qty)}</td><td class="num">${rp(p.comm)}</td></tr>`).join('')
     +`</tbody></table>${more}</div></div>`;
 }
+// A daily export broken down by placement holds the same spend as the plain
+// ads export, so it stands in for it only when no plain file is loaded;
+// both together would count every rupiah twice.
+function adsRows(){
+  if(DATA.ads.length||!DATA.placement.length)return DATA.ads;
+  return DATA.placement.filter(r=>E.dayOnly(r['Reporting starts'])===E.dayOnly(r['Reporting ends']||r['Reporting starts']));
+}
+let PLC_ALL=false,PLC_TAGS_ALL=false;const PLC_OPEN=new Set(),PLC_OTHER_OPEN=new Set();
+/* Shopee clicks and orders whose referrer is not Facebook or Instagram
+   (Others, Websites, …). They have no Meta placement, so they sit under the
+   placements as their own row with real, not estimated, commission. */
+function plcOtherRow(o,cols,names,key){
+  if(!o||!(o.shopeeClicks||o.comm))return'';
+  const what=`${nf(o.shopeeClicks)} klik Shopee · ${nf(o.orders)} pesanan`+(names?' · '+names:'');
+  const open=key&&PLC_OTHER_OPEN.has(key);
+  const label=key?`<button class="attr-open${open?' open':''}" data-other="${key}" aria-expanded="${open}" title="Lihat tag asal klik Other">Other<span class="exp" aria-hidden="true">▸</span></button>`:'Other';
+  return`<tr class="plc-other"><td>${label}</td><td colspan="${cols-3}">Bukan placement Meta <small class="src-other">${esc(what)}</small></td><td class="num" title="Komisi nyata dari pesanan dengan perujuk selain Facebook/Instagram">${o.comm?full(o.comm):'—'}</td><td class="num">—</td></tr>`
+    +(open?`<tr class="daydetail"><td colspan="${cols}">${plcOtherTags()}</td></tr>`:'');
+}
+/* Which tags the Other clicks and orders landed on, with their sources. */
+function plcOtherTags(){
+  const list=(RESULT.placement.otherTags||[]);
+  if(!list.length)return'<p class="hint">Tidak ada klik atau pesanan Other.</p>';
+  const src=t=>t.sources.slice(0,3).map(x=>`${esc(x.source)} ${nf(x.shopeeClicks)}`).join(' · ')+(t.sources.length>3?` · +${t.sources.length-3} lain`:'');
+  return`<div class="daybox attr-box plc-other-box"><table><thead><tr><th>Tag</th><th class="num">Klik Shopee</th><th class="num">Pesanan</th><th class="num">Komisi</th><th>Sumber</th></tr></thead><tbody>`
+    +list.map(t=>`<tr><td>${esc(t.tag)}</td><td class="num">${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num">${t.orders?nf(t.orders):'—'}</td><td class="num">${t.comm?full(t.comm):'—'}</td><td>${src(t)}</td></tr>`).join('')
+    +`</tbody></table><p class="hint">${nf(list.length)} tag. Hanya tag yang punya iklan di file placement.</p></div>`;
+}
+// One tag's placements. Spend and clicks are Meta's; commission is the tag's
+// platform commission split by click share, so it is marked as an estimate.
+function plcTagDetail(t){
+  const rows=(t.placements||[]).filter(p=>p.spend>0||p.clicks>0);
+  if(!rows.length)return'<p class="hint">Tidak ada biaya per placement untuk tag ini.</p>';
+  const roas=v=>v==null||!isFinite(v)?'—':`<span class="${v>=1?'pos':'neg'}">${rx(v)}</span>`;
+  return`<div class="daybox attr-box"><table><thead><tr><th>Platform</th><th>Placement</th><th class="num">Biaya</th><th class="num">Klik Meta</th><th class="num">CTR</th><th class="num">CPC</th><th class="num">Estimasi komisi</th><th class="num">Estimasi ROAS</th></tr></thead><tbody>`
+    +rows.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td><td class="num">${full(p.spend)}</td><td class="num">${nf(p.clicks)}</td><td class="num">${p.ctr==null?'—':p.ctr.toFixed(2).replace('.',',')+'%'}</td><td class="num">${p.cpc==null?'—':full(p.cpc)}</td><td class="num est">${p.estComm?full(p.estComm):'—'}</td><td class="num">${roas(p.estRoas)}</td></tr>`).join('')
+    +plcOtherRow(t.platforms[Placement.OTHER],8)
+    +'</tbody></table><p class="hint">Komisi per placement adalah estimasi: komisi tag di platform itu dibagi menurut porsi klik Meta tiap placement.</p></div>';
+}
+function renderPlacement(){
+  const P=RESULT.placement,card=$('plcCard');
+  card.classList.toggle('hidden',!P);if(!P)return;
+  const roasCell=v=>v==null||!isFinite(v)?'<td class="num">—</td>':`<td class="num ${v>=1?'pos':'neg'}">${rx(v)}</td>`;
+  const money=v=>`<td class="num">${v?full(v):'—'}</td>`,count=v=>`<td class="num">${v?nf(v):'—'}</td>`;
+  const pct=(v,d)=>`<td class="num">${v==null||!isFinite(v)?'—':v.toFixed(d==null?1:d).replace('.',',')+'%'}</td>`;
+  const head=(id,cols)=>$(id).querySelector('thead').innerHTML='<tr>'+cols.map((c,i)=>`<th class="${i>=(id==='tblPlcPlace'?2:1)?'num':''}">${c}</th>`).join('')+'</tr>';
+  const spendAll=P.total.spend;
+  const srcNames=(P.otherSources||[]).slice(0,4).map(o=>`${o.source} ${nf(o.shopeeClicks)}`).join(' · ')+((P.otherSources||[]).length>4?` · +${P.otherSources.length-4} lain`:'');
+  head('tblPlcPlat',['Platform','Biaya','% biaya','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee','Klik hilang','Pesanan','Komisi','ROAS','Laba']);
+  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${p.platform===Placement.OTHER?`<button class="attr-open${PLC_OTHER_OPEN.has('plat')?' open':''}" data-other="plat" aria-expanded="${PLC_OTHER_OPEN.has('plat')}" title="Lihat tag asal klik Other">${esc(p.platform)}<span class="exp" aria-hidden="true">▸</span></button>`:esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`
+    +(p.platform===Placement.OTHER&&PLC_OTHER_OPEN.has('plat')?`<tr class="daydetail"><td colspan="12">${plcOtherTags()}</td></tr>`:'');
+  $('tblPlcPlat').querySelector('tbody').innerHTML=P.platforms.map(platRow).join('');
+  $('tblPlcPlat').querySelector('tfoot').innerHTML=platRow(P.total);
+  head('tblPlcPlace',['Platform','Placement','Biaya','% biaya','Impresi','Klik Meta','CTR','CPC Meta','CPC vs rata-rata','Estimasi komisi','Estimasi ROAS']);
+  const vs=v=>v==null||!isFinite(v)?'<td class="num">—</td>':`<td class="num ${v<=-10?'pos':v>=10?'neg':''}">${v>0?'+':''}${v.toFixed(0)}%</td>`;
+  // Placements under 0.5% of spend are noise until asked for.
+  const big=P.placements.filter(p=>p.share>=0.5),list=PLC_ALL?P.placements:big;
+  $('tblPlcPlace').querySelector('tbody').innerHTML=list.map(p=>`<tr><td>${esc(p.platform)}</td><td>${esc(p.placement)}</td>${money(p.spend)}${pct(p.share)}${count(p.impr)}${count(p.clicks)}${pct(p.ctr,2)}${money(p.cpc)}${vs(p.cpcVsAvg)}<td class="num est">${p.estComm?full(p.estComm):'—'}</td>${roasCell(p.estRoas)}</tr>`).join('')
+    +plcOtherRow(P.platforms.find(p=>p.platform===Placement.OTHER),11,srcNames,'place');
+  $('plcCard').querySelectorAll('button[data-other]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.other;PLC_OTHER_OPEN.has(k)?PLC_OTHER_OPEN.delete(k):PLC_OTHER_OPEN.add(k);renderPlacement()});
+  const more=$('btnPlcAll');more.classList.toggle('hidden',big.length===P.placements.length);
+  more.textContent=PLC_ALL?'Sembunyikan placement kecil':`Tampilkan ${P.placements.length-big.length} placement kecil (<0,5% biaya)`;
+  more.onclick=()=>{PLC_ALL=!PLC_ALL;renderPlacement()};
+  head('tblPlcTag',['Tag','Biaya FB','Komisi FB','ROAS FB','Biaya IG','Komisi IG','ROAS IG','Komisi Lainnya + Other','Lebih untung di']);
+  const pf=(t,k)=>t.platforms[k]||{spend:0,comm:0,roas:null};
+  const tagCut=15,tagList=PLC_TAGS_ALL?P.tags:P.tags.slice(0,tagCut);
+  $('tblPlcTag').querySelector('tbody').innerHTML=tagList.map(t=>{
+    const fb=pf(t,'Facebook'),ig=pf(t,'Instagram'),other=pf(t,'Lainnya').comm+pf(t,Placement.OTHER).comm;
+    // A side with under Rp10.000 spend has too little to call either way.
+    const ok=x=>x.spend>=10000&&x.roas!=null;
+    const best=!fb.comm&&!ig.comm?'Belum ada komisi':ok(fb)&&ok(ig)?(Math.abs(fb.roas-ig.roas)<0.1?'Setara':fb.roas>ig.roas?'Facebook':'Instagram'):'—';
+    const open=PLC_OPEN.has(t.tag);
+    const detail=open?`<tr class="daydetail"><td colspan="9">${plcTagDetail(t)}</td></tr>`:'';
+    return`<tr data-plc-tag="${esc(t.tag)}"><td><button class="attr-open${open?' open':''}" aria-expanded="${open}" title="Lihat placement ${esc(t.tag)}">${esc(t.tag)}<span class="exp" aria-hidden="true">▸</span></button></td>${money(fb.spend)}${money(fb.comm)}${roasCell(fb.spend?fb.roas:null)}${money(ig.spend)}${money(ig.comm)}${roasCell(ig.spend?ig.roas:null)}${money(other)}<td>${best}</td></tr>`+detail;
+  }).join('');
+  $('tblPlcTag').querySelectorAll('tr[data-plc-tag] .attr-open').forEach(b=>b.onclick=()=>{
+    const tag=b.closest('tr').dataset.plcTag;PLC_OPEN.has(tag)?PLC_OPEN.delete(tag):PLC_OPEN.add(tag);renderPlacement()});
+  const tagBtn=$('btnPlcTags');tagBtn.classList.toggle('hidden',P.tags.length<=tagCut);
+  tagBtn.textContent=PLC_TAGS_ALL?`Tampilkan ${tagCut} teratas`:`Tampilkan semua ${P.tags.length} tag`;
+  tagBtn.onclick=()=>{PLC_TAGS_ALL=!PLC_TAGS_ALL;renderPlacement()};
+  $('plcNote').textContent=`${P.range.start} s/d ${P.range.end}${P.daily?' · ikut filter tanggal':' · satu periode, tidak ikut filter tanggal'}`
+    +(P.unmatchedSpend?` · ${rp(P.unmatchedSpend)} biaya dari iklan yang belum cocok ke tag`:'')
+    +(P.hasOrderPlatform?'':' · laporan komisi tanpa kolom Platform, komisi per platform kosong')
+    +(P.hasClicks?'':' · laporan klik belum dimuat');
+}
 function renderAttr(){
   const A=RESULT.attribution||{},tot=A.total,cut=30;
   const tb=$('tblAttr');
   if(!A.column||!tot){
-    $('attrNote').textContent='';$('attrStrip').innerHTML='';$('btnAttrAll').classList.add('hidden');
+    $('attrNote').textContent='';$('attrStrip').innerHTML='';$('btnAttrAll').classList.add('hidden');$('attrTools').classList.add('hidden');
     tb.querySelector('thead').innerHTML='';tb.querySelector('tfoot').innerHTML='';
     tb.querySelector('tbody').innerHTML='<tr><td class="tbl-empty">Laporan komisi ini tidak punya kolom tipe atribusi (langsung/tidak langsung), jadi belum bisa dipisah. Unggah laporan komisi Shopee terbaru yang memuat kolom itu.</td></tr>';
     return;
   }
+  $('attrTools').classList.remove('hidden');
   const unk=tot.unknown.rows>0;
   const share=a=>{const c=a.direct.comm+a.indirect.comm;return c>0?(a.indirect.comm/c*100).toFixed(0)+'%':'—'};
   // In a tag row the order counts open that kind's products; the total row is plain.
@@ -717,7 +806,8 @@ function renderAttr(){
     // The header is rebuilt, so a keyboard sort puts focus back on its replacement.
     th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();const k=th.dataset.sort;go();tb.querySelector(`th[data-sort="${k}"]`).focus()}};
   });
-  const rows=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows))
+  const withAttr=RESULT.tags.filter(t=>t.attr&&(t.attr.direct.rows||t.attr.indirect.rows||t.attr.unknown.rows));
+  const rows=withAttr.filter(t=>!ATTR_QUERY||t.tag.toLocaleLowerCase().includes(ATTR_QUERY))
     .sort((a,b)=>{
       if(!S)return b.comm-a.comm||a.tag.localeCompare(b.tag);
       const x=val[S.key](a),y=val[S.key](b);
@@ -725,8 +815,10 @@ function renderAttr(){
     });
   const shown=ATTR_ALL?rows:rows.slice(0,cut);
   tb.querySelector('tbody').innerHTML=shown.map(t=>`<tr data-attr="${esc(t.tag)}"><td>${esc(t.tag)}${t.attr.mixed?` <span class="pill" title="${nf(t.attr.mixed)} pesanan berisi barang langsung dan tidak langsung, dihitung di kedua kolom">${nf(t.attr.mixed)} campuran</span>`:''}</td>${cells(t.attr,t.tag)}</tr>`).join('')
-    ||`<tr><td colspan="${head.length}" class="tbl-empty">Tidak ada pesanan pada periode ini.</td></tr>`;
-  tb.querySelector('tfoot').innerHTML=rows.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+    ||`<tr><td colspan="${head.length}" class="tbl-empty">${ATTR_QUERY?'Tidak ada tag yang cocok dengan pencarian.':'Tidak ada pesanan pada periode ini.'}</td></tr>`;
+  // The total stays the whole account, whatever the search shows.
+  tb.querySelector('tfoot').innerHTML=withAttr.length?`<tr><td>Total akun</td>${cells(tot)}</tr>`:'';
+  $('attrSearchCount').textContent=ATTR_QUERY?rows.length+' dari '+withAttr.length+' tag':withAttr.length+' tag';
   /* One detail row per tag, showing one kind at a time: the same number
      closes it, the other number switches it. */
   const show=(tr,kind,all)=>{
@@ -767,17 +859,29 @@ function renderAttr(){
    clicks. Beside a "klik masuk rendah" note (days the ad ran) a healthy period
    total stays uncoloured rather than green. Rounded from the arriving share
    itself, as the note is, so "hanya 8%" sits next to 92%, not 93%. */
-function lostCell(t,tip){const v=t.lostTotal,L=t.leak;if(v==null||!isFinite(v))return'<td class="num">—</td>';
+function lostCell(t,tip){if(t==null||typeof t!=='object')return lostPctCell(t,tip);const v=t.lostTotal,L=t.leak;if(v==null||!isFinite(v))return'<td class="num">—</td>';
   const sev=L&&L.reliable?L.severity:'',cls=sev==='bad'||sev==='warn'?'leak-'+sev:t.capture&&t.capture.low?'':sev?'leak-'+sev:'';
   const r=L&&isFinite(L.pct)?100-Math.round(L.pct):Math.round(v),wait=L&&!L.reliable?` · belum dinilai: ${nf(L.metaClicks)} klik iklan (perlu ±300)`:'';
   return`<td class="num ${cls}" title="${tip}${wait}">${r<0?'+'+nf(-r)+'% lebih':nf(r)+'%'}</td>`}
+/* A plain share with no per-tag link verdict behind it, such as a platform
+   total in the placement card. */
+function lostPctCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
+/* Every Shopee click on the tag inside the click report window. The tooltip
+   splits it by Perujuk; the platform card has the full Facebook/Instagram/Other
+   breakdown. */
+function inCell(t){
+  if(!t.shopeeClicks)return'<td class="num">—</td>';
+  const s=t.shopeeSrc,tip=`Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik.`
+    +(s?` Menurut Perujuk: Facebook ${nf(s.fb)} · Instagram ${nf(s.ig)} · Other ${nf(s.other)}.`:'');
+  return`<td class="num" title="${tip}">${nf(t.shopeeClicks)}</td>`;
+}
 function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpcIdeal'?' col-ideal':''}" data-sort="${x[0]}" tabindex="0" aria-sort="${SORT.key===x[0]?(SORT.dir<0?'descending':'ascending'):'none'}">${x[1]}${SORT.key===x[0]?(SORT.dir<0?' ▾':' ▴'):''}</th>`).join('');$('tblMain').querySelector('thead').innerHTML='<tr>'+th+'</tr>';let rows=visibleTags().slice().sort((a,b)=>{if(a.spend>0!==b.spend>0)return a.spend>0?-1:1;let x=a[SORT.key],y=b[SORT.key];if(SORT.key==='tag')return SORT.dir*String(x).localeCompare(y);x=x!=null&&isFinite(x)?x:-1e15;y=y!=null&&isFinite(y)?y:-1e15;return SORT.dir*(x-y)});$('tblMain').querySelector('tbody').innerHTML=rows.map(t=>{
   // A verdict that flips when the lag setting moves is not safe to act on yet.
   const s=STAB&&STAB.tags.find(x=>x.tag===t.tag);
   const frail=s&&!s.stable?` <span class="pill" title="Vonis berubah bila lag digeser: ${s.byLag.map(b=>'lag '+b.lag+' → '+b.status).join(', ')}">rapuh</span>`:'';
   // A ROAS a few orders away from the threshold that decided the verdict.
   const edge=t.borderAt!=null?` <span class="pill edge" title="ROAS matang ${rx(t.matureRoasEff)} berada dalam ±10% dari ambang ${t.borderAt===RESULT.options.thScale?'Scale':'Pantau'} ${rx(t.borderAt)}. Beberapa pesanan saja bisa membalik vonis.">di batas</span>`:'';
-  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td><td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.shopeeClicks?` title="Jendela laporan klik. Pada jendela yang sama Meta mencatat ${nf(t.winClicks)} klik."`:''}>${t.shopeeClicks?nf(t.shopeeClicks):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.shopeeClicks)} klik Shopee`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
+  return `<tr class="dayrow" data-bd="${esc(t.tag)}" tabindex="0" role="button" aria-expanded="false"><td><div class="tagcell"><span class="nm">${esc(t.tag)} <span class="badge ${t.status}">${t.label}</span>${frail}${edge}</span><span class="rs">${esc(t.reason)}${t.linkNote?` · <b class="${t.linkTone==='over'?'leak-over':'neg'}">${esc(t.linkNote)}</b>`:''}${t.bidHint?' · '+esc(t.bidHint):''}</span></div></td><td class="num">${rp(t.spend)}</td><td class="num">${rp(t.commEff)}</td><td class="num ${t.netEff>=0?'pos':'neg'}">${rp(t.netEff)}</td><td class="num">${rx(t.roasEff)}</td><td class="num">${t.spend?t.roi.toFixed(0)+'%':'—'}</td><td class="num">${rp(t.cpm)}</td><td class="num">${t.clicks?nf(t.clicks):'—'}</td>${inCell(t)}<td class="num">${t.clicks?full(t.cpc):'—'}</td><td class="num">${t.lpv?nf(t.lpv):'—'}</td><td class="num"${t.cpLpv?` title="${full(t.spend)} biaya ÷ ${nf(t.lpv)} LP view"`:''}>${t.cpLpv?full(t.cpLpv):'—'}</td><td class="num"${t.cpcShopee?` title="${full(t.winSpend)} biaya pada jendela klik ÷ ${nf(t.shopeeClicks)} klik masuk"`:''}>${t.cpcShopee?full(t.cpcShopee):'—'}</td>${lostCell(t,`Jendela laporan klik: ${nf(t.winClicks)} klik Meta → ${nf(t.leak?t.leak.shopeeClicks:t.shopeeClicks)} klik Shopee${t.shopeeSrc?' dari Facebook/Instagram':''}`)}<td class="num col-ideal"><b>${t.clicks?full(t.cpcIdeal):'—'}</b></td><td class="num">${nf(t.orders)}</td><td class="num">${t.clicks?dec(t.convRate,2)+'%':'—'}</td><td class="num">${t.orders?rp(t.costPerOrder):'—'}</td><td class="num">${t.daysProd||'—'}</td></tr>`;
 }).join('');if(!rows.length)$('tblMain').querySelector('tbody').innerHTML=`<tr><td colspan="${MC.length}" class="tbl-empty">${FILTER?'Tidak ada tag berstatus '+filterName(FILTER)+' pada periode ini.':'Tidak ada tag pada periode ini.'}</td></tr>`;
   $('tagSearchCount').textContent=rows.length+' dari '+RESULT.tags.length+' tag';
   $('filterNote').textContent=FILTER?'Disaring: '+filterName(FILTER)+' · '+rows.length+' tag':'';
@@ -786,7 +890,7 @@ function renderMain(){let th=MC.map(x=>`<th class="${x[2]?'num':''}${x[0]==='cpc
     +'klik judul kolom untuk mengurutkan';$('btnClearFilter').classList.toggle('hidden',!FILTER);$('btnClearFilter').onclick=()=>{FILTER=null;renderDecisions();renderMain()};bindBreakdown('tblMain',tag=>{const t=RESULT.tags.find(x=>x.tag===tag);return t?{byDate:t.byDate}:null},MC.length);
   $('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onclick=()=>{SORT.key===e.dataset.sort?SORT.dir*=-1:(SORT.key=e.dataset.sort,SORT.dir=-1);renderMain()});$('tblMain').querySelectorAll('th[data-sort]').forEach(e=>e.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();const k=e.dataset.sort;e.click();$('tblMain').querySelector(`th[data-sort="${k}"]`).focus()}})}
 /* ── Part 2: ad units, leakage, daily, trend, details, matching, charts ── */
-const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
+const UC=[['adName','Ad Unit',0],['delivery','Status',0],['spend','Spend+PPN',1],['cpm','CPM',1],['impr','Impresi',1],['clicks','Klik Meta',1],['cpc','CPC Meta',1],['lpv','LP View',1],['cpLpv','Biaya/LP View',1],['shopeeClicks','Klik Shopee',1],['cpcShopee','CPC Shopee',1],['cpcIdeal','CPC Ideal',1],['ctr','CTR %',1],['orders','Order',1],['convRate','CR %',1],['commEff','Komisi Efektif',1],['netEff','Laba',1],['roi','ROI %',1],['costPerOrder','Biaya/Order',1]];
 /* One name can belong to several ads (copies in other campaigns). Only then
    does the row say which one it is. */
 function repeatedNames(list){const seen=new Set(),twin=new Set();list.forEach(x=>{seen.has(x.adName)?twin.add(x.adName):seen.add(x.adName)});return twin}
@@ -797,7 +901,7 @@ function renderUnit(){
   $('adunitNote').textContent=u.length+' ad unit · '+r.start+' — '+r.end
     +(r.clickStart?` · kolom Shopee dari laporan klik ${r.clickStart} — ${r.clickEnd}`:'');
   $('tblUnit').querySelector('thead').innerHTML='<tr>'+UC.map(c=>`<th class="${c[2]?'num':''}${c[0]==='cpcIdeal'?' col-ideal':''}">${c[1]}</th>`).join('')+'</tr>';
-  const emptyUnit=!DATA.ads.length
+  const emptyUnit=!adsRows().length
     ? 'Laporan Meta Ads belum dimuat — tabel ini butuh data iklan.'
     : 'Tidak ada iklan dengan biaya pada periode ini.';
   if(!u.length){
@@ -812,6 +916,8 @@ function renderUnit(){
     <td class="num">${rp(x.spend)}</td><td class="num">${rp(x.cpm)}</td>
     <td class="num">${nf(x.impr)}</td><td class="num">${nf(x.clicks)}</td>
     <td class="num">${full(x.cpc)}</td>
+    <td class="num">${x.lpv?nf(x.lpv):'—'}</td>
+    <td class="num"${x.lpv?` title="${full(x.spend)} biaya ÷ ${nf(x.lpv)} LP view"`:''}>${x.lpv?full(x.spend/x.lpv):'—'}</td>
     <td class="num"${x.shopeeClicks?' title="Jendela laporan klik, dibagi proporsional dari tag induk"':''}>${x.shopeeClicks?nf(x.shopeeClicks):'—'}</td>
     <td class="num"${x.cpcShopee?' title="Biaya pada jendela klik ÷ klik masuk, di tingkat tag"':''}>${x.cpcShopee?full(x.cpcShopee):'—'}</td>
     <td class="num col-ideal"><b>${full(x.cpcIdeal)}</b></td>
@@ -1103,24 +1209,71 @@ function suggestHtml(m,twin){const list=(m.candidates&&m.candidates.length)?m.ca
   const key=twin&&m.adId?'id:'+m.adId:m.adName.trim();
   const lead=m.method==='Ambigu'?'Cocok ke beberapa tag — pilih satu:':'Saran:';
   return `<div class="pick-tags"><span>${lead}</span> ${list.map(t=>`<button class="btn sm" type="button" data-accept-ad="${esc(m.adName)}" data-accept-key="${esc(key)}" data-accept-tag="${esc(t)}" title="Sambungkan iklan ini ke ${esc(t)}">${esc(t)}</button>`).join(' ')}</div>`}
-$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(!b)return;const m=map();m[b.dataset.acceptKey||b.dataset.acceptAd.trim()]=b.dataset.acceptTag;
-  try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(b.dataset.acceptAd+' → '+b.dataset.acceptTag);
+function acceptMatch(key,ad,tag){const m=map();m[key||ad.trim()]=tag;
+  try{saveMap(m)}catch(err){return toast('Mapping gagal disimpan: penyimpanan tidak tersedia')}toast(ad+' → '+tag);
   // Keep the rows below in step: Simpan rebuilds the map from them, and would
   // otherwise drop the mapping just accepted.
-  $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()});
+  $('mapRows').innerHTML=Object.keys(m).map(k=>mapRow(k,m[k])).join('')||mapRow('','');bindDel();recalc()}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-accept-tag]');if(b)acceptMatch(b.dataset.acceptKey,b.dataset.acceptAd,b.dataset.acceptTag)});
+function pickFrom(input){
+  const tag=input.value.trim();if(!tag)return;
+  if(!RESULT.tags.some(t=>t.tag===tag))return toast('Tag "'+tag+'" tidak ada di laporan Shopee. Pilih dari daftar.');
+  acceptMatch(input.dataset.pickKey,input.dataset.pickAd,tag);
+}
+$('tblMatch').addEventListener('click',e=>{const b=e.target.closest('[data-pick-go]');if(b)pickFrom(b.parentElement.querySelector('input[data-pick-key]'))});
+$('tblMatch').addEventListener('keydown',e=>{const i=e.target.closest('input[data-pick-key]');if(i&&e.key==='Enter'){e.preventDefault();pickFrom(i)}});
+let MATCH_QUERY='',MATCH_OPEN=false;
+$('matchSearch').oninput=()=>{MATCH_QUERY=$('matchSearch').value.trim().toLocaleLowerCase();if(RESULT)renderMatch()};
+$('matchOnlyOpen').onchange=()=>{MATCH_OPEN=$('matchOnlyOpen').checked;if(RESULT)renderMatch()};
+/* Ads with spend that no Shopee tag claims. Their spend sits on a tag of
+   their own name with no clicks or commission, so it reads as pure loss. */
+function unmatchedAds(){return RESULT.matchLog.filter(m=>m.confidence<.5&&m.spend>0).sort((a,b)=>b.spend-a.spend)}
+/* Tags an unmatched ad can be joined to: every sub_id Shopee reported.
+   Those with clicks or commission but no ad come first: an ad whose name
+   was mistyped usually left exactly such a tag behind. */
+function pickableTags(){
+  const shopee=RESULT.tags.filter(t=>t.comm>0||t.shopeeClicks>0||t.orders>0);
+  const orphan=shopee.filter(t=>!(t.spend>0)).sort((a,b)=>(b.shopeeClicks||0)-(a.shopeeClicks||0)||b.comm-a.comm);
+  const rest=shopee.filter(t=>t.spend>0).sort((a,b)=>a.tag.localeCompare(b.tag));
+  return {orphan,rest};
+}
+// One shared list feeds every picker; typing in a picker searches it.
+function tagOptionsHtml(){
+  const P=pickableTags(),opt=(t,lead)=>`<option value="${esc(t.tag)}" label="${lead}${t.shopeeClicks?nf(t.shopeeClicks)+' klik':''}${t.comm?' · '+rp(t.comm):''}"></option>`;
+  return P.orphan.map(t=>opt(t,'tanpa iklan · ')).join('')+P.rest.map(t=>opt(t,'')).join('');
+}
+function pickHtml(m,twin){
+  const key=twin&&m.adId?'id:'+m.adId:m.adName.trim(),P=pickableTags();
+  if(!P.orphan.length&&!P.rest.length)return'';
+  return `<div class="pick-manual"><label><span>Pilih tag manual:</span><input type="search" list="tagOptions" placeholder="Ketik untuk cari tag…" autocomplete="off" data-pick-key="${esc(key)}" data-pick-ad="${esc(m.adName)}"></label><button class="btn sm" type="button" data-pick-go>Pasangkan</button></div>`;
+}
 /* A mapping whose tag catches under ~25% of the ad's Meta link clicks sends
    most of its traffic to another sub_id, even when the name matches exactly. */
 const lowCapture=m=>m.confidence>=.5&&!!(m.capture&&m.capture.low);
 function renderMatch(){
   $('tblMatch').querySelector('thead').innerHTML='<tr>'+['Nama Iklan','Tag Hasil','Metode','Keyakinan','Biaya','Klik'].map((h,i)=>`<th class="${i>2?'num':''}">${h}</th>`).join('')+'</tr>';
   const twin=repeatedNames(RESULT.matchLog),rank=m=>lowCapture(m)?Math.min(m.confidence,.49):m.confidence;
-  $('tblMatch').querySelector('tbody').innerHTML=RESULT.matchLog.slice().sort((a,b)=>rank(a)-rank(b)).map(m=>{
+  const hit=s=>!MATCH_QUERY||String(s||'').toLocaleLowerCase().includes(MATCH_QUERY);
+  const list=RESULT.matchLog.filter(m=>(!MATCH_OPEN||m.confidence<.5)&&(hit(m.adName)||hit(m.tag)));
+  $('tagOptions').innerHTML=tagOptionsHtml();
+  $('matchCount').textContent=`${list.length} dari ${RESULT.matchLog.length} iklan`;
+  $('tblMatch').querySelector('tbody').innerHTML=list.slice().sort((a,b)=>{
+    // Unmatched ads that spent money are the ones to fix first, biggest first.
+    const ua=a.confidence<.5&&a.spend>0,ub=b.confidence<.5&&b.spend>0;
+    return ua!==ub?(ua?-1:1):ua?b.spend-a.spend:rank(a)-rank(b)}).map(m=>{
     const c=m.confidence>=.9?'leak-ok':m.confidence>=.5?'leak-warn':'leak-bad';
     const cap=lowCapture(m)?`<br><small class="leak-bad">Klik masuk rendah: klik Shopee di tag ini hanya ${Math.round(m.capture.pct)}% dari klik Meta selama iklan jalan. Cek link iklan.</small>`:'';
     return `<tr><td><b>${esc(m.adName)}</b>${twin.has(m.adName)?`<br><small>${esc(whichAd(m))}</small>`:''}</td><td><span class="pill">${esc(m.tag)}</span>${cap}</td>
-      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
+      <td>${esc(m.method)}${suggestHtml(m,twin.has(m.adName))}${m.confidence<.5&&m.spend>0?pickHtml(m,twin.has(m.adName)):''}</td><td class="num ${c}">${(m.confidence*100).toFixed(0)}%</td>
       <td class="num">${rp(m.spend)}</td><td class="num">${nf(m.clicks)}</td></tr>`;
-  }).join('');
+  }).join('')||`<tr><td colspan="6" class="tbl-empty">${MATCH_OPEN&&!MATCH_QUERY?'Semua iklan sudah dipasangkan ke tag.':'Tidak ada iklan yang cocok dengan pencarian.'}</td></tr>`;
+  // Shopee tags with clicks or commission but no ad: either organic, or the
+  // other half of an ad whose name was mistyped.
+  const orphan=pickableTags().orphan.filter(t=>hit(t.tag));
+  $('tblOrphan').querySelector('thead').innerHTML='<tr><th>Tag</th><th class="num">Klik Shopee</th><th class="num">Pesanan</th><th class="num">Komisi</th></tr>';
+  $('tblOrphan').querySelector('tbody').innerHTML=orphan.map(t=>`<tr><td>${esc(t.tag)}</td><td class="num">${nf(t.shopeeClicks)}</td><td class="num">${nf(t.orders)}</td><td class="num">${rp(t.comm)}</td></tr>`).join('')
+    ||`<tr><td colspan="4" class="tbl-empty">${MATCH_QUERY?'Tidak ada tag yang cocok dengan pencarian.':'Semua tag Shopee sudah punya iklan.'}</td></tr>`;
+  $('orphanCount').textContent=orphan.length+' tag';
   // The mapping table now lives behind one button, so that button has to say
   // when something inside needs looking at.
   const weak=RESULT.matchLog.filter(m=>m.confidence<.5||lowCapture(m)).length;
@@ -1418,7 +1571,7 @@ $('importFile').onchange=e=>{
 function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
 function qualityNotes(){
   const notes=FILES.flatMap(f=>f.quality||[]);
-  if(!DATA.ads.length)notes.push('Laporan Meta Ads belum dimuat; evaluasi biaya dan ROAS iklan belum lengkap.');
+  if(!adsRows().length)notes.push('Laporan Meta Ads belum dimuat; evaluasi biaya dan ROAS iklan belum lengkap.');
   if(!DATA.clicks.length)notes.push('Laporan klik belum dimuat; kebocoran klik tidak dihitung.');
   if(RESULT&&RESULT.matchLog.some(m=>m.confidence<.5))notes.push('Ada pencocokan iklan lemah yang memerlukan mapping manual.');
   return [...new Set(notes)];
@@ -1454,7 +1607,8 @@ async function downloadPdf(mode){
   try{
     await loadPdfLibraries();await new Promise(resolve=>requestAnimationFrame(resolve));
     if(epoch!==IMPORT_EPOCH||account!==active()||RESULT!==result)throw new Error('Data atau akun berubah. Buka ulang ekspor untuk membuat laporan terbaru.');
-    const doc=DashboardPDF.create(result,{account,mode,title,quality});
+    const version=(($('appVersion')||{}).textContent||'').replace(/^·\s*versi\s*/,'').trim();
+    const doc=DashboardPDF.create(result,{account,mode,title,quality,version});
     downloadBlob(doc.output('blob'),`laporan-${DashboardExport.filenamePart(account)}-${result.range.start}_${result.range.end}-${mode}.pdf`);toast('PDF '+mode+' diunduh');
   }catch(e){$('pdfError').textContent=e.message;$('pdfError').classList.remove('hidden')}
   finally{PDF_BUSY=false;document.querySelectorAll('[data-pdf]').forEach(b=>b.disabled=false);$('pdfBusy').classList.add('hidden')}
@@ -1477,3 +1631,66 @@ document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click'
 loadOpts();
 updateAnalysisAvailability();
 renderHistory();
+/* Click any column header to sort a table; click again to reverse. The
+   decision table and the direct/indirect table keep their own sorting. The
+   chosen order survives re-renders, and an opened detail row moves with
+   the row above it. */
+const TABLE_SORT={},OWN_SORT=new Set(['tblMain','tblAttr']);
+function cellValue(td){
+  const s=(td?td.innerText||td.textContent:'').trim().split('\n')[0].trim();
+  if(!s||s==='—'||s==='-')return null;
+  let t=s.replace(/^Rp\s*/i,'').replace(/^−/,'-'),k=1;
+  const neg=/^-/.test(t)||/\blebih\b/.test(t);
+  t=t.replace(/^[+-]/,'').replace(/\s*(lebih|lain)\b.*$/,'').replace(/[%x×]$/,'').trim();
+  const unit=t.match(/(rb|jt|m)$/i);if(unit){k={rb:1e3,jt:1e6,m:1e9}[unit[1].toLowerCase()];t=t.slice(0,-unit[1].length).trim()}
+  // Indonesian numbers: dots group thousands, a comma marks decimals; a dot
+  // not followed by exactly three digits is a decimal point (2.50x, 6.02%).
+  if(t.includes(','))t=t.replace(/\./g,'').replace(',','.');
+  else if(/^\d{1,3}(\.\d{3})+$/.test(t))t=t.replace(/\./g,'');
+  if(!/^\d+(\.\d+)?$/.test(t))return s.toLocaleLowerCase('id');
+  return (neg?-1:1)*parseFloat(t)*k;
+}
+function cellAt(tr,col){let i=0;for(const td of tr.cells){if(i===col)return td;i+=td.colSpan||1}return null}
+function applyTableSort(table){
+  const st=TABLE_SORT[table.id],tb=table.tBodies[0];if(!st||!tb)return;
+  const rows=[...tb.rows];
+  if(!rows.length||rows.some(r=>r.cells.length===1&&r.cells[0].colSpan>1&&!r.classList.contains('daydetail')))return;
+  const groups=[],tail=[];
+  rows.forEach(r=>{if(r.classList.contains('daydetail')&&groups.length)groups[groups.length-1].push(r);else if(r.classList.contains('total'))tail.push(r);else groups.push([r])});
+  const val=g=>cellValue(cellAt(g[0],st.col));
+  const sorted=groups.map((g,i)=>({g,i,v:val(g)})).sort((a,b)=>{
+    if(a.v==null||b.v==null)return a.v==null&&b.v==null?a.i-b.i:a.v==null?1:-1;
+    if(typeof a.v!==typeof b.v)return typeof a.v==='number'?-1:1;
+    return (typeof a.v==='number'?a.v-b.v:a.v.localeCompare(b.v,'id'))*st.dir||a.i-b.i;
+  });
+  const frag=document.createDocumentFragment();sorted.forEach(x=>x.g.forEach(r=>frag.append(r)));tail.forEach(r=>frag.append(r));
+  tb.append(frag);
+}
+function markSortHeader(table){
+  const st=TABLE_SORT[table.id],head=table.tHead&&table.tHead.rows[0];if(!head)return;
+  let i=0;for(const th of head.cells){
+    th.classList.toggle('sorted',!!st&&st.col===i);
+    th.setAttribute('aria-sort',st&&st.col===i?(st.dir<0?'descending':'ascending'):'none');
+    i+=th.colSpan||1;
+  }
+}
+document.querySelectorAll('.tscroll>table[id]').forEach(table=>{
+  if(OWN_SORT.has(table.id))return;
+  let busy=false;
+  const resort=()=>{if(busy||!TABLE_SORT[table.id])return;busy=true;applyTableSort(table);markSortHeader(table);obs.takeRecords();busy=false};
+  const obs=new MutationObserver(resort);
+  obs.observe(table,{childList:true,subtree:false});
+  if(table.tHead)obs.observe(table.tHead,{childList:true});
+  if(table.tBodies[0])obs.observe(table.tBodies[0],{childList:true});
+  const pick=th=>{
+    if(th.closest('table')!==table||!th.closest('thead')||th.colSpan>1)return;
+    let col=0;for(const c of th.parentElement.cells){if(c===th)break;col+=c.colSpan||1}
+    const cur=TABLE_SORT[table.id],first=[...table.tBodies[0]?.rows||[]].map(r=>cellValue(cellAt(r,col))).find(v=>v!=null);
+    TABLE_SORT[table.id]=cur&&cur.col===col?{col,dir:-cur.dir}:{col,dir:typeof first==='number'?-1:1};
+    resort();
+  };
+  table.addEventListener('click',e=>{const th=e.target.closest('th');if(th)pick(th)});
+  table.addEventListener('keydown',e=>{const th=e.target.closest('th');if(th&&(e.key==='Enter'||e.key===' ')){e.preventDefault();pick(th)}});
+  const tabbable=()=>table.tHead&&[...table.tHead.querySelectorAll('th')].forEach(th=>{if(!th.hasAttribute('tabindex'))th.tabIndex=0});
+  new MutationObserver(tabbable).observe(table.tHead||table,{childList:true,subtree:true});tabbable();
+});

@@ -35,8 +35,8 @@ const data = {
     { 'Reporting starts':'2026-08-04', 'Ad name':'A', 'Amount spent (IDR)':'100', 'Link clicks':'10', 'Impressions':'1000', 'Reach':'800', 'Landing page views':'8', 'Ad delivery':'active' },
   ],
   clicks: [
-    { 'Waktu Klik':'2026-08-01 09:00:00', 'Tag_link':'A----', 'Perujuk':'Websites', 'Wilayah Klik':'Indonesia' },
-    { 'Waktu Klik':'2026-08-02 09:00:00', 'Tag_link':'A----', 'Perujuk':'Websites', 'Wilayah Klik':'Indonesia' },
+    { 'Waktu Klik':'2026-08-01 09:00:00', 'Tag_link':'A----', 'Perujuk':'Facebook', 'Wilayah Klik':'Indonesia' },
+    { 'Waktu Klik':'2026-08-02 09:00:00', 'Tag_link':'A----', 'Perujuk':'Facebook', 'Wilayah Klik':'Indonesia' },
   ],
   tagMap: {},
 };

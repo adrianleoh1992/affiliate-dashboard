@@ -10,7 +10,7 @@
   // normalized row. DailyAgg uses it only to recognize exact pre-validation
   // CSV fingerprints already stored by the prior reader.
   const SOURCE_ROW = Symbol.for('affiliate-dashboard.source-row');
-  const TYPES = { affiliate: 'aff', ads: 'ads', clicks: 'clk' };
+  const TYPES = { affiliate: 'aff', ads: 'ads', clicks: 'clk', placement: 'ads' };
   const EMPTY_MARKERS = /^(?:-{1,2}|—|–|n\/?a|null)$/i;
   const STATUSES = new Map(['Selesai', 'Tertunda', 'Dibatalkan', 'Belum Dibayar'].map(x => [x.toLowerCase(), x]));
   const headerKey = value => String(value).normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -159,22 +159,38 @@
     else if (hasAny(E.COL.ads.date) || hasAny(E.COL.ads.spend) || hasAny(E.COL.ads.name)) result.type = 'ads';
     else if (hasAny(E.COL.clk.time) && hasAny(E.COL.clk.tag)) result.type = 'clicks';
     else result.type = E.detectFileType(fields);
+    // A Meta export broken down by placement repeats each ad once per
+    // placement, usually over the whole period. It feeds only the placement
+    // breakdown, never the daily spend totals, so it is its own report type.
+    if (result.type === 'ads' && fields.includes('Placement')) result.type = 'placement';
     if (!TYPES[result.type]) {
       issue('error', 'unknown_report', 'Jenis laporan tidak dikenali. Gunakan laporan Affiliate Shopee, Meta Ads harian (IDR), atau Klik Shopee dengan header asli.');
       return finish(true);
     }
     const col = E.COL[TYPES[result.type]];
-    const required = result.type === 'affiliate' ? ['orderId', 'status', 'orderAt', 'comm'] : result.type === 'ads' ? ['date', 'name', 'spend'] : ['time', 'tag'];
+    const isAds = result.type === 'ads' || result.type === 'placement';
+    const required = result.type === 'affiliate' ? ['orderId', 'status', 'orderAt', 'comm'] : isAds ? ['date', 'name', 'spend'] : ['time', 'tag'];
     for (const key of required) if (!hasAny(col[key])) {
-      issue('error', 'missing_column', `Kolom wajib tidak ditemukan: ${col[key].join(' / ')}.${result.type === 'ads' && key === 'spend' ? ' Ekspor biaya iklan dalam IDR.' : ' Gunakan header asli laporan.'}`, { row: 1, column: col[key][0] });
+      issue('error', 'missing_column', `Kolom wajib tidak ditemukan: ${col[key].join(' / ')}.${isAds && key === 'spend' ? ' Ekspor biaya iklan dalam IDR.' : ' Gunakan header asli laporan.'}`, { row: 1, column: col[key][0] });
     }
     if (errors) return finish(true);
     if (!records.length) { issue('error', 'no_rows', 'Header terbaca, tetapi laporan tidak berisi baris data.'); return finish(true); }
-    const optional = result.type === 'affiliate' ? ['gmv', 'qty', 'tag', 'clickAt'] : result.type === 'ads' ? ['clicks', 'impr', 'reach', 'lpv'] : [];
+    // Some Meta exports (seen on Beautyismust, Oct 2026) carry no "Link clicks"
+    // column, only Results with "Result indicator" = actions:link_click. That
+    // Results figure is the same counter, so it stands in for Link clicks.
+    // "Unique link clicks" is not used: it counts people, not clicks.
+    const clicksFromResults = isAds && !hasAny(col.clicks)
+      && fields.includes('Results') && fields.includes('Result indicator');
+    let otherResultRows = 0;
+    if (clicksFromResults) {
+      fields.push(col.clicks[0]);
+      issue('warning', 'link_clicks_from_results', 'Kolom Link clicks tidak ada di ekspor ini. Klik Meta diambil dari kolom Results pada baris dengan Result indicator = link_click. Tambahkan kolom Link clicks pada ekspor berikutnya agar lebih pasti.');
+    }
+    const optional = result.type === 'affiliate' ? ['gmv', 'qty', 'tag', 'clickAt'] : result.type === 'ads' ? ['clicks', 'impr', 'reach', 'lpv'] : result.type === 'placement' ? ['clicks', 'impr'] : [];
     const missing = optional.filter(key => !hasAny(col[key])).map(key => col[key][0]);
     if (missing.length) issue('warning', 'optional_columns_missing', `Kolom pelengkap tidak tersedia: ${missing.join(', ')}. Metrik terkait belum lengkap; sertakan kolom ini pada ekspor berikutnya.`);
     if (result.type === 'ads' && !fields.includes('Reporting ends')) issue('warning', 'daily_grain_unverified', 'Kolom Reporting ends tidak tersedia. Pastikan laporan Meta Ads diekspor dengan breakdown Waktu → Hari, sehingga setiap baris mewakili satu hari.');
-    const numericKeys = result.type === 'affiliate' ? ['comm', 'commNet', 'gmv', 'refund', 'price', 'qty', 'rate'] : result.type === 'ads' ? ['spend', 'clicks', 'impr', 'reach', 'freq', 'cpm', 'ctr', 'lpv', 'results', 'shopClicks', 'allClicks'] : [];
+    const numericKeys = result.type === 'affiliate' ? ['comm', 'commNet', 'gmv', 'refund', 'price', 'qty', 'rate'] : isAds ? ['spend', 'clicks', 'impr', 'reach', 'freq', 'cpm', 'ctr', 'lpv', 'results', 'shopClicks', 'allClicks'] : [];
     const numeric = new Map();
     numericKeys.forEach(key => col[key].filter(name => fields.includes(name)).forEach(name => numeric.set(name, key)));
     const countKeys = new Set(['qty', 'clicks', 'impr', 'reach', 'lpv', 'results', 'shopClicks', 'allClicks']);
@@ -193,8 +209,8 @@
         else { row[col.status[0]] = normalized; excluded = normalized === 'Dibatalkan' || normalized === 'Belum Dibayar'; }
         if (!E.pick(row, col.orderId)) rowIssue('error', 'missing_order_id', 'ID Pemesanan kosong; jumlah pesanan tidak dapat dihitung dengan benar.', col.orderId[0], '');
       }
-      if (result.type === 'ads' && !E.pick(row, col.name)) rowIssue('error', 'missing_ad_name', 'nama iklan/kampanye kosong. Hapus baris total dari laporan atau isi nama aslinya.', col.name[0], '');
-      const primaryDate = result.type === 'affiliate' ? col.orderAt : result.type === 'ads' ? col.date : col.time;
+      if (isAds && !E.pick(row, col.name)) rowIssue('error', 'missing_ad_name', 'nama iklan/kampanye kosong. Hapus baris total dari laporan atau isi nama aslinya.', col.name[0], '');
+      const primaryDate = result.type === 'affiliate' ? col.orderAt : isAds ? col.date : col.time;
       const dateValue = E.pick(row, primaryDate) || '';
       if (!validTimestamp(dateValue)) rowIssue('error', 'invalid_date', `tanggal "${dateValue}" tidak valid. Gunakan YYYY-MM-DD atau YYYY-MM-DD HH:mm:ss.`, primaryDate[0], dateValue);
       const day = E.dayOnly(dateValue);
@@ -204,6 +220,7 @@
         const value = E.pick(row, col[dateKey]);
         if (value && !EMPTY_MARKERS.test(value) && !validTimestamp(value)) rowIssue('error', 'invalid_date', `tanggal ${col[dateKey][0]} "${value}" tidak valid. Gunakan YYYY-MM-DD HH:mm:ss.`, col[dateKey][0], value);
       }
+      if (result.type === 'placement' && fields.includes('Reporting ends') && !validTimestamp(row['Reporting ends'])) rowIssue('error', 'invalid_date', 'Reporting ends kosong atau tidak valid. Ekspor ulang laporan Meta Ads per placement.', 'Reporting ends', row['Reporting ends']);
       if (result.type === 'ads' && fields.includes('Reporting ends')) {
         const until = row['Reporting ends'];
         if (!validTimestamp(until)) rowIssue('error', 'invalid_date', 'Reporting ends kosong atau tidak valid. Ekspor ulang laporan Meta Ads harian.', 'Reporting ends', until);
@@ -212,7 +229,7 @@
           rowIssue('error', 'non_daily_ads', `Reporting starts (${day}) berbeda dengan Reporting ends (${E.dayOnly(until)}). Seluruh file ditolak agar biaya beberapa hari tidak masuk ke satu tanggal. Ekspor ulang Meta Ads dengan breakdown Waktu → Hari (Time → Day).`, 'Reporting ends', until);
         }
       }
-      if (result.type === 'ads') for (const field of ['Currency', 'Account currency']) {
+      if (isAds) for (const field of ['Currency', 'Account currency']) {
         if (row[field] && row[field].toUpperCase() !== 'IDR') rowIssue('error', 'unsupported_currency', `mata uang ${row[field]} bukan IDR. Gunakan laporan IDR agar biaya tidak tercampur.`, field, row[field]);
       }
       // Meta lists every ad for every day of the range, delivered or not, and
@@ -239,6 +256,12 @@
           if (number.ambiguous) rowIssue('warning', 'ambiguous_number', `${field} "${raw}" dibaca sebagai ${number.value}. Verifikasi pemisah desimal/ribuan pada sumber; gunakan format tanpa pemisah ribuan untuk menghilangkan ambiguitas.`, field, raw);
         }
       }
+      if (clicksFromResults) {
+        const indicator = String(row['Result indicator'] || '').trim();
+        if (/(^|[:.])link_click$/.test(indicator)) row[col.clicks[0]] = typeof row.Results === 'number' ? row.Results : 0;
+        else if (!indicator && typeof row.Results !== 'number') row[col.clicks[0]] = 0;
+        else { row[col.clicks[0]] = ''; otherResultRows++; }
+      }
       // A commission column may be present but every alternative is empty.
       if (result.type === 'affiliate' && !excluded && !col.comm.some(name => typeof row[name] === 'number')) rowIssue('error', 'missing_commission', 'komisi kosong atau tidak valid. Isi komisi yang benar, termasuk angka 0 jika nol.', col.comm[0], E.pick(row, col.comm) || '');
       if (col.tag && !E.pick(row, col.tag)) rowIssue('warning', 'untagged_row', `tag kosong; ${result.type === 'affiliate' ? 'pesanan masuk kelompok (tanpa tag)' : 'klik tetap masuk total, tetapi tidak dapat dicocokkan ke tag'}.`, col.tag[0], '');
@@ -250,6 +273,7 @@
         if (!end || day > end) end = day;
       }
     });
+    if (otherResultRows) issue('warning', 'link_clicks_unknown', `${otherResultRows} baris memakai Results selain link_click, sehingga Klik Meta baris tersebut tidak diketahui. Ekspor ulang dengan kolom Link clicks.`, { column: col.clicks[0] });
     if (start) result.period = { start, end };
     if (!result.rows.length && !nonDaily) issue('error', 'no_valid_rows', 'Tidak ada baris valid yang bisa dimuat. Perbaiki temuan di atas lalu impor ulang.');
     return finish(nonDaily);

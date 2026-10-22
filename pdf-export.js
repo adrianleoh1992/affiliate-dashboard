@@ -173,6 +173,7 @@
     }
     function decisionBoard() {
       const statuses = ['scale', 'pantau', 'stop', 'organik'], width = (WIDTH - 4) / 2;
+      ensure(57); // keep both rows of the board on one page
       statuses.forEach((status, index) => {
         if (index % 2 === 0) ensure(27);
         const x = M + (index % 2) * (width + 4), top = y;
@@ -216,11 +217,69 @@
       y += 34;
     }
 
+    /* Platform & placement, as in the dashboard card: real numbers per
+       platform, estimated commission per placement, the Other referrers and
+       the tags they landed on. Only when a placement export is loaded. */
+    function placementSection() {
+      const P = result.placement;
+      if (!P || !array(P.platforms).length) return;
+      const OTHER = 'Other (bukan FB/IG)', rp = v => amount(v) ? 'Rp ' + integer(Math.round(amount(v))) : '-', count = v => amount(v) ? integer(v) : '-';
+      const sources = list => list.slice(0, 4).map(o => o.source + ' ' + integer(o.shopeeClicks)).join(', ') + (list.length > 4 ? ', +' + integer(list.length - 4) + ' lain' : '');
+      const allSources = sources(array(P.otherSources));
+      section('Platform dan placement', 'Periode file placement ' + P.range.start + ' s/d ' + P.range.end + (P.daily ? ' (ikut filter tanggal)' : ' (satu periode)') + '. '
+        + 'Per platform semua angka nyata: biaya dan klik dari Meta, klik Shopee dari kolom Perujuk, pesanan dan komisi dari kolom Platform laporan komisi. '
+        + 'Hanya tag yang punya iklan di file placement yang dihitung. Other = perujuk selain Facebook/Instagram.');
+      const platRow = p => [p.platform === OTHER ? 'Other' : p.platform,
+        rp(p.spend), P.total.spend ? percent(amount(p.spend) / P.total.spend * 100) : '-', count(p.clicks), count(p.shopeeClicks),
+        p.platform === OTHER || !P.hasClicks ? '-' : lost(p.lost), count(p.orders), rp(p.comm), ratio(p.roas, amount(p.spend) > 0), amount(p.spend) ? (p.net < 0 ? '-' : '') + rp(Math.abs(p.net)) : '-'];
+      table(['Platform', 'Biaya', '% biaya', 'Klik Meta', 'Klik Shopee', 'Klik hilang', 'Pesanan', 'Komisi', 'ROAS', 'Laba'],
+        array(P.platforms).map(platRow).concat([platRow(P.total)]), [30, 22, 13, 15, 15, 14, 14, 22, 13, 24],
+        { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9], fontSize: 7, oneLine: true });
+      if (allSources) paragraph('Sumber Other: ' + allSources + '.', { size: 7, gap: 1 });
+      if (P.unmatchedSpend) paragraph(money(P.unmatchedSpend) + ' biaya berasal dari iklan yang belum cocok ke tag.', { size: 7, gap: 1 });
+      if (!P.hasOrderPlatform) paragraph('Laporan komisi tanpa kolom Platform: komisi per platform kosong.', { size: 7, gap: 1 });
+
+      const big = array(P.placements).filter(p => p.share >= 0.5);
+      const places = mode === 'lengkap' ? array(P.placements) : big;
+      const other = array(P.platforms).find(p => p.platform === OTHER);
+      section('Per placement', 'Shopee tidak tahu placement Meta, jadi komisi per placement adalah estimasi: komisi tiap tag di platform itu dibagi menurut porsi klik Meta tiap placement. '
+        + (places.length < array(P.placements).length ? integer(array(P.placements).length - places.length) + ' placement di bawah 0,5% biaya tidak ditampilkan (ada di PDF Lengkap). ' : '')
+        + 'Baris Other memakai komisi nyata.');
+      table(['Platform', 'Placement', 'Biaya', '% biaya', 'Klik Meta', 'CTR', 'CPC Meta', 'CPC vs rata-rata', 'Estimasi komisi', 'Estimasi ROAS'],
+        places.map(p => [p.platform, p.placement, rp(p.spend), percent(p.share), count(p.clicks), percent(p.ctr, finite(p.ctr)),
+          p.cpc == null ? '-' : rp(p.cpc), finite(p.cpcVsAvg) ? (p.cpcVsAvg > 0 ? '+' : '') + p.cpcVsAvg.toFixed(0) + '%' : '-', rp(p.estComm), ratio(p.estRoas, amount(p.spend) > 0)])
+          .concat(other && (amount(other.shopeeClicks) || amount(other.comm)) ? [['Other', 'Bukan placement Meta', '-', '-', '-', '-', '-', '-', rp(other.comm), '-']] : []),
+        [17, 34, 20, 13, 14, 12, 18, 16, 22, 16], { numeric: [2, 3, 4, 5, 6, 7, 8, 9], fontSize: 7, oneLine: true });
+      if (other && amount(other.shopeeClicks)) paragraph('Other: ' + integer(other.shopeeClicks) + ' klik Shopee dan ' + integer(other.orders) + ' pesanan dari perujuk selain Facebook/Instagram; komisinya nyata, bukan estimasi.', { size: 7, gap: 1 });
+
+      const otherTags = array(P.otherTags), cut = mode === 'ringkas' ? 10 : mode === 'standar' ? 25 : otherTags.length;
+      if (otherTags.length) {
+        section('Tag asal klik Other', 'Klik dan pesanan dengan perujuk selain Facebook/Instagram, per tag. Biasanya link yang dibagikan ulang, bukan klik iklan.'
+          + (otherTags.length > cut ? ' ' + integer(cut) + ' dari ' + integer(otherTags.length) + ' tag, urut klik terbanyak.' : ''));
+        table(['Tag', 'Klik Shopee', 'Pesanan', 'Komisi', 'Sumber'], otherTags.slice(0, cut).map(t => [t.tag, count(t.shopeeClicks), count(t.orders), rp(t.comm), sources(array(t.sources))]),
+          [50, 22, 18, 28, 64], { numeric: [1, 2, 3] });
+      }
+
+      if (mode !== 'ringkas') {
+        const pf = (t, key) => (t.platforms && t.platforms[key]) || { spend: 0, comm: 0, roas: null };
+        const tagCut = mode === 'lengkap' ? array(P.tags).length : 15;
+        section('Per tag: Facebook vs Instagram', 'ROAS per platform nyata. Platform dengan biaya di bawah Rp10.000 terlalu kecil untuk dibandingkan.'
+          + (array(P.tags).length > tagCut ? ' ' + integer(tagCut) + ' dari ' + integer(array(P.tags).length) + ' tag dengan biaya terbesar.' : ''));
+        table(['Tag', 'Biaya FB', 'Komisi FB', 'ROAS FB', 'Biaya IG', 'Komisi IG', 'ROAS IG', 'Komisi Lainnya + Other', 'Lebih untung di'],
+          array(P.tags).slice(0, tagCut).map(t => {
+            const fb = pf(t, 'Facebook'), ig = pf(t, 'Instagram'), rest = amount(pf(t, 'Lainnya').comm) + amount(pf(t, OTHER).comm);
+            const ok = x => amount(x.spend) >= 10000 && finite(x.roas);
+            const best = !amount(fb.comm) && !amount(ig.comm) ? 'Belum ada komisi' : ok(fb) && ok(ig) ? (Math.abs(fb.roas - ig.roas) < 0.1 ? 'Setara' : fb.roas > ig.roas ? 'Facebook' : 'Instagram') : '-';
+            return [t.tag, rp(fb.spend), rp(fb.comm), ratio(fb.roas, amount(fb.spend) > 0), rp(ig.spend), rp(ig.comm), ratio(ig.roas, amount(ig.spend) > 0), rp(rest), best];
+          }), [36, 19, 19, 13, 19, 19, 13, 22, 22], { numeric: [1, 2, 3, 4, 5, 6, 7], fontSize: 7, oneLine: true });
+      }
+    }
+
     doc.setFillColor(...COLORS.accent); doc.rect(M, y - 2, 8, 2, 'F'); y += 7;
     paragraph('AFFILIATE DASHBOARD / ' + MODES[mode].toUpperCase(), { size: 9, color: COLORS.accent, bold: true });
     paragraph(title, { size: 21, color: COLORS.ink, bold: true, gap: 3 });
     paragraph(account, { size: 11, color: COLORS.ink, bold: true, gap: 1 });
-    paragraph('Periode ' + period + '  |  Dibuat ' + made + '  |  PPN biaya iklan ' + ppnPct, { size: 8, gap: 3 });
+    paragraph('Periode ' + period + '  |  Dibuat ' + made + '  |  PPN biaya iklan ' + ppnPct + (settings.version ? '  |  Versi ' + settings.version : ''), { size: 8, gap: 3 });
     section('Dashboard utama');
     metricGrid([
       ['Komisi Efektif', money(k.commEff), 'Total ' + money(k.comm) + ' | ' + integer(k.orders) + ' pesanan'],
@@ -239,12 +298,17 @@
     const netLost = Math.max(0, metaClicks - shopeeClicks);
     const hasClickComparison = clickTags.length > 0;
     const hasAds = amount(result.counts && result.counts.ads) > 0;
-    section('Klik Meta dan Shopee');
+    // With a Perujuk column the leak compares Meta clicks with Facebook and
+    // Instagram arrivals only; every other arrival is shown beside it.
+    const bySource = clickTags.some(t => t.shopeeSrc);
+    const arrived = clickTags.reduce((sum, t) => sum + amount(t.shopeeClicks), 0);
+    const otherArrived = clickTags.reduce((sum, t) => sum + (t.shopeeSrc ? amount(t.shopeeSrc.other) : 0), 0);
+    section('Klik Meta dan Shopee', bySource ? 'Klik hilang membandingkan klik Meta dengan klik Shopee yang perujuknya Facebook/Instagram. Klik dari sumber lain (Others, Websites, ...) dihitung terpisah sebagai Other.' : null);
     metricGrid([
       ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
-      ['Klik Shopee', hasClickComparison ? integer(shopeeClicks) : '-', 'Jendela dan tag sama'],
-      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? 'Per tag; bersih ' + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
-      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), 'Shopee / Meta'],
+      ['Klik Masuk Shopee', hasClickComparison ? integer(arrived) : '-', bySource ? 'FB+IG ' + integer(shopeeClicks) + ' | Other ' + integer(otherArrived) : 'Jendela dan tag sama'],
+      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? (bySource ? 'FB+IG, per tag; bersih ' : 'Per tag; bersih ') + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
+      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), bySource ? 'Shopee FB+IG / Meta' : 'Shopee / Meta'],
     ], 4);
     section('Prioritas anggaran');
     // Paid tags not judged yet: same definition as the dashboard card. Their
@@ -259,6 +323,7 @@
       ['Potensi perbaikan laba', money(a.maxGain), 'Batas atas: bid + rugi STOP'],
       ['Tag belum cukup data', money(unjudgedNet), integer(unjudged.length) + ' tag | laba efektif', unjudgedNet < 0],
     ], 4);
+    ensure(70); // heading and both board rows together
     section('Keputusan utama');
     decisionBoard();
     y += 2;
@@ -272,7 +337,8 @@
       + (unjudged.length ? integer(unjudged.length) + ' tag berbiaya belum cukup data (biaya ' + money(unjudgedSpend) + '); lihat tabel. ' : '')
       + 'Jendela klik: ' + (r.clickStart ? r.clickStart + ' s/d ' + r.clickEnd : 'belum tersedia') + '.', { size: 7, gap: 0 });
 
-    nextPage();
+    // A new page only when the trend chart would not fit under the board.
+    ensure(100);
     section('Tren biaya dan komisi');
     ensure(76);
     // Commission on its click day, as on screen. A day without commission rows
@@ -298,6 +364,7 @@
         count: tags.filter(t => t.status === status).length, color: statusColors[status] })) });
     y += 38;
 
+    ensure(75); // heading with the money flow and its two cards
     section('Bagaimana laba terbentuk');
     moneyFlow();
     // Completed-only ROAS is a floor: it treats every pending order as cancelled.
@@ -308,7 +375,7 @@
       ['Pesanan batal', percent(k.cancelRate), 'Menurut nilai ' + percent(k.cancelValueRate)],
     ], 4);
 
-    nextPage();
+    ensure(118); // heading, note and the bar chart together
     const topTags = tags.slice().sort((a, b) => amount(b.spend) - amount(a.spend) || amount(b.commEff) - amount(a.commEff)).slice(0, 6);
     section('Biaya dan komisi per tag', integer(topTags.length) + ' dari ' + integer(tags.length) + ' tag, diurutkan dari biaya terbesar. Tabel memuat semua tag dengan biaya atau komisi.');
     ensure(93);
@@ -395,21 +462,28 @@
     /* One row per tag with every click cost, the clicks lost before Shopee
        and the direct/indirect split, in every mode: this is the table the
        account owner reads tag by tag. */
-    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang (Rp) dibulatkan ke rupiah terdekat. CPC Shopee dan klik hilang memakai jendela laporan klik; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee, tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. Langsung/tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
+    section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang (Rp) dibulatkan ke rupiah terdekat. Klik masuk Shopee = semua perujuk pada jendela laporan klik. CPC Shopee dan klik hilang memakai jendela itu; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee' + (bySource ? ' dari Facebook/Instagram' : '') + ', tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. Langsung/tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
     // One value per cell, money as whole rupiah with Rp and counts plain, so every row stays on one line.
     // Rounded from the arriving share itself, like the link note, so the two add up to 100.
-    const lost = leak => { if (!leak || !finite(leak.pct)) return '-'; const r = 100 - Math.round(leak.pct); return r < 0 ? '+' + integer(-r) + '%' : integer(r) + '%'; };
+    // A tag's leak rounds from the arriving share, as the dashboard note does;
+    // a plain share (platform rows) rounds as it is.
+    const lost = v => {
+      const r = v && typeof v === 'object' ? (finite(v.pct) ? 100 - Math.round(v.pct) : null) : finite(v) ? Math.round(v) : null;
+      return r == null ? '-' : r < 0 ? '+' + integer(-r) + '%' : integer(r) + '%';
+    };
     const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? 'Rp ' + integer(Math.round(amount(v))) : '-');
     const split = attribution.column;
-    table(['Tag', 'Klik Meta', 'CPC Meta', 'LP view', 'Biaya / LP', 'Klik Shopee', 'CPC Shopee', 'Klik hilang',
+    table(['Tag', 'Klik Meta', 'Klik masuk Shopee', 'CPC Meta', 'LP view', 'Biaya / LP', 'CPC Shopee', 'Klik hilang',
       'Order langsung', 'Komisi langsung', 'Order tidak langsung', 'Komisi tidak langsung'], tags.map(t => [
-      t.tag, integer(t.clicks), rupiah(t.cpc, amount(t.clicks) > 0 && amount(t.spend) > 0),
+      t.tag, integer(t.clicks), r.clickStart ? integer(t.shopeeClicks) : '-', rupiah(t.cpc, amount(t.clicks) > 0 && amount(t.spend) > 0),
       amount(t.lpv) > 0 ? integer(t.lpv) : '-', rupiah(t.cpLpv),
-      r.clickStart ? integer(t.shopeeClicks) : '-', rupiah(t.cpcShopee, amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0),
+      rupiah(t.cpcShopee, amount(t.shopeeClicks) > 0 && amount(t.winSpend) > 0),
       lost(t.leak),
       split && t.attr ? integer(t.attr.direct.orders) : '-', split && t.attr ? rupiah(t.attr.direct.comm) : '-',
       split && t.attr ? integer(t.attr.indirect.orders) : '-', split && t.attr ? rupiah(t.attr.indirect.comm) : '-',
-    ]), [31, 12, 13, 10, 14, 13, 14, 12, 15, 16, 15, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7, oneLine: true });
+    ]), [31, 12, 13, 13, 10, 14, 14, 12, 15, 16, 15, 17], { numeric: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], fontSize: 7, oneLine: true });
+
+    placementSection();
 
     if (mode !== 'ringkas') {
       section('Rincian iklan', 'Komisi, pesanan, dan klik Shopee dibagi proporsional dari tag berdasarkan biaya; ini estimasi atribusi. Keputusan mengikuti tag induk.');
@@ -442,12 +516,13 @@
 
       section('Perbandingan klik Meta dan Shopee', r.clickStart ? 'Jendela ' + r.clickStart + ' s/d ' + r.clickEnd + '. Selisih positif dapat mencakup klik tambahan di luar iklan; selisih negatif perlu diperiksa.' : 'Tidak tersedia laporan klik pada periode ini.');
       const leaks = tags.filter(t => t.leak && finite(t.leak.pct));
-      table(['Tag', 'Klik Meta', 'Klik Shopee', 'Selisih', 'Masuk', 'Biaya klik kurang (maks.)'], leaks.map(t => [
-        t.tag, integer(t.leak.metaClicks), integer(t.leak.shopeeClicks), integer(amount(t.leak.shopeeClicks) - amount(t.leak.metaClicks)),
+      table(['Tag', 'Klik Meta', bySource ? 'Shopee FB+IG' : 'Klik Shopee', 'Shopee Other', 'Selisih', 'Masuk', 'Biaya klik kurang (maks.)'], leaks.map(t => [
+        t.tag, integer(t.leak.metaClicks), integer(t.leak.shopeeClicks), t.shopeeSrc ? integer(t.shopeeSrc.other) : '-',
+        integer(amount(t.leak.shopeeClicks) - amount(t.leak.metaClicks)),
         // Same link-health flags as the dashboard; small samples are not judged.
         percent(t.leak.pct) + (t.leak.reliable ? ({ bad: '\ncek link', over: '\nROAS batas atas' }[t.leak.severity] || '') : '\ndata sedikit'),
         money(t.leak.wasted),
-      ]), [50, 25, 25, 22, 24, 36], { numeric: [1, 2, 3, 4, 5], empty: 'Perbandingan klik belum dapat dihitung.' });
+      ]), [46, 21, 23, 22, 20, 20, 30], { numeric: [1, 2, 3, 4, 5, 6], empty: 'Perbandingan klik belum dapat dihitung.' });
 
       section('Status pesanan per hari', 'Jumlah adalah pesanan per status, bukan baris produk. Pesanan yang tercatat pada beberapa status dapat dihitung pada setiap statusnya.');
       table(['Tanggal', 'Selesai', 'Tertunda', 'Belum dibayar', 'Dibatalkan', 'Lainnya'], array(result.statusDaily).map(d => [
