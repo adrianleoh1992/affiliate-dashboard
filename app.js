@@ -567,7 +567,6 @@ function renderClickKpi(){
   const gained=gainTags.reduce((s,t)=>s+(t.leak.shopeeClicks-t.leak.metaClicks),0);
   const pctIn=adMeta?adShopee/adMeta*100:0;
   const ms=metaBySource(),msTot=ms.reduce((s,x)=>s+x[1],0);
-  const ss=(RESULT.breakdown.clickSource||[]),ssTot=ss.reduce((s,x)=>s+x.count,0);
   const win=r.clickStart?`${r.clickStart} s/d ${r.clickEnd}`:'klik belum dimuat';
   const W=clickWindowStats();
   // Both columns divide the SAME spend, impressions and orders — only the click
@@ -586,17 +585,31 @@ function renderClickKpi(){
       ['CTR',pc(mC,im)],['CR',pc(od,mC)],
       ...ms.slice(0,3).map(([p,v])=>[p,`${nf(v)} · ${msTot?(v/msTot*100).toFixed(0):0}%`]),
       ['CR memakai semua pesanan','termasuk dari tag organik',1]]));
+  // The headline is every Shopee click except Shopee Video, which never
+  // passes through Meta. Tags with no Meta clicks stay in: they are often ads
+  // Shopee boosts itself, not organic posts. Only FB+IG arrivals on tags with
+  // Meta clicks are set against Klik Meta (% masuk, klik hilang), so the rows
+  // show where that smaller number sits inside the headline.
+  const bySrc=RESULT.tags.some(t=>t.shopeeSrc);
+  const sv=k.shopeeVideoClicks||0,hC=k.shopeeClicks-sv;
+  const tagged=RESULT.tags.reduce((s,t)=>s+(t.shopeeClicks||0),0);
+  const fromMeta=bySrc?RESULT.tags.reduce((s,t)=>s+(t.shopeeSrc?t.shopeeSrc.fb+t.shopeeSrc.ig:0),0):tagged-sv;
+  const leakSet=new Set(leaks);
+  const noAd=RESULT.tags.filter(t=>!leakSet.has(t))
+    .map(t=>[t.tag,bySrc?(t.shopeeSrc?t.shopeeSrc.fb+t.shopeeSrc.ig:0):(t.shopeeClicks||0)])
+    .filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
   if(hasClicks)out.push(
-    kpiCard('','Klik Shopee',nf(sC),`${win} · ${nf(k.shopeeClicks)} total`,[
-      // Shopee reports no impressions, so there is no CPM to report either.
-      // Spend ÷ Shopee clicks × 1000 is a cost per thousand arrivals, not a
-      // cost per thousand views — printing it under the label CPM invites the
-      // wrong comparison with the Rp5.704 next to it.
-      ['Impresi','—',1],['CPM','—',1],['CPC',per(sp,sC)],
-      ['CTR',pc(sC,im)],['CR',pc(od,sC)],
-      ...ss.slice(0,3).map(s=>[s.name||'(tanpa sumber)',`${nf(s.count)} · ${ssTot?(s.count/ssTot*100).toFixed(0):0}%`]),
-      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1],
-      ...(RESULT.tags.some(t=>t.shopeeSrc)?[['Hanya perujuk Facebook/Instagram','dipakai untuk klik hilang',1]]:[])]),
+    kpiCard('','Klik Shopee',nf(hC),sv?`${win} · tanpa Shopee Video`:win,[
+      ['Semua klik di laporan Shopee',nf(k.shopeeClicks)],
+      sv&&['Shopee Video (dipisah)',`−${nf(sv)}`],
+      [bySrc?'FB+IG ke tag beriklan':'Ke tag beriklan',nf(sC)],
+      [bySrc?'FB+IG ke tag tanpa iklan Meta':'Ke tag tanpa iklan Meta',nf(fromMeta-sC)],
+      noAd.length&&[`boost Shopee atau organik: ${noAd.slice(0,2).map(x=>`${esc(x[0])} ${nf(x[1])}`).join(', ')}`,'',1],
+      bySrc&&['Perujuk lain (Others, Websites, …)',nf(hC-fromMeta)],
+      ['CPC',per(sp,hC)],['CTR',pc(hC,im)],['CR',pc(od,hC)],
+      ['% masuk dan klik hilang memakai',`${nf(sC)} ${bySrc?'FB+IG ':''}ke tag beriklan`,1],
+      // Shopee reports no impressions, so there is no CPM either.
+      ['CTR memakai impresi Meta','Shopee tak melaporkan impresi',1]]),
     // Per-tag sum as the headline, the net beside it, and the money as a range:
     // the data cannot tell a misrouted click from outside traffic.
     kpiCard(lost>0?'bad':'','Klik Hilang',nf(lost),
@@ -604,8 +617,14 @@ function renderClickKpi(){
       ...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
       ['Kelebihan di tag lain',`+${nf(gained)}`,1],
       lost>0&&['Biaya: bawah = semua kelebihan dianggap salah tag; atas = tidak ada','',1]]),
-    kpiCard(pctIn<70?'bad':'','% Klik Masuk Shopee',dec(pctIn,1)+'%',
-      pctIn>100?'di atas 100%: ada trafik di luar iklan':'sebagian klik tidak sampai',[
+    // Headline: every click but Shopee Video over Meta's, as adrian reads it.
+    // It includes Shopee-boosted and organic arrivals with no Meta click
+    // behind them, so the leak verdict (colour, Klik Hilang) stays on the
+    // like-for-like ratio printed first underneath.
+    kpiCard(pctIn<70?'bad':'','% Klik Masuk Shopee',mC?dec(hC/mC*100,1)+'%':'—',
+      `${nf(hC)} ÷ ${nf(mC)} · semua klik tanpa Shopee Video`,[
+      [`Per tag beriklan${bySrc?' (FB+IG)':''}`,`<b>${dec(pctIn,1)}%</b>`],
+      [`${nf(adShopee)} ÷ ${nf(adMeta)} · dipakai untuk klik hilang · ${pctIn>100?'di atas 100%: ada trafik di luar iklan':'sebagian klik tidak sampai'}`,'',1],
       [`${gainTags.length} tag kelebihan klik`,`+${nf(gained)} klik`],
       [`${lostTags.length} tag kekurangan klik`,`−${nf(lost)} klik`],
       ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]]));

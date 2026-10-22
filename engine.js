@@ -199,6 +199,11 @@ function attrColumn(rows) {
 }
 
 function cleanTag(t) { return String(t == null ? '' : t).trim().replace(/-+$/, '').trim(); }
+/* Shopee Video traffic carries no sub_id: Shopee fills Platform (commission
+   report) or Perujuk (click report) with "Shopeevideo-Shopee" and leaves the
+   tag empty. It is its own channel, so it gets a name instead of "(tanpa tag)". */
+const SHOPEE_VIDEO = 'Shopee Video';
+function isShopeeVideo(v) { return /^shopee\s*video/i.test(String(v == null ? '' : v).trim()); }
 
 /* Exact means the same letters in the same case. Shopee keeps
    "MaskerDuckbill" (an ad) and "Maskerduckbill" (an organic post) as two
@@ -659,7 +664,7 @@ function analyze(data, options) {
   const offerType = dict(), contentType = dict();
 
   fAff.forEach(r => {
-    const t = cleanTag(pick(r, COL.aff.tag)) || '(tanpa tag)';
+    const t = cleanTag(pick(r, COL.aff.tag)) || (isShopeeVideo(pick(r, COL.aff.platform)) ? SHOPEE_VIDEO : '(tanpa tag)');
     const b = bucket(t);
     const c = num(pick(r, COL.aff.comm));
     const g = num(pick(r, COL.aff.gmv));
@@ -749,7 +754,8 @@ function analyze(data, options) {
      The commission report still decides how a click's joined slots split. */
   const commTags = Object.keys(T).filter(t => t && t !== '(tanpa tag)');
   const commKnown = tagLookup(commTags);
-  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), commKnown));
+  const clickTagOf = fClk.map(r => resolveClickTag(pick(r, COL.clk.tag), commKnown)
+    || (isShopeeVideo(pick(r, COL.clk.src)) ? SHOPEE_VIDEO : null));
   const affiliateTags = [...new Set(commTags.concat(clickTagOf.filter(Boolean)))];
 
   /* ── Ads aggregation + matching, per ad ─────────────────────────────────
@@ -1342,6 +1348,8 @@ function analyze(data, options) {
     avgOrder: allOrders.size > 0 ? sum(t => t.gmv) / allOrders.size : 0,
     commRate: sum(t => t.gmv) > 0 ? totalComm / sum(t => t.gmv) * 100 : 0,
     shopeeClicks: fClk.length,
+    // Kept apart from the Klik Shopee headline: Shopee Video never passes through Meta.
+    shopeeVideoClicks: fClk.filter(r => isShopeeVideo(pick(r, COL.clk.src))).length,
     wasted: wastedHigh, // upper end; same meaning as before, stored in snapshots
     // Lower end: as if every surplus click were a misrouted paid click.
     wastedLow: lostClicks > 0 ? wastedHigh * netLostClicks / lostClicks : 0,
