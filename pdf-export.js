@@ -301,14 +301,18 @@
     // With a Perujuk column the leak compares Meta clicks with Facebook and
     // Instagram arrivals only; every other arrival is shown beside it.
     const bySource = clickTags.some(t => t.shopeeSrc);
-    const arrived = clickTags.reduce((sum, t) => sum + amount(t.shopeeClicks), 0);
-    const otherArrived = clickTags.reduce((sum, t) => sum + (t.shopeeSrc ? amount(t.shopeeSrc.other) : 0), 0);
+    const videoClicks = amount(k.shopeeVideoClicks);
+    const allArrived = Math.max(0, amount(k.shopeeClicks) - videoClicks);
     section('Klik Meta dan Shopee', bySource ? 'Klik hilang membandingkan klik Meta dengan klik Shopee yang perujuknya Facebook/Instagram. Klik dari sumber lain (Others, Websites, ...) dihitung terpisah sebagai Other.' : null);
     metricGrid([
       ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
-      ['Klik Masuk Shopee', hasClickComparison ? integer(arrived) : '-', bySource ? 'FB+IG ' + integer(shopeeClicks) + ' | Other ' + integer(otherArrived) : 'Jendela dan tag sama'],
+      // Every click but Shopee Video, as on the dashboard card; the
+      // like-for-like count the leak uses is printed underneath.
+      ['Klik Masuk Shopee', hasClickComparison ? integer(allArrived) : '-',
+        hasClickComparison ? (bySource ? 'FB+IG tag beriklan ' : 'Tag beriklan ') + integer(shopeeClicks) + (videoClicks ? ' | tanpa Shopee Video' : '') : 'Jendela dan tag sama'],
       ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? 'Per tag; bersih ' + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
-      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), bySource ? 'Shopee FB+IG / Meta' : 'Shopee / Meta'],
+      ['% Klik Masuk Shopee', percent(metaClicks > 0 ? allArrived / metaClicks * 100 : null, hasClickComparison && metaClicks > 0),
+        hasClickComparison && metaClicks > 0 ? 'Per tag beriklan' + (bySource ? ' FB+IG ' : ' ') + percent(shopeeClicks / metaClicks * 100) : 'Shopee / Meta'],
     ], 4);
     section('Prioritas anggaran');
     // Paid tags not judged yet: same definition as the dashboard card. Their

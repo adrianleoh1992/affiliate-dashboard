@@ -1420,6 +1420,8 @@ async function main() {
       return { val: el.querySelector('.val').textContent, sub: el.querySelector('.sub').textContent,
         rows: [...el.querySelectorAll('.krow')].slice(0, 6).map(r => [...r.children].map(c => c.textContent)),
         pct: pct.querySelector('.val').textContent, pctSub: pct.querySelector('.sub').textContent,
+        pctRows: [...pct.querySelectorAll('.krow')].slice(0, 2).map(r => [...r.children].map(c => c.textContent)),
+        pctBad: pct.classList.contains('bad'),
         sv: sv && [sv.shopeeClicks, sv.orders], untagged: RESULT.tags.some(t => t.tag === '(tanpa tag)') };
     });
     assert.equal(card.val, '85');
@@ -1429,8 +1431,11 @@ async function main() {
       ['boost Shopee atau organik: Boosted 7', ''], ['Perujuk lain (Others, Websites, …)', '8']]);
     assert.deepEqual(card.sv, [4, 1], 'untagged Shopee Video clicks and orders land on one named tag');
     assert.equal(card.untagged, false);
-    assert.equal(card.pct, '70,0%', '% masuk still compares FB+IG on advertised tags with Meta');
-    assert.match(card.pctSub, /^70 ÷ 100 · /);
+    assert.equal(card.pct, '85,0%', 'headline is every click but Shopee Video over Meta clicks');
+    assert.equal(card.pctSub, '85 ÷ 100 · semua klik tanpa Shopee Video');
+    assert.deepEqual(card.pctRows[0], ['Per tag beriklan (FB+IG)', '70,0%'], 'like-for-like ratio sits right under it');
+    assert.match(card.pctRows[1][0], /^70 ÷ 100 · dipakai untuk klik hilang/);
+    assert.equal(card.pctBad, false, 'colour follows the like-for-like ratio (70% is not below 70)');
   });
 
   test('placement rows under Spend Iklan include PPN and add up to the headline', async page => {

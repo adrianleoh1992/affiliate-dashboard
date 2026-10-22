@@ -617,8 +617,14 @@ function renderClickKpi(){
       ...lostTags.slice(0,4).map(t=>[t.tag,`−${nf(t.leak.metaClicks-t.leak.shopeeClicks)}`]),
       ['Kelebihan di tag lain',`+${nf(gained)}`,1],
       lost>0&&['Biaya: bawah = semua kelebihan dianggap salah tag; atas = tidak ada','',1]]),
-    kpiCard(pctIn<70?'bad':'','% Klik Masuk Shopee',dec(pctIn,1)+'%',
-      `${nf(adShopee)} ÷ ${nf(adMeta)} · ${pctIn>100?'di atas 100%: ada trafik di luar iklan':'sebagian klik tidak sampai'}`,[
+    // Headline: every click but Shopee Video over Meta's, as adrian reads it.
+    // It includes Shopee-boosted and organic arrivals with no Meta click
+    // behind them, so the leak verdict (colour, Klik Hilang) stays on the
+    // like-for-like ratio printed first underneath.
+    kpiCard(pctIn<70?'bad':'','% Klik Masuk Shopee',mC?dec(hC/mC*100,1)+'%':'—',
+      `${nf(hC)} ÷ ${nf(mC)} · semua klik tanpa Shopee Video`,[
+      [`Per tag beriklan${bySrc?' (FB+IG)':''}`,`<b>${dec(pctIn,1)}%</b>`],
+      [`${nf(adShopee)} ÷ ${nf(adMeta)} · dipakai untuk klik hilang · ${pctIn>100?'di atas 100%: ada trafik di luar iklan':'sebagian klik tidak sampai'}`,'',1],
       [`${gainTags.length} tag kelebihan klik`,`+${nf(gained)} klik`],
       [`${lostTags.length} tag kekurangan klik`,`−${nf(lost)} klik`],
       ['Selisih bersih',`${adShopee-adMeta>=0?'+':''}${nf(adShopee-adMeta)} klik`]]));
