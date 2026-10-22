@@ -193,6 +193,8 @@
     const numericKeys = result.type === 'affiliate' ? ['comm', 'commNet', 'gmv', 'refund', 'price', 'qty', 'rate'] : isAds ? ['spend', 'clicks', 'impr', 'reach', 'freq', 'cpm', 'ctr', 'lpv', 'results', 'shopClicks', 'allClicks'] : [];
     const numeric = new Map();
     numericKeys.forEach(key => col[key].filter(name => fields.includes(name)).forEach(name => numeric.set(name, key)));
+    // The synthesized Link clicks column is filled from Results below, so it is never "blank".
+    if (clicksFromResults) numeric.delete(col.clicks[0]);
     const countKeys = new Set(['qty', 'clicks', 'impr', 'reach', 'lpv', 'results', 'shopClicks', 'allClicks']);
     let start = '', end = '', nonDaily = false;
     records.forEach((cells, index) => {

@@ -307,7 +307,7 @@
     metricGrid([
       ['Klik Meta', hasAds ? integer(hasClickComparison ? metaClicks : k.clicks) : '-', hasClickComparison ? 'Pada jendela klik' : 'Pada periode analisis'],
       ['Klik Masuk Shopee', hasClickComparison ? integer(arrived) : '-', bySource ? 'FB+IG ' + integer(shopeeClicks) + ' | Other ' + integer(otherArrived) : 'Jendela dan tag sama'],
-      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? (bySource ? 'FB+IG, per tag; bersih ' : 'Per tag; bersih ') + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
+      ['Klik Hilang', hasClickComparison ? integer(lostClicks) : '-', hasClickComparison ? 'Per tag; bersih ' + integer(netLost) : 'Jumlah per tag', lostClicks > 0],
       ['% Klik Masuk Shopee', percent(metaClicks > 0 ? shopeeClicks / metaClicks * 100 : null, hasClickComparison && metaClicks > 0), bySource ? 'Shopee FB+IG / Meta' : 'Shopee / Meta'],
     ], 4);
     section('Prioritas anggaran');
@@ -465,11 +465,13 @@
     section('Klik, biaya per klik, dan komisi per tag', 'Semua tag dengan biaya atau komisi; nilai uang (Rp) dibulatkan ke rupiah terdekat. Klik masuk Shopee = semua perujuk pada jendela laporan klik. CPC Shopee dan klik hilang memakai jendela itu; klik hilang = klik Meta yang tidak tercatat sebagai klik Shopee' + (bySource ? ' dari Facebook/Instagram' : '') + ', tanda + berarti Shopee mencatat lebih banyak. LP view hanya informasi: Meta jarang melihat aplikasi Shopee terbuka. Langsung/tidak langsung: jumlah pesanan (order) dan komisi laporan menurut kolom Tipe Pesanan.');
     // One value per cell, money as whole rupiah with Rp and counts plain, so every row stays on one line.
     // Rounded from the arriving share itself, like the link note, so the two add up to 100.
-    // A tag's leak rounds from the arriving share, as the dashboard note does;
-    // a plain share (platform rows) rounds as it is.
+    // Takes a tag's leak or a platform's lost share. Both round from the
+    // arriving share, as the dashboard does, so "hanya 8%" sits beside 92%.
     const lost = v => {
-      const r = v && typeof v === 'object' ? (finite(v.pct) ? 100 - Math.round(v.pct) : null) : finite(v) ? Math.round(v) : null;
-      return r == null ? '-' : r < 0 ? '+' + integer(-r) + '%' : integer(r) + '%';
+      const arrived = v && typeof v === 'object' ? v.pct : finite(v) ? 100 - v : null;
+      if (!finite(arrived)) return '-';
+      const r = 100 - Math.round(arrived);
+      return r < 0 ? '+' + integer(-r) + '%' : integer(r) + '%';
     };
     const rupiah = (v, ok = true) => (ok && amount(v) !== 0 ? 'Rp ' + integer(Math.round(amount(v))) : '-');
     const split = attribution.column;

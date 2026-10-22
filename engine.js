@@ -1072,12 +1072,16 @@ function analyze(data, options) {
       // Meta ad; shares (Others, WhatsApp, …) would otherwise hide a broken link.
       const shopee = hasClickSrc ? b.shopeeSrc.fb + b.shopeeSrc.ig : b.shopeeClicks;
       const pct = shopee / b.metaClicksWindow * 100;
+      // Too many arrivals is judged on every source: the tag's commission
+      // includes the orders shared and organic clicks bring, so its ROAS is an
+      // upper bound whichever referrer they came through.
+      const allPct = b.shopeeClicks / b.metaClicksWindow * 100;
       const failed = Math.max(b.metaClicksWindow - shopee, 0);
       const wasted = (winSpend / b.metaClicksWindow) * failed;
       leak = {
-        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, failed, wasted,
+        metaClicks: b.metaClicksWindow, shopeeClicks: shopee, pct, allPct, failed, wasted,
         reliable: b.metaClicksWindow >= LINK.minClicks,
-        severity: pct < LINK.low ? 'bad' : pct < LINK.warn ? 'warn' : pct > LINK.over ? 'over' : 'ok',
+        severity: pct < LINK.low ? 'bad' : pct < LINK.warn ? 'warn' : allPct > LINK.over ? 'over' : 'ok',
       };
     }
 
@@ -1144,7 +1148,7 @@ function analyze(data, options) {
     const checkFirst = v.status === 'stop' ? ' sebelum dimatikan' : '';
     const linkTone = leak && leak.reliable && leak.severity === 'bad' || capture && capture.low ? 'bad'
       : leak && leak.reliable && leak.severity === 'over' ? 'over' : '';
-    const linkNote = linkTone === 'over' ? `klik Shopee ${Math.round(leak.pct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas`
+    const linkNote = linkTone === 'over' ? `klik Shopee ${Math.round(leak.allPct)}% dari klik iklan — ROAS memuat trafik lain, anggap batas atas`
       : linkTone !== 'bad' ? ''
       : leak && leak.reliable && leak.severity === 'bad' ? `hanya ${Math.round(leak.pct)}% klik sampai Shopee — cek link${checkFirst}`
       : `klik masuk rendah: hanya ${Math.round(capture.pct)}% klik iklan sampai Shopee selama iklan jalan — cek link${checkFirst}`;
@@ -1653,5 +1657,6 @@ return {
   DEFAULTS, normalizeOptions, analyze, stability, detectFileType, matchAdToTag, toSnapshot, buildTrend,
   normalize, escapeHtml, num, int, dayOnly, hourOf, isDate, addDays, diffDays,
   cleanTag, attrKind, attrColumn, resolveClickTag, strictKey, tagLookup, intactAdId, idAgrees, COL, pick, topOf, variantOf, variantClash, overlapScore,
+  LINK,
 };
 });

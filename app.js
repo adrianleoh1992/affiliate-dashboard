@@ -740,7 +740,7 @@ function renderPlacement(){
   const spendAll=P.total.spend;
   const srcNames=(P.otherSources||[]).slice(0,4).map(o=>`${o.source} ${nf(o.shopeeClicks)}`).join(' · ')+((P.otherSources||[]).length>4?` · +${P.otherSources.length-4} lain`:'');
   head('tblPlcPlat',['Platform','Biaya','% biaya','Klik Meta','CPC Meta','Klik Shopee','CPC Shopee','Klik hilang','Pesanan','Komisi','ROAS','Laba']);
-  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${p.platform===Placement.OTHER?`<button class="attr-open${PLC_OTHER_OPEN.has('plat')?' open':''}" data-other="plat" aria-expanded="${PLC_OTHER_OPEN.has('plat')}" title="Lihat tag asal klik Other">${esc(p.platform)}<span class="exp" aria-hidden="true">▸</span></button>`:esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(p.lost,'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`
+  const platRow=p=>`<tr${p.platform==='Total'?' class="total"':''}><td>${p.platform===Placement.OTHER?`<button class="attr-open${PLC_OTHER_OPEN.has('plat')?' open':''}" data-other="plat" aria-expanded="${PLC_OTHER_OPEN.has('plat')}" title="Lihat tag asal klik Other">${esc(p.platform)}<span class="exp" aria-hidden="true">▸</span></button>`:esc(p.platform)}${p.platform===Placement.OTHER&&srcNames?`<small class="src-other">${esc(srcNames)}</small>`:''}</td>${money(p.spend)}${pct(spendAll?p.spend/spendAll*100:null,0)}${count(p.clicks)}${money(p.cpc)}${count(p.shopeeClicks)}${money(p.cpcShopee)}${p.platform===Placement.OTHER||!P.hasClicks?'<td class="num">—</td>':lostCell(platformLeak(p),'Klik Meta yang tidak tercatat di Shopee pada platform ini')}${count(p.orders)}${money(p.comm)}${roasCell(p.roas)}<td class="num ${p.net>=0?'pos':'neg'}">${p.spend?rp(p.net):'—'}</td></tr>`
     +(p.platform===Placement.OTHER&&PLC_OTHER_OPEN.has('plat')?`<tr class="daydetail"><td colspan="12">${plcOtherTags()}</td></tr>`:'');
   $('tblPlcPlat').querySelector('tbody').innerHTML=P.platforms.map(platRow).join('');
   $('tblPlcPlat').querySelector('tfoot').innerHTML=platRow(P.total);
@@ -865,7 +865,11 @@ function lostCell(t,tip){if(t==null||typeof t!=='object')return lostPctCell(t,ti
   return`<td class="num ${cls}" title="${tip}${wait}">${r<0?'+'+nf(-r)+'% lebih':nf(r)+'%'}</td>`}
 /* A plain share with no per-tag link verdict behind it, such as a platform
    total in the placement card. */
-function lostPctCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'';return`<td class="num ${cls}" title="${tip}">${v<0?'+'+Math.abs(v).toFixed(0)+'% lebih':v.toFixed(0)+'%'}</td>`}
+function lostPctCell(v,tip){if(v==null||!isFinite(v))return'<td class="num">—</td>';const cls=v>=50?'neg':v<=10?'pos':'',r=100-Math.round(100-v);return`<td class="num ${cls}" title="${tip}">${r<0?'+'+nf(-r)+'% lebih':nf(r)+'%'}</td>`}
+/* A platform total judged like a tag's link: same thresholds, and only from
+   300 Meta clicks, so the placement card and the tag table colour alike. */
+function platformLeak(p){if(p.lost==null||!isFinite(p.lost))return null;const a=100-p.lost,L=E.LINK;
+  return{lostTotal:p.lost,leak:{pct:a,metaClicks:p.clicks,reliable:p.clicks>=L.minClicks,severity:a<L.low?'bad':a<L.warn?'warn':a>L.over?'over':'ok'}}}
 /* Every Shopee click on the tag inside the click report window. The tooltip
    splits it by Perujuk; the platform card has the full Facebook/Instagram/Other
    breakdown. */
@@ -933,7 +937,8 @@ function renderLeak(){
   const r=RESULT.range;
   $('leakRange').textContent=r.clickStart?`Klik report ${r.clickStart} s/d ${r.clickEnd}`:'Click report belum dimuat';
   const rows=RESULT.tags.filter(t=>t.leak&&isFinite(t.leak.pct));
-  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta','Klik Shopee','± Klik','% Masuk','Biaya Klik Kurang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
+  const bySrc=RESULT.tags.some(t=>t.shopeeSrc);
+  $('tblLeak').querySelector('thead').innerHTML='<tr>'+['Tag','Klik Meta',bySrc?'Klik Shopee FB+IG':'Klik Shopee','± Klik','% Masuk','Biaya Klik Kurang','Catatan'].map((h,i)=>`<th class="${i&&i<6?'num':''}">${h}</th>`).join('')+'</tr>';
   $('tblLeak').querySelector('tbody').innerHTML=rows.length?rows.sort((a,b)=>a.leak.pct-b.leak.pct).map(t=>{
     const L=t.leak;
     // Signed, because the two directions mean different things: missing clicks
@@ -944,7 +949,7 @@ function renderLeak(){
     const note=!L.reliable?`Belum bisa dinilai: ${nf(L.metaClicks)} klik iklan (perlu ±300)`
       : L.severity==='bad'?'Kurang dari 25% klik sampai — periksa link'
       : L.severity==='warn'?'Sebagian klik tidak sampai; wajar bila klik sangat murah'
-      : L.severity==='over'?'Jauh di atas klik iklan — ada trafik lain (organik, akun lain, atau iklan lain yang salah tag). ROAS tag ini batas atas'
+      : L.severity==='over'?(bySrc?`Semua perujuk ${nf(Math.round(L.allPct))}% dari klik iklan`:'Jauh di atas klik iklan')+' — ada trafik lain (organik, akun lain, atau iklan lain yang salah tag). ROAS tag ini batas atas'
       : d>0?'Sedikit di atas klik iklan':d<0?'Selisih kecil, wajar':'Pas dengan klik berbayar';
     return `<tr><td><b>${esc(t.tag)}</b></td><td class="num">${nf(L.metaClicks)}</td><td class="num">${nf(L.shopeeClicks)}</td>
       <td class="num ${d<0?'neg':d>0?'pos':''}">${d>0?'+':''}${nf(d)}</td>

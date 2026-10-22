@@ -184,11 +184,14 @@ assert.equal(analyze({ ads: [ad('2026-08-01', 100, { 'Ad delivery': 'tidak aktif
 // spec values are per day, so 4 days of 160 Meta clicks make 640.
 function linkFixture(spec, days) {
   const affiliate = [], ads = [], clicks = [];
+  // With `other` on any tag the clicks carry Perujuk: ad arrivals as Facebook.
+  const bySource = Object.values(spec).some(s => s.other);
   for (let i = 1; i <= days; i++) {
     const date = '2026-08-0' + i;
     for (const [tag, s] of Object.entries(spec)) {
       ads.push(ad(date, s.spend, { 'Ad name': tag, 'Link clicks': s.meta }));
-      for (let c = 0; c < s.shopee; c++) clicks.push(click(date, { 'Tag_link': tag }));
+      for (let c = 0; c < s.shopee; c++) clicks.push(click(date, { 'Tag_link': tag, ...(bySource ? { Perujuk: 'Facebook' } : {}) }));
+      for (let c = 0; c < (s.other || 0); c++) clicks.push(click(date, { 'Tag_link': tag, Perujuk: 'Others' }));
       const comm = typeof s.comm === 'function' ? s.comm(i) : s.comm;
       if (comm) affiliate.push(aff(tag + i, comm, { 'Tag_link1': tag,
         'Waktu Pemesanan': date + ' 10:00:00', 'Waktu Klik': date + ' 09:00:00' }));
@@ -237,6 +240,21 @@ near(health.actions.leakWasteLive, H.LiveLeak.leak.wasted);
 assert.equal(health.actions.leakStopCount, 1);
 assert.equal(health.actions.leakLiveCount, 1);
 near(health.actions.leakWasteLive + health.actions.leakWasteStop, health.actions.leakWaste);
+// With a Perujuk column a broken link is judged on Facebook/Instagram arrivals,
+// so shares cannot hide it, but too many arrivals is judged on every source:
+// the orders shared clicks bring are in the tag's commission too.
+const sourced = linkFixture({
+  Shared: { spend: 1000, meta: 100, shopee: 95, other: 150, comm: 5000 }, // 95% from FB+IG, 245% in all
+  Hidden: { spend: 1000, meta: 100, shopee: 10, other: 200, comm: 5000 }, // 10% from FB+IG behind 200 shares
+}, 4);
+const S = Object.fromEntries(sourced.tags.map(t => [t.tag, t]));
+near(S.Shared.leak.pct, 95);
+near(S.Shared.leak.allPct, 245);
+assert.equal(S.Shared.leak.severity, 'over');
+assert.equal(S.Shared.linkNote, 'klik Shopee 245% dari klik iklan — ROAS memuat trafik lain, anggap batas atas');
+assert.equal(S.Hidden.leak.severity, 'bad');
+assert.equal(S.Hidden.linkNote, 'hanya 10% klik sampai Shopee — cek link');
+near(H.Outside.leak.allPct, H.Outside.leak.pct); // without Perujuk both shares are the same
 // STOP money: loss, commission and spend reported apart; the tail adds profit changes only.
 assert.equal(H.Faded.status, 'stop');
 assert.equal(health.actions.stopCount, 2);

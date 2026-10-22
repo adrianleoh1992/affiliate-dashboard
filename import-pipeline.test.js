@@ -243,6 +243,7 @@ test('export without Link clicks reads Meta clicks from link_click Results', () 
   assert.deepEqual(r.rows.map(row => row['Link clicks']), [42, 0, '']);
   assert.ok(hasIssue(r, 'link_clicks_from_results'));
   assert.ok(hasIssue(r, 'link_clicks_unknown'));
+  assert.ok(!r.issues.some(i => i.code === 'empty_optional_number' && i.column === 'Link clicks'), 'clicks read from Results are not reported as blank');
   assert.ok(!hasIssue(r, 'optional_columns_missing') || !r.issues.find(i => i.code === 'optional_columns_missing').message.includes('Link clicks'));
   const result = E.analyze({ affiliate: [], ads: r.rows, clicks: [] });
   assert.equal(result.tags.reduce((sum, tag) => sum + tag.clicks, 0), 42);

@@ -630,6 +630,8 @@ async function main() {
       assert.deepEqual(platform.map(row => row[0]), ['Facebook', 'Instagram', 'Other', 'Total']);
       assert.equal(platform[2][4], '9', 'Other row carries its Shopee clicks');
       assert.equal(platform[2][5], '-', 'Other has no lost-click figure');
+      // 70 of 80 arrived is 87,5%: the dashboard shows 12% lost, so the PDF does too (not 13%).
+      assert.deepEqual(platform.map(row => row[5]), ['12%', '25%', '-', '6%']);
       const place = report.tables['Platform|Placement'][0];
       assert.deepEqual(place[place.length - 1].slice(0, 2), ['Other', 'Bukan placement Meta']);
       assert.equal(place[place.length - 1][8], 'Rp 55');

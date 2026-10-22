@@ -473,6 +473,37 @@ async function main() {
     assert.equal(await page.locator('#tblPlcPlat tr.daydetail').count(), 0);
   });
 
+  test('platform rows take the link verdict colours of the tag table', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 80, 400), plc('Instagram', 'Instagram Reels', 20, 100)] },
+      { name: 'clicks.csv', rows: Array.from({ length: 40 }, (_, i) => from(i, 'Facebook')) }]);
+    const lostAt = await page.evaluate(() => [...document.querySelectorAll('#tblPlcPlat thead th')].findIndex(th => th.textContent === 'Klik hilang'));
+    const cell = name => page.locator('#tblPlcPlat tbody tr', { hasText: name }).first().locator('td').nth(lostAt);
+    // 40 of 400 arrived: judged, and red like a tag's "cek link".
+    assert.equal(await cell('Facebook').innerText(), '90%');
+    assert.match(await cell('Facebook').getAttribute('class'), /leak-bad/);
+    // 100 Meta clicks is under the 300-click floor: shown, not judged.
+    assert.equal(await cell('Instagram').innerText(), '100%');
+    assert.doesNotMatch(await cell('Instagram').getAttribute('class'), /leak-|neg|pos/);
+    assert.match(await cell('Instagram').getAttribute('title'), /belum dinilai: 100 klik iklan/);
+  });
+
+  test('shared clicks that lift a tag over its ad clicks are named with every source', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1', 'Alpha')] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 100), 'Link clicks': '300' }] },
+      { name: 'clicks.csv', rows: Array.from({ length: 735 }, (_, i) => from(i, i < 285 ? 'Facebook' : 'Others')) }]);
+    // 285 of 300 from Facebook is a healthy link; with 450 shares the tag's ROAS is an upper bound.
+    assert.match(await page.locator('#tblMain tbody tr').first().locator('.rs').innerText(), /klik Shopee 245% dari klik iklan — ROAS memuat trafik lain/);
+    assert.match(await page.locator('#tblLeak thead').innerText(), /Klik Shopee FB\+IG/);
+    const row = await page.locator('#tblLeak tbody tr').first().innerText();
+    assert.match(row, /285[\s\S]*95,0%[\s\S]*Semua perujuk 245% dari klik iklan — ada trafik lain/);
+  });
+
   test('renamed reports and overlapping CSV rows cannot inflate totals', async page => {
     await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
     const row1 = aff('1'), row2 = aff('2');
