@@ -358,7 +358,7 @@ async function main() {
     assert.equal(Number(rows.Half.note.match(/hanya (\d+)%/)[1]) + Number(rows.Half.text.replace('%', '')), 100, rows.Half.note + ' beside ' + rows.Half.text);
     // The Klik tab marks the same tags the same way.
     const leakTab = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#tblLeak tbody tr')].map(tr =>
-      [tr.querySelector('td').textContent, [...tr.querySelectorAll('td')[4].classList].filter(c => c !== 'num')])));
+      [tr.querySelector('td b').textContent, [...tr.querySelectorAll('td')[4].classList].filter(c => c !== 'num')])));
     for (const tag of ['Broken', 'Warn', 'Tiny', 'Over', 'Fine', 'Half']) assert.deepEqual(leakTab[tag], rows[tag].cls, tag + ' matches the Klik tab');
     // A healthy period total beside a "klik masuk rendah" note (days the ad ran) is not painted green.
     assert.doesNotMatch(await page.evaluate(() => lostCell({ lostTotal: 5, leak: { reliable: true, severity: 'ok', metaClicks: 900 },
@@ -489,6 +489,111 @@ async function main() {
     assert.equal(await cell('Instagram').innerText(), '100%');
     assert.doesNotMatch(await cell('Instagram').getAttribute('class'), /leak-|neg|pos/);
     assert.match(await cell('Instagram').getAttribute('title'), /belum dinilai: 100 klik iklan/);
+  });
+
+  test('a tag in the click table opens its placements with spend, clicks and commission', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, spend, clicks, impr) => ({ ...ad('Alpha', spend), Platform: platform, Placement: placement, 'Link clicks': String(clicks), Impressions: String(impr) });
+    const from = (i, p) => ({ ...click(), 'Klik ID': 'k' + i, Perujuk: p });
+    const shopee = [['Facebook', 250], ['Instagram', 200], ['Others', 30]].flatMap(([p, n]) => Array.from({ length: n }, () => p));
+    await upload(page, [
+      { name: 'affiliate.csv', rows: [aff('1'), aff('2'), aff('3'), { ...aff('4'), Platform: 'Instagram' }, { ...aff('5'), Platform: 'Instagram' }, { ...aff('6'), Platform: 'Others' }] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 130000), 'Link clicks': '1170' }] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 60000, 300, 20000), plc('Facebook', 'Facebook Stories', 20000, 200, 9000),
+        plc('Instagram', 'Instagram Stories', 30000, 400, 8000), plc('Instagram', 'Instagram Reels', 15000, 120, 6000),
+        plc('Audience Network', 'Native, banner and interstitial', 5000, 150, 30000)] },
+      { name: 'clicks.csv', rows: shopee.map((p, i) => from(i, p)) }]);
+    await page.locator('[data-tab="klik"]').click();
+    // Spend, commission and profit sit on the tag row, so it reads without opening.
+    const head = (await page.locator('#tblLeak > thead th').allInnerTexts()).map(s => s.trim().toUpperCase());
+    assert.deepEqual(head.slice(6, 9), ['BIAYA', 'KOMISI EFEKTIF', 'LABA']);
+    const tagRow = page.locator('#tblLeak > tbody > tr').first().locator('td');
+    assert.deepEqual((await tagRow.allInnerTexts()).slice(6, 9).map(s => s.trim()), ['Rp130rb', 'Rp1rb', '-Rp129rb']);
+    assert.match(await tagRow.nth(8).getAttribute('class'), /neg/);
+    const button = page.locator('#tblLeak button[data-leak-tag="Alpha"]');
+    assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    await button.click();
+    assert.equal(await button.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.leakTag), 'Alpha', 'opening keeps focus on the tag');
+    const detail = page.locator('#tblLeak > tbody > tr.daydetail');
+    const row = async name => (await detail.locator('tr', { hasText: name }).first().locator('td').allInnerTexts()).map(s => s.trim());
+    // Arrivals are real per platform: 250 of 500 Facebook clicks, judged like the tag row.
+    assert.deepEqual(await row('Facebook'), ['Facebook', 'Rp80.000', '500', '43%', '1,72%', 'Rp160', '250', '50,0%', 'Rp600', '0,01x']);
+    assert.match(await detail.locator('tr.plc-plat', { hasText: 'Facebook' }).locator('td').nth(7).getAttribute('class'), /leak-warn/);
+    assert.deepEqual(await row('Instagram Stories'), ['Instagram Stories', 'Rp30.000', '400', '34%', '5,00%', 'Rp75', '—', '—', 'Rp308', '0,01x'],
+      'a placement has no Shopee arrivals of its own; its commission is the platform split by click share');
+    assert.equal((await row('Facebook Stories'))[8], 'Rp240');
+    assert.deepEqual((await row('Lainnya')).slice(6, 8), ['—', '—'], 'Audience Network arrivals land under Other, so no % is claimed');
+    assert.deepEqual((await row('Other (bukan FB/IG)')).slice(-4), ['30', '—', 'Rp200', '—']);
+    const total = (await detail.locator('tfoot td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(total, ['Total tag', 'Rp130.000', '1.170', '100%', '1,60%', 'Rp111', '450', '38,5%', 'Rp1.200', '0,01x']);
+    assert.equal(await page.locator('#tblLeak > tbody > tr').first().locator('td').nth(4).innerText(), '38,5%', 'the total matches the tag row');
+    assert.match(await detail.innerText(), /Shopee hanya mencatat asal klik per platform/);
+    // The opened box moves with its row when the table is sorted, and closes again.
+    await page.locator('#tblLeak > thead th', { hasText: 'Klik Meta' }).click();
+    assert.equal(await page.evaluate(() => document.querySelector('#tblLeak button[data-leak-tag="Alpha"]').closest('tr').nextElementSibling.className), 'daydetail');
+    await button.focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await detail.count(), 0);
+    assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.leakTag), 'Alpha', 'a sorted table keeps focus on the tag');
+    // Biaya carries PPN like every other spend figure, and stays open across a recalculation.
+    await button.click();
+    await setPpn(page, '11');
+    assert.deepEqual((await row('Facebook')).slice(0, 2), ['Facebook', 'Rp88.800']);
+  });
+
+  test('the placement box in the click table says what is missing', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1')] }, { name: 'ads.csv', rows: [ad('Alpha', 100)] }, { name: 'clicks.csv', rows: [click()] }]);
+    await page.locator('[data-tab="klik"]').click();
+    await page.locator('#tblLeak button[data-leak-tag="Alpha"]').click();
+    assert.match(await page.locator('#tblLeak tr.daydetail').innerText(), /Unggah file Meta Ads per placement/);
+    // A whole-period file outside the click report: Meta numbers show, arrivals do not.
+    const week = { ...ad('Alpha', 700), 'Reporting starts': '2026-07-25', 'Reporting ends': '2026-07-31', Platform: 'Facebook', Placement: 'Feed', 'Link clicks': '70' };
+    await upload(page, [{ name: 'placement.csv', rows: [week] }]);
+    const text = await page.locator('#tblLeak tr.daydetail').innerText();
+    assert.match(text, /Facebook\tRp700\t70\t100%/);
+    assert.match(text, /Total tag\tRp700\t70\t100%\t[^\t]+\tRp10\t—\t—/);
+    assert.match(text, /2026-07-25 s\/d 2026-07-31 tidak berada di dalam periode laporan klik \(2026-08-01 s\/d 2026-08-01\)/);
+  });
+
+  test('without Perujuk the placement box compares arrivals for the whole tag only', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const plc = (platform, placement, clicks) => ({ ...ad('Alpha', clicks * 100), Platform: platform, Placement: placement, 'Link clicks': String(clicks) });
+    const { Platform, ...noPlatform } = aff('1');
+    await upload(page, [{ name: 'affiliate.csv', rows: [noPlatform] },
+      { name: 'ads.csv', rows: [{ ...ad('Alpha', 50000), 'Link clicks': '500' }] },
+      { name: 'placement.csv', rows: [plc('Facebook', 'Feed', 300), plc('Instagram', 'Instagram Stories', 200)] },
+      { name: 'clicks.csv', rows: Array.from({ length: 460 }, (_, i) => { const { Perujuk, ...c } = click(); return { ...c, 'Klik ID': 'k' + i }; }) }]);
+    await page.locator('[data-tab="klik"]').click();
+    await page.locator('#tblLeak button[data-leak-tag="Alpha"]').click();
+    const box = page.locator('#tblLeak tr.daydetail');
+    const fb = (await box.locator('tr.plc-plat').first().locator('td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(fb.slice(6), ['—', '—', '—', '—'], 'no platform arrivals, and no ROAS without a Platform column');
+    assert.equal(await box.locator('tr.plc-other').count(), 0);
+    const total = (await box.locator('tfoot td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(total.slice(6, 8), ['460', '92,0%'], 'the total matches the tag row');
+    assert.match(await box.innerText(), /Laporan klik tanpa kolom Perujuk/);
+  });
+
+  test('placements under a tag in the click table cover only the click report days', async page => {
+    await page.evaluate(() => { document.getElementById('ppn').value = '0'; });
+    const feed = date => ({ ...ad('Alpha', 100, date), Platform: 'Facebook', Placement: 'Feed' });
+    await upload(page, [{ name: 'affiliate.csv', rows: [aff('1')] },
+      { name: 'ads.csv', rows: [ad('Alpha', 100, '2026-07-31'), ad('Alpha', 100)] },
+      { name: 'placement.csv', rows: [feed('2026-07-31'), feed('2026-08-01')] },
+      { name: 'clicks.csv', rows: Array.from({ length: 5 }, (_, i) => ({ ...click(), 'Klik ID': 'k' + i })) }]);
+    await page.locator('[data-tab="klik"]').click();
+    await page.locator('#tblLeak button[data-leak-tag="Alpha"]').click();
+    // The click report holds 1 Aug only: the tag row and its placements both count that day.
+    assert.equal(await page.locator('#tblLeak > tbody > tr').first().locator('td').nth(1).innerText(), '10');
+    // 31 Jul spend is outside the click report: the row's profit counts 1 Aug only.
+    const money = (await page.locator('#tblLeak > tbody > tr').first().locator('td').allInnerTexts()).slice(6, 9).map(s => s.trim());
+    assert.deepEqual(money, ['Rp100', 'Rp200', 'Rp100']);
+    const fb = (await page.locator('#tblLeak tr.daydetail tr.plc-plat').first().locator('td').allInnerTexts()).map(s => s.trim());
+    assert.deepEqual(fb.slice(0, 3).concat(fb.slice(6, 8)), ['Facebook', 'Rp100', '10', '5', '50,0%']);
+    assert.match(await page.locator('#tblLeak tr.daydetail .dayhead').innerText(), /2026-08-01 s\/d 2026-08-01/);
   });
 
   test('shared clicks that lift a tag over its ad clicks are named with every source', async page => {
@@ -1169,8 +1274,8 @@ async function main() {
     // The Klik tab is hidden, so read textContent and class names, not innerText.
     const rows = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#tblLeak tbody tr')].map(tr => {
       const cells = tr.querySelectorAll('td');
-      return [cells[0].textContent, { pct: [...cells[4].classList], marked: tr.querySelectorAll('[class*="leak-"]').length,
-        note: cells[6].textContent }];
+      return [cells[0].querySelector('b').textContent, { pct: [...cells[4].classList], marked: tr.querySelectorAll('[class*="leak-"]').length,
+        note: cells[9].textContent }];
     })));
     // Tiny is under 25% like Broken; only the sample size keeps it unjudged.
     assert.deepEqual(rows.Tiny, { pct: ['num'], marked: 0, note: 'Belum bisa dinilai: 299 klik iklan (perlu ±300)' });

@@ -53,3 +53,32 @@ test('daily rows follow the date filter; unmatched ads stay visible', () => {
 test('no placement rows gives no breakdown', () => {
   assert.equal(P.analyze({ placement: [] }), null);
 });
+
+test('ads sharing a name join their own tags by Ad ID, never the bigger one', () => {
+  const ids = ['120000000000001', '120000000000002'];
+  const log = [{ adName: 'Video1', adId: ids[0], tag: 'Alpha', spend: 100 }, { adName: 'Video1', adId: ids[1], tag: 'Beta', spend: 50 }];
+  const r = P.analyze({
+    placement: [{ ...row('Video1', 'Facebook', 'Feed', 100, 40), 'Ad ID': ids[0] }, { ...row('Video1', 'Facebook', 'Facebook Stories', 50, 40), 'Ad ID': ids[1] },
+      row('Video1', 'Instagram', 'Instagram Stories', 30, 10)],
+    affiliate: [], clicks: [click('Alpha', 'Facebook'), click('Beta', 'Facebook')], matchLog: log,
+  });
+  const tag = name => r.tags.find(t => t.tag === name);
+  assert.deepEqual(tag('Alpha').placements.map(p => p.placement), ['Feed']);
+  assert.deepEqual(tag('Beta').placements.map(p => p.placement), ['Facebook Stories']);
+  assert.equal(tag('Beta').platforms.Facebook.shopeeClicks, 1);
+  // A row without an ID whose name belongs to two tags is left unmatched.
+  assert.equal(tag(P.UNMATCHED).spend, 30);
+});
+
+test('WhatsApp shares stay Other; a click report without Perujuk says so', () => {
+  const r = P.analyze({
+    placement: [row('Ad A', 'Facebook', 'Feed', 100, 10)],
+    affiliate: [order('1', 'Alpha', 'WhatsApp', 300)], clicks: [click('Alpha', 'WhatsApp')], matchLog,
+  });
+  const alpha = r.tags.find(t => t.tag === 'Alpha');
+  assert.equal(alpha.platforms.Lainnya, undefined);
+  assert.equal(alpha.platforms[P.OTHER].comm, 300);
+  assert.equal(r.hasClickSrc, true);
+  const bare = P.analyze({ placement: [row('Ad A', 'Facebook', 'Feed', 100, 10)], affiliate: [], clicks: [{ ...click('Alpha', ''), Perujuk: undefined }], matchLog });
+  assert.equal(bare.hasClickSrc, false);
+});
