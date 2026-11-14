@@ -122,9 +122,16 @@ test('unknown files and headers-only exports return actionable errors', () => {
 });
 
 test('invalid byte decoding and binary masquerading as CSV fail safely', () => {
-  for (const content of ['abc\0def', 'abc\uFFFDdef']) {
-    assert.ok(hasIssue(I.parseText(content), 'invalid_encoding'));
-  }
+  assert.ok(hasIssue(I.parseText('abc\0def'), 'invalid_encoding'));
+});
+
+test('a U+FFFD written by the exporter (Shopee product name) only warns', () => {
+  const r = parse([aff({ 'Nama Barange': 'Tas Wanita' }), aff({ 'ID Pemesanan': '002', 'Nama Barange': 'Tas \uFFFD Wanita' })]);
+  assert.equal(r.ok, true);
+  assert.equal(r.fatal, false);
+  assert.equal(r.stats.accepted, 2);
+  assert.ok(!hasIssue(r, 'invalid_encoding'));
+  assert.ok(hasIssue(r, 'replacement_char'));
 });
 
 test('malformed money rejects only the affected row with row/column/value evidence', () => {

@@ -113,9 +113,19 @@
       issue('error', 'empty_file', 'File kosong. Ekspor laporan yang berisi header dan data.');
       return finish(true);
     }
-    if (input.includes('\0') || input.includes('\uFFFD')) {
+    if (input.includes('\0')) {
       issue('error', 'invalid_encoding', 'Teks file tidak terbaca utuh. Ekspor ulang sebagai CSV UTF-8, bukan file Excel yang hanya diganti ekstensi.');
       return finish(true);
+    }
+    // Every caller decodes with TextDecoder({ fatal: true }), so broken bytes
+    // never reach this point. A U+FFFD here was written by the exporter itself
+    // (Shopee puts one in some product names, e.g. a cut-off emoji), so the
+    // file is valid and only that text is shown as-is.
+    const replacement = input.indexOf('\uFFFD');
+    if (replacement >= 0) {
+      const count = input.split('\uFFFD').length - 1;
+      const line = input.slice(0, replacement).split('\n').length;
+      issue('warning', 'replacement_char', `${count} karakter \uFFFD sudah ada di file sumber (pertama di baris ${line}). Data tetap dimuat; teks itu tampil apa adanya.`);
     }
     let text = input.replace(/^\uFEFF/, '').replace(/^(?:[ \t]*\r?\n)+/, '');
     let forcedDelimiter = '';

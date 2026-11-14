@@ -168,9 +168,9 @@
     const days = rows.map(r => E.dayOnly(r['Reporting starts'])).concat((gaps || []).map(g => g.date)).filter(E.isDate).sort();
     return M.fileName({ account, since: days[0], until: days[days.length - 1] });
   };
-  // parseText refuses text with U+FFFD as a broken encoding, and a lone
-  // surrogate becomes U+FFFD once the text is put in a File. Both can only come
-  // from a damaged ad name (a deleted ad cannot be renamed), so they become '?'.
+  // parseText flags U+FFFD with a warning, and a lone surrogate becomes U+FFFD
+  // once the text is put in a File. Both can only come from a damaged ad name
+  // (a deleted ad cannot be renamed), so they become '?' to keep the import quiet.
   const wellFormed = s => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|�/g, '?');
   // Spend the ad rows do not explain, as a quality note naming the file.
   const gapNote = (name, gaps) => gaps.length ? `${name}: ${full(gaps.reduce((s, g) => s + g.missing, 0))} biaya akun pada ${gaps.length} hari tidak muncul di baris iklan.` : '';
